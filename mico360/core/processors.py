@@ -512,14 +512,17 @@ _WM_COLORS = {
 
 
 def pdf_watermark(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
-    import fitz
+    """Stamp a watermark on every page — either diagonal text or a logo/image."""
+    opacity = _clampi(opt.get("opacity", 20), 1, 100, 20) / 100.0
+    rotation = _clampi(opt.get("rotation", 45), -180, 180, 45)
+    if opt.get("wm_type", "text") == "image":
+        return _pdf_watermark_image(src, out_dir, opt, report, opacity, rotation)
 
+    import fitz
     text = (opt.get("text") or "").strip()
     if not text:
         raise ProcessError("Enter the watermark text.")
     size = _clampi(opt.get("font_size", 48), 6, 400, 48)
-    opacity = _clampi(opt.get("opacity", 20), 1, 100, 20) / 100.0
-    rotation = _clampi(opt.get("rotation", 45), -90, 90, 45)
     color = _WM_COLORS.get(opt.get("color", "gray"), (0.5, 0.5, 0.5))
 
     try:
@@ -545,6 +548,68 @@ def pdf_watermark(src: Path, out_dir: Path, opt: dict, report: Report) -> list[P
     finally:
         doc.close()
     report(f"Watermarked {pages} page(s) → {out.name}")
+    return [out]
+
+
+def _pdf_watermark_image(src: Path, out_dir: Path, opt: dict, report: Report,
+                         opacity: float, rotation: int) -> list[Path]:
+    """Overlay a logo/image (PNG transparency honoured) centred on every page."""
+    import os
+    import tempfile
+
+    import fitz
+    from PIL import Image
+
+    raw = (opt.get("image_path") or "").strip()
+    if not raw:
+        raise ProcessError("Choose a logo / image for the watermark.")
+    imgpath = Path(raw)
+    if not imgpath.exists():
+        raise ProcessError(f"Watermark image not found: {raw}")
+    try:
+        logo = Image.open(imgpath).convert("RGBA")
+    except Exception as exc:
+        raise ProcessError(f"Couldn't open image '{imgpath.name}' ({exc}).")
+
+    # Apply opacity to the alpha channel; rotate (transparent corners) if asked.
+    if opacity < 1.0:
+        logo.putalpha(logo.split()[3].point(lambda a: int(a * opacity)))
+    if rotation % 360:
+        logo = logo.rotate(rotation, expand=True, resample=Image.BICUBIC)
+    scale = _clampi(opt.get("scale", 40), 5, 100, 40) / 100.0
+    ratio = (logo.height / logo.width) if logo.width else 1.0
+
+    fd, tmp = tempfile.mkstemp(suffix=".png")
+    os.close(fd)
+    try:
+        logo.save(tmp, "PNG")
+        try:
+            doc = fitz.open(str(src))
+        except Exception as exc:
+            raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
+        try:
+            for i, page in enumerate(doc):
+                _check_cancel(report)
+                rect = page.rect
+                w = rect.width * scale
+                h = w * ratio
+                cx, cy = rect.width / 2.0, rect.height / 2.0
+                box = fitz.Rect(cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0)
+                page.insert_image(box, filename=tmp, overlay=True, keep_proportion=True)
+                _progress(report, i + 1, doc.page_count)
+            out = build_output_path(src, out_dir, ".pdf", name_suffix="_watermarked",
+                                    overwrite=opt.get("overwrite", False),
+                                    numbered=opt.get("same_as_source", False))
+            pages = doc.page_count
+            doc.save(str(out), garbage=3, deflate=True)
+        finally:
+            doc.close()
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    report(f"Watermarked {pages} page(s) with {imgpath.name} → {out.name}")
     return [out]
 
 

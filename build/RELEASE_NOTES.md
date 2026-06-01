@@ -1,20 +1,15 @@
-## MICO360 Doc Toolkit v5.2.0
+## MICO360 Doc Toolkit v5.3.0
 
-**Three new PDF tools — plus drag-to-reorder for Merge.**
+**Watermark with a logo or image — not just text.**
 
-- **Organize PDF** — rotate, delete, extract, or reorder pages. Give pages 1-based
-  (e.g. `3, 1, 2, 5-8`); ranges may even run backwards.
-- **Protect PDF** — add a password with strong **AES-256** encryption, or remove a
-  password you know (unlock).
-- **Watermark PDF** — stamp diagonal text across every page, with adjustable size,
-  opacity, angle and colour.
-- **Merge / combined Image → PDF**: **drag files in the list to reorder** them
-  before combining.
+- **Watermark PDF** now supports an **image / logo** watermark in addition to text.
+  Pick a picture (a PNG with transparency works best), then set its **size**
+  (% of page width), **opacity** and **angle**. It's centred on every page.
+- The text watermark is unchanged (text, size, opacity, angle, colour) — just
+  switch the **Watermark** type between *Text* and *Logo / image*.
 
-Help has been updated with guidance for all of the above.
-
-Includes the v5.1.x improvements (better OCR, expanded Help) and the fixed,
-crash-free auto-update.
+Includes all of v5.2 (Organize / Protect / Watermark PDF, Merge drag-reorder) and
+the crash-free auto-update.
 
 ---
 *This release is also the update manifest: the tag is the version, this text is the

@@ -139,17 +139,26 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         id="pdf_watermark", name="Watermark PDF", icon="💧",
-        tagline="Stamp diagonal text across every page.",
+        tagline="Stamp text — or a logo/image — across every page.",
         mode=PER_FILE, accept=PDF, runner=processors.pdf_watermark, group="PDF",
         options=[
-            Option("text", "Watermark text", "text", "CONFIDENTIAL"),
+            Option("wm_type", "Watermark", "choice", "text", [
+                ("text", "Text"), ("image", "Logo / image"),
+            ]),
+            Option("text", "Watermark text", "text", "CONFIDENTIAL",
+                   visible_when=("wm_type", "text")),
+            Option("image_path", "Logo / image file", "file", "",
+                   hint="A PNG with transparency works best.",
+                   visible_when=("wm_type", "image")),
             Option("font_size", "Font size", "int", 48, minimum=6, maximum=400,
-                   suffix=" pt"),
+                   suffix=" pt", visible_when=("wm_type", "text")),
+            Option("scale", "Size", "int", 40, minimum=5, maximum=100,
+                   suffix=" % of page width", visible_when=("wm_type", "image")),
             Option("opacity", "Opacity", "int", 20, minimum=1, maximum=100, suffix=" %"),
-            Option("rotation", "Angle", "int", 45, minimum=-90, maximum=90, suffix="°"),
+            Option("rotation", "Angle", "int", 45, minimum=-180, maximum=180, suffix="°"),
             Option("color", "Colour", "choice", "gray", [
                 ("gray", "Grey"), ("red", "Red"), ("blue", "Blue"), ("black", "Black"),
-            ]),
+            ], visible_when=("wm_type", "text")),
         ],
     ),
     Tool(

@@ -1,4 +1,4 @@
-# MICO360 Doc Toolkit  ·  v5.2
+# MICO360 Doc Toolkit  ·  v5.3
 
 A modern Windows 10/11 desktop app for PDF & image management — compress, merge,
 split, organize, protect, watermark, and convert between PDF, Office, and image
@@ -7,6 +7,9 @@ batches, and activity logs.
 
 ![brand: maroon / black / white]
 
+> **v5.3** — **Watermark PDF** can now stamp a **logo / image** (not just text) —
+> choose a picture, size, opacity and angle.
+>
 > **v5.2** — three new PDF tools: **Organize** (rotate / delete / extract / reorder
 > pages), **Protect** (AES-256 password, or unlock), and **Watermark** (diagonal
 > text) — plus **drag-to-reorder** files in Merge.
@@ -47,7 +50,7 @@ batches, and activity logs.
 | **Split PDF** | Per page, fixed page-count, or custom ranges (`1-3, 5, 8-10`) |
 | **Organize PDF** | Rotate, delete, extract, or reorder pages |
 | **Protect PDF** | Add an **AES-256** password, or unlock with the current one |
-| **Watermark PDF** | Diagonal text stamp — size, opacity, angle, colour |
+| **Watermark PDF** | Text **or logo/image** stamp — size, opacity, angle, colour |
 | **PDF → Word** | Fully editable `.docx` text + layout (pdf2docx) |
 | **PDF → PowerPoint** | **Editable text boxes**, one slide per page |
 | **Word → PDF** | Engine chain: LibreOffice → MS Word → built-in fallback (always works) |

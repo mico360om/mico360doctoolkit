@@ -49,8 +49,9 @@ _HELP_HTML = """
       are given 1-based, e.g. <i>3, 1, 2, 5-8</i> (ranges may run backwards).</li>
   <li><b>Protect PDF</b> — add a password (strong AES-256 encryption) or remove one
       (enter the PDF's current password to unlock).</li>
-  <li><b>Watermark PDF</b> — stamp diagonal text (e.g. “CONFIDENTIAL”) across every page,
-      with adjustable size, opacity, angle and colour.</li>
+  <li><b>Watermark PDF</b> — stamp <i>text</i> (e.g. “CONFIDENTIAL”) or a <i>logo/image</i>
+      across every page, with adjustable size, opacity and angle. For an image watermark,
+      a PNG with transparency works best.</li>
   <li><b>PDF → Word</b> — produces a fully <b>editable .docx</b> (text + layout). For scanned,
       image-only PDFs, turn on <b>OCR</b> to recognise the text.</li>
   <li><b>PDF → PowerPoint</b> — <i>Auto</i> makes editable text boxes where there's a text

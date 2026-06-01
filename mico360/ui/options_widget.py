@@ -5,9 +5,12 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QFileDialog,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QSizePolicy,
     QSpinBox,
     QVBoxLayout,
@@ -49,7 +52,31 @@ class OptionsWidget(QWidget):
         # Start from the last-used value if we have one, else the spec default.
         default = self._saved.get(opt.key, opt.default)
         field: QWidget
-        if opt.kind == "choice":
+        read_widget: QWidget | None = None   # widget values() reads (if != field)
+        if opt.kind == "file":
+            le = QLineEdit(str(default if default is not None else ""))
+            le.setPlaceholderText("Choose a file…")
+            browse = QPushButton("Browse…")
+            browse.setObjectName("Ghost")
+            browse.setCursor(Qt.PointingHandCursor)
+            holder = QWidget()
+            h = QHBoxLayout(holder)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(8)
+            h.addWidget(le, 1)
+            h.addWidget(browse)
+
+            def _pick(_=False, _le=le):
+                f, _sel = QFileDialog.getOpenFileName(
+                    self, "Choose image", "",
+                    "Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff);;"
+                    "All files (*.*)")
+                if f:
+                    _le.setText(f)
+            browse.clicked.connect(_pick)
+            field = holder
+            read_widget = le
+        elif opt.kind == "choice":
             cb = QComboBox()
             for value, label in opt.choices:
                 cb.addItem(label, value)
@@ -85,7 +112,7 @@ class OptionsWidget(QWidget):
             le = QLineEdit(str(default if default is not None else ""))
             field = le
 
-        self._controls[opt.key] = field
+        self._controls[opt.key] = read_widget if read_widget is not None else field
 
         if opt.kind == "bool":
             # Span the whole row so the checkbox sits left-aligned with its

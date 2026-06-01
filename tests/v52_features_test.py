@@ -119,23 +119,58 @@ def main() -> int:
                                         "overwrite": True}, rep)
         check("unlock: output not encrypted", not PdfReader(str(ru[0])).is_encrypted)
 
-        # --- Watermark ---------------------------------------------------
-        rw = P.pdf_watermark(src, out, {"text": "DRAFT", "opacity": 25,
-                                        "font_size": 40, "rotation": 45,
-                                        "color": "red", "overwrite": True}, rep)
+        # --- Watermark (text) -------------------------------------------
+        rw = P.pdf_watermark(src, out, {"wm_type": "text", "text": "DRAFT",
+                                        "opacity": 25, "font_size": 40,
+                                        "rotation": 45, "color": "red",
+                                        "overwrite": True}, rep)
         d = fitz.open(str(rw[0]))
         wm_text = "DRAFT" in d[0].get_text("text")
         same_pages = d.page_count == 5
         d.close()
-        check("watermark: text present on page", wm_text)
-        check("watermark: page count preserved", same_pages)
+        check("watermark text: present on page", wm_text)
+        check("watermark text: page count preserved", same_pages)
         # empty watermark text is rejected
         empty = False
         try:
-            P.pdf_watermark(src, out, {"text": "  ", "overwrite": True}, rep)
+            P.pdf_watermark(src, out, {"wm_type": "text", "text": "  ",
+                                       "overwrite": True}, rep)
         except P.ProcessError:
             empty = True
-        check("watermark: empty text rejected", empty)
+        check("watermark text: empty text rejected", empty)
+
+        # --- Watermark (logo / image) -----------------------------------
+        from PIL import Image
+        logo = tmp / "logo.png"
+        Image.new("RGBA", (200, 120), (200, 30, 30, 255)).save(logo)
+        before_imgs = len(fitz.open(str(src))[0].get_images())
+        ri = P.pdf_watermark(src, out, {"wm_type": "image",
+                                        "image_path": str(logo), "opacity": 50,
+                                        "scale": 35, "rotation": 30,
+                                        "overwrite": True}, rep)
+        d = fitz.open(str(ri[0]))
+        after_imgs = len(d[0].get_images())
+        n_pages = d.page_count
+        d.close()
+        check("watermark image: an image was added to the page",
+              after_imgs > before_imgs, f"{before_imgs}->{after_imgs}")
+        check("watermark image: page count preserved", n_pages == 5, str(n_pages))
+        # missing / unset image path is rejected
+        noimg = False
+        try:
+            P.pdf_watermark(src, out, {"wm_type": "image", "image_path": "",
+                                       "overwrite": True}, rep)
+        except P.ProcessError:
+            noimg = True
+        check("watermark image: missing image rejected", noimg)
+        badpath = False
+        try:
+            P.pdf_watermark(src, out, {"wm_type": "image",
+                                       "image_path": str(tmp / "nope.png"),
+                                       "overwrite": True}, rep)
+        except P.ProcessError:
+            badpath = True
+        check("watermark image: nonexistent path rejected", badpath)
 
     # --- options widget builds for new tools (unique keys, no clash) -----
     from mico360.ui.options_widget import OptionsWidget
@@ -144,6 +179,18 @@ def main() -> int:
     check("organize options have unique keys",
           {"operation", "angle", "pages", "del_pages", "ext_pages", "order"} <= keys,
           str(sorted(keys)))
+
+    # --- watermark 'file' option kind builds & reads a path --------------
+    from PySide6.QtWidgets import QLineEdit
+    ow2 = OptionsWidget(TOOLS_BY_ID["pdf_watermark"])
+    check("watermark has wm_type + image_path options",
+          {"wm_type", "image_path", "scale"} <= set(ow2.values().keys()),
+          str(sorted(ow2.values().keys())))
+    ctrl = ow2._controls.get("image_path")
+    check("image_path control is a readable line edit", isinstance(ctrl, QLineEdit))
+    ctrl.setText(r"C:\logo.png")
+    check("image_path value reads back", ow2.values().get("image_path") == r"C:\logo.png",
+          repr(ow2.values().get("image_path")))
 
     # --- Merge drag-reorder sync ----------------------------------------
     from mico360.ui.tool_page import ToolPage
