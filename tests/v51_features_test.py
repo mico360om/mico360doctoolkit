@@ -118,6 +118,26 @@ def main() -> int:
                   any("Strategic" in p and "Leadership" in p for p in paras),
                   str(paras[:3]))
 
+        # parallel OCR must produce the SAME result as page-by-page OCR
+        with tempfile.TemporaryDirectory() as td:
+            import fitz
+            flat = fitz.open()
+            for i in range(4):
+                one = fitz.open(); op = one.new_page(width=500, height=300)
+                op.insert_text((50, 120), f"Document Page {i} Header", fontsize=22)
+                pix = op.get_pixmap(dpi=150)
+                fp = flat.new_page(width=500, height=300); fp.insert_image(fp.rect, pixmap=pix)
+                one.close()
+            sp = Path(td) / "multi.pdf"; flat.save(str(sp)); flat.close()
+            eng = P._make_ocr_engine()
+            d = fitz.open(str(sp))
+            seq = {i: [t for t, _ in P._ocr_page_lines(eng, d[i])] for i in range(4)}
+            d.close()
+            par = P._ocr_pages_concurrent(sp, list(range(4)), rep)
+            par_txt = {i: [t for t, _ in par[i]] for i in range(4)}
+            check("parallel OCR == sequential OCR (same text, all pages)",
+                  seq == par_txt, str({k: par_txt[k][:1] for k in par_txt}))
+
     # --- Help page expanded ---------------------------------------------
     from mico360.ui.help_page import _HELP_HTML
     for needle in ("OCR", "Staying up to date", "Settings → Updates",

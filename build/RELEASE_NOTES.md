@@ -1,7 +1,11 @@
 ## MICO360 Doc Toolkit v5.5.1
 
-**Smaller download, same features.**
+**Faster OCR, smaller download — same quality.**
 
+- **Faster OCR on large scans** — a single scanned PDF now OCRs its pages **in
+  parallel** (the recognised text is byte-for-byte identical; only the speed
+  changes). A 12-page scan dropped from ~18s to ~7s (~2.4× faster). Batches of
+  multiple files were already parallel.
 - **Slimmer install / faster updates** — trimmed unused Qt components (QML/Quick,
   QtPdf, QtNetwork, Multimedia, Charts) and Qt translations from the bundle, so the
   installer and auto-update download are smaller, with no change in functionality.

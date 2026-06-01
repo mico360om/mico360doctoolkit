@@ -681,32 +681,31 @@ def _ocr_pdf_to_docx(src: Path, out: Path, report: Report) -> None:
     import fitz
     import docx
 
-    engine = _make_ocr_engine()
-    document = docx.Document()
+    _make_ocr_engine()
     pdf = fitz.open(src)
     try:
-        for i, page in enumerate(pdf):
-            _check_cancel(report)
-            report(f"OCR page {i + 1}/{pdf.page_count}…")
-            # Reconstruct visual rows (fragments on the same line joined L→R,
-            # ordered top→bottom) for clean, readable paragraphs.
-            rows = _ocr_rows(_ocr_page_lines(engine, page))
-            if i:
-                document.add_page_break()
-            if not rows:
-                document.add_paragraph("(No text recognised on this page.)")
-            prev_bottom = None
-            for text, y_top, height in rows:
-                # Insert a blank line where there's a clear vertical gap, so
-                # paragraphs/headings stay visually separated.
-                if prev_bottom is not None and (y_top - prev_bottom) > height * 1.2:
-                    document.add_paragraph("")
-                document.add_paragraph(text)
-                prev_bottom = y_top + height
-            _progress(report, i + 1, pdf.page_count)
-        document.save(str(out))
+        npages = pdf.page_count
     finally:
         pdf.close()
+    report(f"OCR {npages} page(s)…")
+    # OCR all pages in parallel, then build the document in page order.
+    page_lines = _ocr_pages_concurrent(src, list(range(npages)), report)
+
+    document = docx.Document()
+    for i in range(npages):
+        # Reconstruct visual rows (same-line fragments joined L→R, top→bottom).
+        rows = _ocr_rows(page_lines.get(i, []))
+        if i:
+            document.add_page_break()
+        if not rows:
+            document.add_paragraph("(No text recognised on this page.)")
+        prev_bottom = None
+        for text, y_top, height in rows:
+            if prev_bottom is not None and (y_top - prev_bottom) > height * 1.2:
+                document.add_paragraph("")
+            document.add_paragraph(text)
+            prev_bottom = y_top + height
+    document.save(str(out))
     if not out.exists():
         raise ProcessError("OCR produced no output.")
 
@@ -744,13 +743,8 @@ def _page_has_text(page, threshold: int = 8) -> bool:
     return len(page.get_text("text").strip()) >= threshold
 
 
-def _ocr_page_lines(engine, page, dpi: int = _OCR_DPI,
-                    min_score: float = _OCR_MIN_SCORE) -> list[tuple[str, tuple]]:
-    """OCR one page; return [(text, (x0, y0, x1, y1)] with coords in PDF points.
-
-    Renders at ``dpi`` (clamped) for accuracy and drops detections whose
-    confidence is below ``min_score`` so OCR noise doesn't leak into the output.
-    """
+def _render_page_image(page, dpi: int = _OCR_DPI):
+    """Rasterise a page to an RGB numpy array for OCR. Returns (image, dpi)."""
     import numpy as np
 
     dpi = _clampi(dpi, 72, 400, _OCR_DPI)
@@ -760,6 +754,13 @@ def _ocr_page_lines(engine, page, dpi: int = _OCR_DPI,
         img = np.ascontiguousarray(img[:, :, :3])
     elif pix.n == 1:
         img = np.ascontiguousarray(np.repeat(img, 3, axis=2))
+    return img, dpi
+
+
+def _ocr_image_lines(engine, img, dpi: int,
+                     min_score: float = _OCR_MIN_SCORE) -> list[tuple[str, tuple]]:
+    """Run OCR on an already-rendered image; return [(text, (x0,y0,x1,y1))] in
+    PDF points. Drops detections below ``min_score`` so noise stays out."""
     result, _ = engine(img)
     scale = 72.0 / dpi
     lines: list[tuple[str, tuple]] = []
@@ -777,6 +778,67 @@ def _ocr_page_lines(engine, page, dpi: int = _OCR_DPI,
         lines.append((t, (min(xs) * scale, min(ys) * scale,
                           max(xs) * scale, max(ys) * scale)))
     return lines
+
+
+def _ocr_page_lines(engine, page, dpi: int = _OCR_DPI,
+                    min_score: float = _OCR_MIN_SCORE) -> list[tuple[str, tuple]]:
+    """OCR one page; return [(text, (x0, y0, x1, y1))] with coords in PDF points.
+    Renders at ``dpi`` (clamped) for accuracy and filters low-confidence noise."""
+    img, used_dpi = _render_page_image(page, dpi)
+    return _ocr_image_lines(engine, img, used_dpi, min_score)
+
+
+def _ocr_pages_concurrent(src: Path, indices: list[int],
+                          report: Report) -> dict[int, list[tuple[str, tuple]]]:
+    """OCR many pages of one PDF in parallel and return {page_index: lines}.
+
+    The slow part — model inference — is concurrent (RapidOCR/onnxruntime is
+    thread-safe and ~2.5× faster under concurrency), while rasterising stays on
+    one thread (a fitz document is not thread-safe). Output is byte-identical to
+    OCRing page-by-page; only the speed differs. Memory is bounded by processing
+    in chunks. Used for a *single* file — the batch engine already parallelises
+    across files, but pages within one file were previously sequential.
+    """
+    import concurrent.futures
+    import os
+
+    import fitz
+
+    engine = _make_ocr_engine()
+    if not indices:
+        return {}
+    cpu = os.cpu_count() or 4
+    workers = max(1, min(len(indices), max(2, cpu // 2), 8))
+    if workers == 1:
+        doc = fitz.open(str(src))
+        try:
+            out = {}
+            for n, i in enumerate(indices):
+                _check_cancel(report)
+                out[i] = _ocr_page_lines(engine, doc[i])
+                _progress(report, n + 1, len(indices))
+            return out
+        finally:
+            doc.close()
+
+    results: dict[int, list] = {}
+    chunk = workers * 2
+    doc = fitz.open(str(src))
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            done = 0
+            for start in range(0, len(indices), chunk):
+                _check_cancel(report)
+                batch = indices[start:start + chunk]
+                imgs = {i: _render_page_image(doc[i]) for i in batch}   # render (1 thread)
+                for i, lines in zip(batch, ex.map(
+                        lambda i: _ocr_image_lines(engine, *imgs[i]), batch)):
+                    results[i] = lines
+                done += len(batch)
+                _progress(report, done, len(indices))
+    finally:
+        doc.close()
+    return results
 
 
 def _ocr_rows(lines: list[tuple[str, tuple]]) -> list[tuple[str, float, float]]:
@@ -1562,27 +1624,26 @@ def pdf_ocr(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
     """Make a scanned PDF searchable by overlaying an invisible OCR text layer."""
     import fitz
 
-    engine = _make_ocr_engine()
+    _make_ocr_engine()   # ensure OCR is available (raises a clear error if not)
     try:
         doc = fitz.open(str(src))
     except Exception as exc:
         raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
     try:
+        todo = [i for i in range(doc.page_count) if not _page_has_text(doc[i])]
+        kept = doc.page_count - len(todo)
+        report(f"OCR {len(todo)} page(s)…"
+               + (f"  ({kept} already searchable)" if kept else ""))
+        # OCR the image-only pages in parallel, then write text in page order.
+        page_lines = _ocr_pages_concurrent(src, todo, report)
         added = 0
-        for i, page in enumerate(doc):
-            _check_cancel(report)
-            if _page_has_text(page):
-                report(f"Page {i + 1}: already has text — kept")
-                _progress(report, i + 1, doc.page_count)
-                continue
-            report(f"OCR page {i + 1}/{doc.page_count}…")
-            for text, (x0, y0, x1, y1) in _ocr_page_lines(engine, page):
+        for i in todo:
+            for text, (x0, y0, x1, y1) in page_lines.get(i, []):
                 fontsize = max(4.0, (y1 - y0) * 0.9)
                 # render_mode=3 → invisible text (selectable/searchable only)
-                page.insert_text(fitz.Point(x0, y1), text, fontsize=fontsize,
-                                 fontname="helv", render_mode=3)
+                doc[i].insert_text(fitz.Point(x0, y1), text, fontsize=fontsize,
+                                   fontname="helv", render_mode=3)
                 added += 1
-            _progress(report, i + 1, doc.page_count)
         out = build_output_path(src, out_dir, ".pdf", name_suffix="_searchable",
                                 overwrite=opt.get("overwrite", False),
                                 numbered=opt.get("same_as_source", False))
