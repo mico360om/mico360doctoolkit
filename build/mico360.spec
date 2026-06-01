@@ -31,13 +31,13 @@ hiddenimports = [
     # AES-256 PDF password protection (pypdf -> cryptography)
     "cryptography",
     # PDF -> Excel (tables) and Excel handling
-    "pdfplumber", "pdfminer", "openpyxl",
+    "pdfplumber", "pdfminer", "openpyxl", "pypdfium2",
 ]
 
 # Bundle tricky packages completely (data files, submodules).
 for pkg in ("pdf2docx", "fontTools", "pptx", "reportlab", "docx", "docx2pdf",
             "rapidocr_onnxruntime", "onnxruntime", "cryptography",
-            "pdfplumber", "pdfminer", "openpyxl"):
+            "pdfplumber", "pdfminer", "openpyxl", "pypdfium2"):
     try:
         d, b, h = collect_all(pkg)
         datas += d
