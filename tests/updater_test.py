@@ -59,20 +59,21 @@ def main() -> int:
           updater.check_for_update(lambda url: same) is None)
 
     # --- check_for_update: newer, picks Setup exe over onefile ----------
-    newer = _fake_release("v5.1.0", [
+    # Use a far-future tag so this stays "newer" regardless of the app version.
+    newer = _fake_release("v9.9.9", [
         _asset("MICO360DocToolkit.exe", "http://x/onefile.exe"),
-        _asset("MICO360-DocToolkit-Setup-5.1.0.exe", "http://x/setup.exe"),
+        _asset("MICO360-DocToolkit-Setup-9.9.9.exe", "http://x/setup.exe"),
     ])
     info = updater.check_for_update(lambda url: newer)
     check("newer returns UpdateInfo", isinstance(info, UpdateInfo))
-    check("version parsed", info and info.version == "5.1.0", str(info and info.version))
+    check("version parsed", info and info.version == "9.9.9", str(info and info.version))
     check("prefers Setup installer", info and info.url == "http://x/setup.exe",
           str(info and info.url))
     check("notes carried", info and "thing" in info.notes)
     check("no sidecar -> sha None", info and info.sha256 is None)
 
     # --- newer but no exe asset -> None ---------------------------------
-    noexe = _fake_release("v5.1.0", [_asset("notes.txt")])
+    noexe = _fake_release("v9.9.9", [_asset("notes.txt")])
     check("no installer asset returns None",
           updater.check_for_update(lambda url: noexe) is None)
 

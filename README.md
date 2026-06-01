@@ -1,4 +1,4 @@
-# MICO360 Doc Toolkit  ·  v5
+# MICO360 Doc Toolkit  ·  v5.1
 
 A modern Windows 10/11 desktop app for PDF & image management — compress, merge,
 split, and convert between PDF, Office, and image formats. Clean themed UI,
@@ -6,6 +6,11 @@ drag-and-drop, bulk/folder processing, multi-threaded batches, and activity logs
 
 ![brand: maroon / black / white]
 
+> **v5.1** — **better OCR** (higher-resolution recognition, low-confidence noise
+> filtered out, text rebuilt in proper reading order, and the engine loaded once
+> for faster batches) and an **expanded Help** (new OCR, auto-update and keyboard
+> shortcut sections).
+>
 > **v5.0** — **built-in auto-update via GitHub Releases.** The app checks for new
 > versions on startup (and on demand from **Settings → Updates**), shows the
 > release notes, then downloads the installer, **verifies it with SHA-256**, and
@@ -166,6 +171,7 @@ python tests\qa_fixes_test.py            # atomic naming, error wrapping, aggreg
 python tests\progress_test.py            # real intra-file 0->100 progress (not a jump)
 python tests\v4_features_test.py         # system-theme default, lazy startup, legal docs, logo
 python tests\updater_test.py             # version compare, release parsing, download + SHA-256 verify
+python tests\v51_features_test.py        # OCR engine caching, confidence filter, row reconstruction, Help
 ```
 
 ## Compatibility

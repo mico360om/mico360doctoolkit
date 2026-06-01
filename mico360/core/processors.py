@@ -11,6 +11,7 @@ Each function has one of two signatures:
 from __future__ import annotations
 
 import subprocess
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -394,15 +395,21 @@ def _ocr_pdf_to_docx(src: Path, out: Path, report: Report) -> None:
         for i, page in enumerate(pdf):
             _check_cancel(report)
             report(f"OCR page {i + 1}/{pdf.page_count}…")
-            lines = _ocr_page_lines(engine, page)
-            # Group OCR lines into reading order (top-to-bottom, then left).
-            lines.sort(key=lambda t: (round(t[1][1] / 6), t[1][0]))
+            # Reconstruct visual rows (fragments on the same line joined L→R,
+            # ordered top→bottom) for clean, readable paragraphs.
+            rows = _ocr_rows(_ocr_page_lines(engine, page))
             if i:
                 document.add_page_break()
-            if not lines:
+            if not rows:
                 document.add_paragraph("(No text recognised on this page.)")
-            for text, _bbox in lines:
+            prev_bottom = None
+            for text, y_top, height in rows:
+                # Insert a blank line where there's a clear vertical gap, so
+                # paragraphs/headings stay visually separated.
+                if prev_bottom is not None and (y_top - prev_bottom) > height * 1.2:
+                    document.add_paragraph("")
                 document.add_paragraph(text)
+                prev_bottom = y_top + height
             _progress(report, i + 1, pdf.page_count)
         document.save(str(out))
     finally:
@@ -414,24 +421,46 @@ def _ocr_pdf_to_docx(src: Path, out: Path, report: Report) -> None:
 # =========================================================================
 # OCR helpers (scanned / image-only pages → editable text)
 # =========================================================================
+# OCR is recognised at this DPI (higher = more accurate on small text, slower).
+_OCR_DPI = 300
+# Detections below this confidence are discarded as noise.
+_OCR_MIN_SCORE = 0.5
+# The RapidOCR engine loads several ONNX models; build it once and reuse it
+# across every page and file in a batch instead of paying that cost per file.
+_ocr_engine_cache = None
+_ocr_engine_lock = threading.Lock()
+
+
 def _make_ocr_engine():
-    """Create a RapidOCR engine, or raise ProcessError if OCR isn't available."""
-    try:
-        from rapidocr_onnxruntime import RapidOCR
-    except Exception as exc:  # pragma: no cover - optional dependency
-        raise ProcessError(
-            "OCR engine is not available in this build. " + str(exc))
-    return RapidOCR()
+    """Return a cached RapidOCR engine (models load once), or raise ProcessError."""
+    global _ocr_engine_cache
+    if _ocr_engine_cache is not None:
+        return _ocr_engine_cache
+    with _ocr_engine_lock:
+        if _ocr_engine_cache is None:
+            try:
+                from rapidocr_onnxruntime import RapidOCR
+            except Exception as exc:  # pragma: no cover - optional dependency
+                raise ProcessError(
+                    "OCR engine is not available in this build. " + str(exc))
+            _ocr_engine_cache = RapidOCR()
+    return _ocr_engine_cache
 
 
 def _page_has_text(page, threshold: int = 8) -> bool:
     return len(page.get_text("text").strip()) >= threshold
 
 
-def _ocr_page_lines(engine, page, dpi: int = 200) -> list[tuple[str, tuple]]:
-    """OCR one page; return [(text, (x0, y0, x1, y1)] with coords in PDF points."""
+def _ocr_page_lines(engine, page, dpi: int = _OCR_DPI,
+                    min_score: float = _OCR_MIN_SCORE) -> list[tuple[str, tuple]]:
+    """OCR one page; return [(text, (x0, y0, x1, y1)] with coords in PDF points.
+
+    Renders at ``dpi`` (clamped) for accuracy and drops detections whose
+    confidence is below ``min_score`` so OCR noise doesn't leak into the output.
+    """
     import numpy as np
 
+    dpi = _clampi(dpi, 72, 400, _OCR_DPI)
     pix = page.get_pixmap(dpi=dpi)
     img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
     if pix.n == 4:
@@ -441,14 +470,56 @@ def _ocr_page_lines(engine, page, dpi: int = 200) -> list[tuple[str, tuple]]:
     result, _ = engine(img)
     scale = 72.0 / dpi
     lines: list[tuple[str, tuple]] = []
-    for box, text, _score in (result or []):
-        if not str(text).strip():
+    for box, text, score in (result or []):
+        t = str(text).strip()
+        if not t:
             continue
+        try:
+            if score is not None and float(score) < min_score:
+                continue
+        except (TypeError, ValueError):
+            pass
         xs = [float(p[0]) for p in box]
         ys = [float(p[1]) for p in box]
-        lines.append((str(text), (min(xs) * scale, min(ys) * scale,
-                                   max(xs) * scale, max(ys) * scale)))
+        lines.append((t, (min(xs) * scale, min(ys) * scale,
+                          max(xs) * scale, max(ys) * scale)))
     return lines
+
+
+def _ocr_rows(lines: list[tuple[str, tuple]]) -> list[tuple[str, float, float]]:
+    """Group OCR fragments into visual rows for clean, readable output.
+
+    Fragments whose vertical centres are within a tolerance of each other are
+    treated as one line and joined left→right. Returns
+    ``[(row_text, y_top, row_height)]`` ordered top→bottom.
+    """
+    if not lines:
+        return []
+    items = []  # (text, x0, y0, height, y_center)
+    for text, (x0, y0, x1, y1) in lines:
+        items.append((text, x0, y0, max(1.0, y1 - y0), (y0 + y1) / 2.0))
+    heights = sorted(it[3] for it in items)
+    med_h = heights[len(heights) // 2] or 10.0
+    tol = max(4.0, med_h * 0.6)
+
+    items.sort(key=lambda it: it[4])  # by vertical centre
+    rows: list[list] = [[items[0]]]
+    centre = items[0][4]
+    for it in items[1:]:
+        if abs(it[4] - centre) <= tol:
+            rows[-1].append(it)
+        else:
+            rows.append([it])
+        centre = sum(c[4] for c in rows[-1]) / len(rows[-1])
+
+    out: list[tuple[str, float, float]] = []
+    for row in rows:
+        row.sort(key=lambda it: it[1])  # left → right
+        text = " ".join(c[0] for c in row).strip()
+        if not text:
+            continue
+        out.append((text, min(c[2] for c in row), max(c[3] for c in row)))
+    return out
 
 
 # =========================================================================

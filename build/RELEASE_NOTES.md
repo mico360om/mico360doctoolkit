@@ -1,16 +1,18 @@
-## MICO360 Doc Toolkit v5.0.0
+## MICO360 Doc Toolkit v5.1.0
 
-**New: built-in auto-update.** The app checks GitHub for new releases and can
-download and install them for you.
+**Better OCR and a more helpful Help.**
 
-- Checks for updates automatically on startup (toggle in **Settings → Updates**).
-- **Settings → Updates → Check for updates** to check on demand and see what's new.
-- Updates are downloaded and **verified with SHA-256** before installing.
-- The installer upgrades in place and restarts the app — your settings are kept.
+- **Smarter OCR for scanned PDFs** (PDF → Word / PowerPoint):
+  - Recognises at a higher resolution for noticeably better accuracy on small text.
+  - Filters out low-confidence noise, so you get cleaner results.
+  - Rebuilds text in proper reading order — words on a line stay together and
+    clear gaps become paragraph breaks, so the Word output reads naturally.
+  - Loads the OCR engine once and reuses it, so batches of scanned files are faster.
+- **Expanded Help** — new sections on OCR, staying up to date (auto-update), and
+  keyboard & mouse shortcuts, plus clearer per-tool guidance.
 
-Plus everything from v4: follows your Windows light/dark theme, theme-aware logo,
-borderless checkboxes, About/Terms/Privacy in Settings, detailed Help, and a fast
-lazy startup.
+Includes the v5.0 built-in auto-update: the app checks GitHub for new releases,
+verifies them with SHA-256, and upgrades in place — keeping your settings.
 
 ---
 *This release is also the update manifest: the tag is the version, this text is the

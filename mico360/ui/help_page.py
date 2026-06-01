@@ -57,6 +57,48 @@ _HELP_HTML = """
       resize and format change (JPEG / PNG / WEBP).</li>
 </ul>
 
+<h3>OCR — turning scanned pages into editable text</h3>
+<p>A “scanned” PDF is really a picture of a page, so its words can’t be selected,
+searched or edited. <b>OCR</b> (Optical Character Recognition) reads those pictures
+and recovers the text.</p>
+<ul>
+  <li>Turn on <b>OCR</b> in <b>PDF → Word</b> or <b>PDF → PowerPoint</b> when your PDF
+      is scanned or image-only. Pages that already have a real text layer are converted
+      directly (no OCR needed), so it’s safe to leave on.</li>
+  <li>Recognised text is laid out in reading order — words on the same line are kept
+      together, and clear vertical gaps become paragraph breaks.</li>
+  <li>It runs <b>entirely on your computer</b> — nothing is uploaded — and works offline.</li>
+  <li><b>For the best accuracy:</b> start from a clean, straight, high-resolution scan
+      (300&nbsp;dpi or more). Faint, skewed or low-contrast scans recognise less reliably.</li>
+  <li>OCR is heavier than a normal conversion, so large documents take longer; the
+      progress bar and Activity log show page-by-page progress, and <b>Cancel</b> stops
+      it within a moment.</li>
+  <li>Recognition is tuned for Latin-script text and digits (English and similar
+      languages).</li>
+</ul>
+
+<h3>Staying up to date</h3>
+<ul>
+  <li>The app can <b>check for new versions automatically on startup</b> and let you know
+      when one is available — toggle this in <b>Settings → Updates</b>.</li>
+  <li>Click <b>Settings → Updates → Check for updates</b> any time to check on demand and
+      read what’s new.</li>
+  <li>When you choose to update, the new version is <b>downloaded, verified (SHA-256) and
+      installed</b> for you; the app closes briefly to finish and your settings are kept.</li>
+  <li>Everything is optional — you can turn auto-checking off and update whenever you like.</li>
+</ul>
+
+<h3>Keyboard &amp; mouse</h3>
+<ul>
+  <li><b>Drag &amp; drop</b> files or folders onto the drop zone to add them.</li>
+  <li><b>Double-click</b> a finished file to reveal its output; <b>right-click</b> any file
+      for more actions; <b>Delete</b> removes the selected files.</li>
+  <li><b>Tab / Shift+Tab</b> move between controls; <b>Space</b> toggles a checkbox or
+      presses a button; <b>Enter</b> activates the focused button.</li>
+  <li>Use the <b>☰</b> button to collapse the sidebar for more room, and <b>☀ / 🌙</b> to
+      switch light / dark.</li>
+</ul>
+
 <h3>Settings</h3>
 <ul>
   <li><b>Appearance</b> — switch Light / Dark (also via the ☀/🌙 button in the top bar). On first
@@ -64,6 +106,8 @@ _HELP_HTML = """
   <li><b>Output</b> — default output folder, “open the folder when a batch finishes”, and
       overwrite behaviour.</li>
   <li><b>Performance</b> — number of parallel workers (0 = automatic, uses CPU cores − 1).</li>
+  <li><b>Updates</b> — see your current version, check for updates on demand, and turn the
+      automatic startup check on or off.</li>
   <li><b>External tools</b> — set or auto-detect Ghostscript (best PDF compression) and
       LibreOffice (Word → PDF). Both are optional; the app works without them.</li>
   <li><b>About &amp; Legal</b> — About Us, Terms &amp; Conditions, Privacy Policy, and contact info.</li>
