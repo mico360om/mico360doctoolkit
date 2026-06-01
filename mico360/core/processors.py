@@ -350,6 +350,205 @@ def _parse_ranges(spec: str, n: int) -> list[tuple[str, list[int]]]:
 
 
 # =========================================================================
+# Page-spec helpers shared by Organize PDF (1-based input → 0-based indices)
+# =========================================================================
+def _page_list(spec: str, n: int, default_all: bool = False) -> list[int]:
+    """Parse a page spec like ``3, 1, 2, 5-8`` into an *ordered* list of 0-based
+    indices (preserving the given order, ranges allowed in either direction).
+    Empty / 'all' → every page when ``default_all`` else []."""
+    spec = (spec or "").strip().lower()
+    if spec in ("", "all"):
+        return list(range(n)) if default_all else []
+    out: list[int] = []
+    for chunk in spec.replace(" ", "").split(","):
+        if not chunk:
+            continue
+        if "-" in chunk[1:]:  # a range (a leading '-' would be a stray sign)
+            a, _, b = chunk.partition("-")
+            try:
+                start, end = int(a), int(b)
+            except ValueError:
+                continue
+            rng = range(start, end + 1) if start <= end else range(start, end - 1, -1)
+            out.extend(p - 1 for p in rng if 1 <= p <= n)
+        else:
+            try:
+                p = int(chunk)
+            except ValueError:
+                continue
+            if 1 <= p <= n:
+                out.append(p - 1)
+    return out
+
+
+def _page_set(spec: str, n: int, default_all: bool = False) -> set:
+    return set(_page_list(spec, n, default_all=default_all))
+
+
+# =========================================================================
+# Organize PDF — rotate / delete / extract / reorder pages
+# =========================================================================
+def pdf_organize(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    from pypdf import PdfReader, PdfWriter
+
+    try:
+        reader = PdfReader(str(src))
+        n = len(reader.pages)
+    except Exception as exc:
+        raise ProcessError(f"Couldn't read '{src.name}' — it may be corrupt or "
+                           f"password-protected ({exc}).")
+    op = opt.get("operation", "rotate")
+    writer = PdfWriter()
+
+    if op == "rotate":
+        angle = _clampi(opt.get("angle", 90), -270, 270, 90)
+        if angle % 90 != 0:
+            raise ProcessError("Rotation must be a multiple of 90°.")
+        targets = _page_set(opt.get("pages", "all"), n, default_all=True)
+        for i in range(n):
+            page = reader.pages[i]
+            if i in targets:
+                page.rotate(angle)
+            writer.add_page(page)
+            _progress(report, i + 1, n)
+        suffix = "_rotated"
+    elif op == "delete":
+        remove = _page_set(opt.get("del_pages", ""), n)
+        if not remove:
+            raise ProcessError("Enter the page(s) to delete, e.g. 2, 5-7.")
+        kept = [i for i in range(n) if i not in remove]
+        if not kept:
+            raise ProcessError("That would delete every page.")
+        for j, i in enumerate(kept):
+            writer.add_page(reader.pages[i])
+            _progress(report, j + 1, len(kept))
+        suffix = "_pages-removed"
+    elif op in ("extract", "reorder"):
+        key = "ext_pages" if op == "extract" else "order"
+        order = _page_list(opt.get(key, ""), n)
+        if not order:
+            raise ProcessError("Enter the pages, e.g. 3, 1, 2, 5-8.")
+        for j, i in enumerate(order):
+            writer.add_page(reader.pages[i])
+            _progress(report, j + 1, len(order))
+        suffix = "_extracted" if op == "extract" else "_reordered"
+    else:
+        raise ProcessError(f"Unknown operation: {op}")
+
+    out = build_output_path(src, out_dir, ".pdf", name_suffix=suffix,
+                            overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+    with open(out, "wb") as fh:
+        writer.write(fh)
+    report(f"Saved {len(writer.pages)} page(s) → {out.name}")
+    return [out]
+
+
+# =========================================================================
+# Protect / Unlock PDF — add or remove a password
+# =========================================================================
+def pdf_protect(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    from pypdf import PdfReader, PdfWriter
+
+    op = opt.get("operation", "protect")
+    pw = opt.get("password", "") or ""
+    try:
+        reader = PdfReader(str(src))
+    except Exception as exc:
+        raise ProcessError(f"Couldn't read '{src.name}' ({exc}).")
+
+    if reader.is_encrypted:
+        try:
+            ok = bool(int(reader.decrypt(pw)))
+        except Exception:
+            ok = False
+        if not ok:
+            if op == "unlock":
+                raise ProcessError("Incorrect password — couldn't unlock this PDF.")
+            raise ProcessError("This PDF is already password-protected. Unlock it "
+                               "with its current password first.")
+    elif op == "unlock":
+        report(f"'{src.name}' isn't password-protected — saving a copy.")
+
+    writer = PdfWriter()
+    try:
+        for page in reader.pages:
+            writer.add_page(page)
+    except Exception as exc:
+        raise ProcessError(f"Couldn't read pages from '{src.name}' ({exc}).")
+
+    if op == "protect":
+        if not pw:
+            raise ProcessError("Enter a password to protect the PDF.")
+        # Prefer strong AES-256 (needs `cryptography`); fall back to the
+        # dependency-free RC4-128 so protection always works.
+        try:
+            writer.encrypt(user_password=pw, algorithm="AES-256")
+        except Exception:
+            try:
+                writer.encrypt(user_password=pw, algorithm="RC4-128")
+            except Exception:
+                writer.encrypt(pw)
+        suffix = "_protected"
+    else:
+        suffix = "_unlocked"
+
+    out = build_output_path(src, out_dir, ".pdf", name_suffix=suffix,
+                            overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+    with open(out, "wb") as fh:
+        writer.write(fh)
+    report(f"{'Protected' if op == 'protect' else 'Unlocked'} → {out.name}")
+    return [out]
+
+
+# =========================================================================
+# Watermark PDF — overlay diagonal text on every page
+# =========================================================================
+_WM_COLORS = {
+    "gray": (0.5, 0.5, 0.5), "red": (0.78, 0.12, 0.12),
+    "blue": (0.13, 0.27, 0.62), "black": (0.0, 0.0, 0.0),
+}
+
+
+def pdf_watermark(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    import fitz
+
+    text = (opt.get("text") or "").strip()
+    if not text:
+        raise ProcessError("Enter the watermark text.")
+    size = _clampi(opt.get("font_size", 48), 6, 400, 48)
+    opacity = _clampi(opt.get("opacity", 20), 1, 100, 20) / 100.0
+    rotation = _clampi(opt.get("rotation", 45), -90, 90, 45)
+    color = _WM_COLORS.get(opt.get("color", "gray"), (0.5, 0.5, 0.5))
+
+    try:
+        doc = fitz.open(str(src))
+    except Exception as exc:
+        raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
+    try:
+        for i, page in enumerate(doc):
+            _check_cancel(report)
+            rect = page.rect
+            cx, cy = rect.width / 2.0, rect.height / 2.0
+            tl = fitz.get_text_length(text, fontname="helv", fontsize=size)
+            tw = fitz.TextWriter(rect, color=color)
+            tw.append(fitz.Point(cx - tl / 2.0, cy + size * 0.30), text, fontsize=size)
+            morph = (fitz.Point(cx, cy), fitz.Matrix(rotation))
+            tw.write_text(page, opacity=opacity, morph=morph, overlay=True)
+            _progress(report, i + 1, doc.page_count)
+        out = build_output_path(src, out_dir, ".pdf", name_suffix="_watermarked",
+                                overwrite=opt.get("overwrite", False),
+                                numbered=opt.get("same_as_source", False))
+        pages = doc.page_count
+        doc.save(str(out), garbage=3, deflate=True)
+    finally:
+        doc.close()
+    report(f"Watermarked {pages} page(s) → {out.name}")
+    return [out]
+
+
+# =========================================================================
 # PDF → Word
 # =========================================================================
 def pdf_to_word(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:

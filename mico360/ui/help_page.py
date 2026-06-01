@@ -40,9 +40,17 @@ _HELP_HTML = """
       (e.g. 250&nbsp;KB — the app auto-picks settings to land at or just under it), or
       <i>Custom</i> DPI + JPEG quality. Uses Ghostscript when available, otherwise a built-in
       compressor.</li>
-  <li><b>Merge PDF</b> — combines two or more PDFs into one, in the listed order.</li>
+  <li><b>Merge PDF</b> — combines two or more PDFs into one. <b>Drag files in the list to
+      reorder</b> them before merging (also works for combined Image → PDF).</li>
   <li><b>Split PDF</b> — split <i>every page</i>, into <i>fixed page counts</i>, or by
       <i>custom ranges</i> like <i>1-3, 5, 8-10</i>. Each source gets its own output subfolder.</li>
+  <li><b>Organize PDF</b> — <i>rotate</i> (all or chosen pages), <i>delete</i> pages,
+      <i>extract</i> only the pages you want, or <i>reorder</i> the whole document. Pages
+      are given 1-based, e.g. <i>3, 1, 2, 5-8</i> (ranges may run backwards).</li>
+  <li><b>Protect PDF</b> — add a password (strong AES-256 encryption) or remove one
+      (enter the PDF's current password to unlock).</li>
+  <li><b>Watermark PDF</b> — stamp diagonal text (e.g. “CONFIDENTIAL”) across every page,
+      with adjustable size, opacity, angle and colour.</li>
   <li><b>PDF → Word</b> — produces a fully <b>editable .docx</b> (text + layout). For scanned,
       image-only PDFs, turn on <b>OCR</b> to recognise the text.</li>
   <li><b>PDF → PowerPoint</b> — <i>Auto</i> makes editable text boxes where there's a text

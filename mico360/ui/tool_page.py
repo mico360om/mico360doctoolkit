@@ -126,8 +126,15 @@ class ToolPage(QWidget):
         self.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.file_list.setMinimumHeight(120)
         self.file_list.itemDoubleClicked.connect(self._open_item_output)
-        self.file_list.setToolTip("Double-click a finished file to open its output. "
-                                  "Right-click for more.")
+        tip = ("Double-click a finished file to open its output. Right-click for more.")
+        # For tools where input order matters (Merge, combined Image → PDF), let
+        # the user drag rows to reorder; keep self.files in sync with the view.
+        if self.tool.mode == AGGREGATE:
+            self.file_list.setDragDropMode(QAbstractItemView.InternalMove)
+            self.file_list.setDefaultDropAction(Qt.MoveAction)
+            self.file_list.model().rowsMoved.connect(self._sync_order_from_list)
+            tip = "Drag to reorder. " + tip
+        self.file_list.setToolTip(tip)
         self.file_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.file_list.customContextMenuRequested.connect(self._file_menu)
         from PySide6.QtGui import QKeySequence, QShortcut
@@ -282,10 +289,21 @@ class ToolPage(QWidget):
             tail = f"    ·    {st['msg']}" if st["msg"] else ""
             item = QListWidgetItem(f"{icon}  {p.name}    —    {size}{tail}")
             item.setToolTip(str(p.parent) + (f"\n{st['msg']}" if st["msg"] else ""))
+            item.setData(Qt.UserRole, str(p))   # used to re-sync order after a drag
             if st["state"] in colors:
                 item.setForeground(colors[st["state"]])
             self.file_list.addItem(item)
         self._update_counts()
+
+    def _sync_order_from_list(self, *args) -> None:
+        """After a drag-reorder, rebuild self.files to match the on-screen order."""
+        by_str = {str(p): p for p in self.files}
+        new = [by_str[s] for s in (self.file_list.item(r).data(Qt.UserRole)
+                                   for r in range(self.file_list.count()))
+               if s in by_str]
+        if len(new) == len(self.files):
+            self.files = new
+            self._update_counts()
 
     def _update_counts(self) -> None:
         n = len(self.files)

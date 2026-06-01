@@ -1,11 +1,16 @@
-# MICO360 Doc Toolkit  ·  v5.1
+# MICO360 Doc Toolkit  ·  v5.2
 
 A modern Windows 10/11 desktop app for PDF & image management — compress, merge,
-split, and convert between PDF, Office, and image formats. Clean themed UI,
-drag-and-drop, bulk/folder processing, multi-threaded batches, and activity logs.
+split, organize, protect, watermark, and convert between PDF, Office, and image
+formats. Clean themed UI, drag-and-drop, bulk/folder processing, multi-threaded
+batches, and activity logs.
 
 ![brand: maroon / black / white]
 
+> **v5.2** — three new PDF tools: **Organize** (rotate / delete / extract / reorder
+> pages), **Protect** (AES-256 password, or unlock), and **Watermark** (diagonal
+> text) — plus **drag-to-reorder** files in Merge.
+>
 > **v5.1** — **better OCR** (higher-resolution recognition, low-confidence noise
 > filtered out, text rebuilt in proper reading order, and the engine loaded once
 > for faster batches) and an **expanded Help** (new OCR, auto-update and keyboard
@@ -40,6 +45,9 @@ drag-and-drop, bulk/folder processing, multi-threaded batches, and activity logs
 | **Compress PDF** | Low / Medium / High, **target file size**, or custom DPI + JPEG quality |
 | **Merge PDF** | Combine many PDFs into one |
 | **Split PDF** | Per page, fixed page-count, or custom ranges (`1-3, 5, 8-10`) |
+| **Organize PDF** | Rotate, delete, extract, or reorder pages |
+| **Protect PDF** | Add an **AES-256** password, or unlock with the current one |
+| **Watermark PDF** | Diagonal text stamp — size, opacity, angle, colour |
 | **PDF → Word** | Fully editable `.docx` text + layout (pdf2docx) |
 | **PDF → PowerPoint** | **Editable text boxes**, one slide per page |
 | **Word → PDF** | Engine chain: LibreOffice → MS Word → built-in fallback (always works) |
@@ -172,6 +180,8 @@ python tests\progress_test.py            # real intra-file 0->100 progress (not 
 python tests\v4_features_test.py         # system-theme default, lazy startup, legal docs, logo
 python tests\updater_test.py             # version compare, release parsing, download + SHA-256 verify
 python tests\v51_features_test.py        # OCR engine caching, confidence filter, row reconstruction, Help
+python tests\update_ui_test.py           # update check/dialog runs on the GUI thread (no crash)
+python tests\v52_features_test.py        # Organize/Protect/Watermark PDF, page-spec parser, merge reorder
 ```
 
 ## Compatibility

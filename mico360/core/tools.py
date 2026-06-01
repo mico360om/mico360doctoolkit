@@ -99,6 +99,60 @@ TOOLS: list[Tool] = [
         ],
     ),
     Tool(
+        id="pdf_organize", name="Organize PDF", icon="🧩",
+        tagline="Rotate, delete, extract or reorder pages.",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_organize, group="PDF",
+        options=[
+            Option("operation", "Action", "choice", "rotate", [
+                ("rotate", "Rotate pages"),
+                ("delete", "Delete pages"),
+                ("extract", "Extract pages (keep only these)"),
+                ("reorder", "Reorder pages"),
+            ]),
+            Option("angle", "Rotate by", "choice", 90, [
+                (90, "90° clockwise"), (180, "180°"), (270, "270° (90° anti-clockwise)"),
+            ], visible_when=("operation", "rotate")),
+            Option("pages", "Pages", "text", "all",
+                   hint="e.g. 1-3, 5, 8  ·  use 'all' for every page",
+                   visible_when=("operation", "rotate")),
+            Option("del_pages", "Pages to delete", "text", "",
+                   hint="e.g. 2, 5-7", visible_when=("operation", "delete")),
+            Option("ext_pages", "Pages to extract", "text", "",
+                   hint="in output order, e.g. 1, 3, 5-8", visible_when=("operation", "extract")),
+            Option("order", "New page order", "text", "",
+                   hint="every page, in the order you want, e.g. 3, 1, 2, 4-10",
+                   visible_when=("operation", "reorder")),
+        ],
+    ),
+    Tool(
+        id="pdf_protect", name="Protect PDF", icon="🔒",
+        tagline="Add or remove a password on a PDF.",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_protect, group="PDF",
+        options=[
+            Option("operation", "Action", "choice", "protect", [
+                ("protect", "Add a password (encrypt)"),
+                ("unlock", "Remove the password (decrypt)"),
+            ]),
+            Option("password", "Password", "text", "",
+                   hint="For Unlock, enter the PDF's current password."),
+        ],
+    ),
+    Tool(
+        id="pdf_watermark", name="Watermark PDF", icon="💧",
+        tagline="Stamp diagonal text across every page.",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_watermark, group="PDF",
+        options=[
+            Option("text", "Watermark text", "text", "CONFIDENTIAL"),
+            Option("font_size", "Font size", "int", 48, minimum=6, maximum=400,
+                   suffix=" pt"),
+            Option("opacity", "Opacity", "int", 20, minimum=1, maximum=100, suffix=" %"),
+            Option("rotation", "Angle", "int", 45, minimum=-90, maximum=90, suffix="°"),
+            Option("color", "Colour", "choice", "gray", [
+                ("gray", "Grey"), ("red", "Red"), ("blue", "Blue"), ("black", "Black"),
+            ]),
+        ],
+    ),
+    Tool(
         id="pdf_to_word", name="PDF → Word", icon="📝",
         tagline="Convert PDF documents to editable Word (.docx).",
         mode=PER_FILE, accept=PDF, runner=processors.pdf_to_word, group="Convert",

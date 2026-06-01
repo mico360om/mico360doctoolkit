@@ -30,11 +30,13 @@ hiddenimports = [
     "win32com", "win32com.client", "pythoncom", "pywintypes",
     # OCR
     "rapidocr_onnxruntime", "onnxruntime", "cv2", "numpy", "shapely", "pyclipper",
+    # AES-256 PDF password protection (pypdf -> cryptography)
+    "cryptography",
 ]
 
 # Bundle tricky packages completely (data files, submodules).
 for pkg in ("pdf2docx", "fontTools", "pptx", "reportlab", "docx", "docx2pdf",
-            "rapidocr_onnxruntime", "onnxruntime"):
+            "rapidocr_onnxruntime", "onnxruntime", "cryptography"):
     try:
         d, b, h = collect_all(pkg)
         datas += d

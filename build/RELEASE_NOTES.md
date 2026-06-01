@@ -1,18 +1,20 @@
-## MICO360 Doc Toolkit v5.1.1
+## MICO360 Doc Toolkit v5.2.0
 
-**Critical fix: the auto-update window.**
+**Three new PDF tools — plus drag-to-reorder for Merge.**
 
-- Fixed a crash where checking for updates could show a blank window and close the
-  app. The update check runs in the background, and its result (and the update
-  dialog) now correctly run on the app's main thread.
+- **Organize PDF** — rotate, delete, extract, or reorder pages. Give pages 1-based
+  (e.g. `3, 1, 2, 5-8`); ranges may even run backwards.
+- **Protect PDF** — add a password with strong **AES-256** encryption, or remove a
+  password you know (unlock).
+- **Watermark PDF** — stamp diagonal text across every page, with adjustable size,
+  opacity, angle and colour.
+- **Merge / combined Image → PDF**: **drag files in the list to reorder** them
+  before combining.
 
-> If you're on v5.0.0 or v5.1.0 and the in-app updater doesn't work, download and
-> run this installer once from the releases page; auto-update works normally from
-> v5.1.1 onward.
+Help has been updated with guidance for all of the above.
 
-Also includes everything from v5.1: improved OCR for scanned PDFs (higher-resolution
-recognition, low-confidence noise filtered out, text rebuilt in proper reading
-order, engine loaded once for faster batches) and an expanded Help.
+Includes the v5.1.x improvements (better OCR, expanded Help) and the fixed,
+crash-free auto-update.
 
 ---
 *This release is also the update manifest: the tag is the version, this text is the

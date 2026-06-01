@@ -64,7 +64,9 @@ def main() -> int:
     w = MainWindow()
     check("startup builds only the first page (lazy)", len(w._widgets) == 1,
           f"{len(w._widgets)} pages built at startup")
-    check("12 nav entries registered", len(w._titles) == 12, str(len(w._titles)))
+    from mico360.core.tools import TOOLS
+    check("nav entries = tools + 3 system pages",
+          len(w._titles) == len(TOOLS) + 3, str(len(w._titles)))
     # settings/help not built until visited
     check("settings page not built until opened", w.settings_page is None)
 

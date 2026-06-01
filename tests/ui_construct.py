@@ -20,9 +20,11 @@ from mico360.ui.main_window import MainWindow
 
 w = MainWindow()
 w.show()
+from mico360.core.tools import TOOLS
+expected = len(TOOLS) + 3   # tools + Settings + Activity + Help
 n_pages = len(w._titles)
 print("MainWindow OK — nav items:", len(w.sidebar._items), "pages:", n_pages)
-assert len(w.sidebar._items) == n_pages == 12, (len(w.sidebar._items), n_pages)
+assert len(w.sidebar._items) == n_pages == expected, (len(w.sidebar._items), n_pages, expected)
 
 w.apply_theme("light")
 w.apply_theme("dark")

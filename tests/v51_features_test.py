@@ -67,7 +67,7 @@ def main() -> int:
     from mico360.core import processors as P
 
     # --- version --------------------------------------------------------
-    check("version is 5.1.x", __version__.startswith("5.1."), __version__)
+    check("version is 5.x", __version__.startswith("5."), __version__)
 
     # --- _ocr_rows groups fragments into visual rows --------------------
     lines = [
