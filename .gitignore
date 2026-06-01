@@ -28,3 +28,6 @@ Thumbs.db
 
 # App runtime
 *.log
+
+# QA render previews
+_*.png
