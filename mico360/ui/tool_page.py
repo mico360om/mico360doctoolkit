@@ -620,7 +620,9 @@ class ToolPage(QWidget):
             settings.add_activity(f"{self.tool.name} — {ok} file(s) done")
             self.toast.emit(f"{self.tool.name}: {ok} file(s) done", "ok")
 
-        if outputs and settings.open_output_when_done and not summary["cancelled"]:
+        from PySide6.QtGui import QGuiApplication
+        if (outputs and settings.open_output_when_done and not summary["cancelled"]
+                and QGuiApplication.platformName() != "offscreen"):
             self._open_in_explorer(outputs[0])
         self.controller = None
 
