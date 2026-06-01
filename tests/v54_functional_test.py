@@ -98,10 +98,10 @@ def main() -> int:
         settings.output_dir = str(out)
         import fitz
 
-        # --- Rotate Pages (combo + text options) ------------------------
-        p = ToolPage(TOOLS_BY_ID["pdf_rotate"])
+        # --- Organize: rotate (combo + text options) --------------------
+        p = ToolPage(TOOLS_BY_ID["pdf_organize"])
         p.add_paths([str(_pdf(tmp / "r.pdf", 3))])
-        _set(p, "angle", 90); _set(p, "pages", "1")
+        _set(p, "operation", "rotate"); _set(p, "angle", 90); _set(p, "pages", "1")
         s = run(p, out)
         check("rotate: run ok", s.get("ok") == 1 and s.get("failed") == 0, str(s.get("ok")))
         outp = (s.get("outputs") or [None])[0]

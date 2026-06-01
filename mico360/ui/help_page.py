@@ -56,13 +56,13 @@ tool automatically.</p>
   <li><b>Organize PDF</b> — <i>rotate</i> (all or chosen pages), <i>delete</i> pages,
       <i>extract</i> only the pages you want, or <i>reorder</i> the whole document. Pages
       are given 1-based, e.g. <i>3, 1, 2, 5-8</i> (ranges may run backwards).</li>
-  <li><b>Protect PDF</b> — add a password (strong AES-256 encryption) or remove one
-      (enter the PDF's current password to unlock).</li>
+  <li><b>Protect PDF</b> — add a password (strong AES-256 encryption — you confirm it,
+      with show/hide toggles) or remove one (enter the PDF's current password to unlock).
+      Passwords are never saved.</li>
   <li><b>Watermark PDF</b> — stamp <i>text</i> (e.g. “CONFIDENTIAL”) or a <i>logo/image</i>
-      across every page, with adjustable size, opacity and angle. For an image watermark,
-      a PNG with transparency works best.</li>
-  <li><b>Rotate / Delete / Extract Pages</b> — quick, dedicated versions of the Organize
-      actions. Give pages 1-based (e.g. <i>1-5, 10, 15-20</i>).</li>
+      across every page, with adjustable size, opacity, angle and <b>position</b> (a 3×3
+      grid — any corner, edge or the centre). For an image watermark, a PNG with
+      transparency works best.</li>
   <li><b>Add Page Numbers</b> — choose the position, style (<i>1, 2, 3</i> · <i>1 / N</i>
       · <i>Page 1</i>) and starting number.</li>
   <li><b>Sign PDF</b> — stamp a signature image on the last/first/every page.</li>

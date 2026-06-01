@@ -15,7 +15,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
+    QTabWidget,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
@@ -41,17 +43,34 @@ class SettingsPage(QWidget):
         header = QLabel("Settings")
         header.setObjectName("PageTitle")
         root.addWidget(header)
-        sub = QLabel("Appearance, output, performance and external tools.")
+        sub = QLabel("Customize application preferences.")
         sub.setObjectName("PageSubtitle")
         root.addWidget(sub)
 
-        root.addWidget(self._appearance_card())
-        root.addWidget(self._output_card())
-        root.addWidget(self._performance_card())
-        root.addWidget(self._updates_card())
-        root.addWidget(self._deps_card())
-        root.addWidget(self._about_card())
-        root.addStretch(1)
+        tabs = QTabWidget()
+        tabs.setObjectName("SettingsTabs")
+        tabs.addTab(self._tab(self._appearance_card(), self._about_card()), "General")
+        tabs.addTab(self._tab(self._performance_card()), "Processing")
+        tabs.addTab(self._tab(self._output_card()), "Output")
+        tabs.addTab(self._tab(self._updates_card()), "Updates")
+        tabs.addTab(self._tab(self._deps_card()), "Advanced")
+        root.addWidget(tabs, 1)
+
+    def _tab(self, *cards) -> QWidget:
+        """Wrap one or more cards in a scrollable tab page."""
+        inner = QWidget()
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(2, 14, 2, 6)
+        lay.setSpacing(16)
+        for c in cards:
+            lay.addWidget(c)
+        lay.addStretch(1)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(inner)
+        return scroll
 
     # ------------------------------------------------------------------
     def _updates_card(self) -> Card:

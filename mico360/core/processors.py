@@ -480,6 +480,9 @@ def pdf_protect(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
     if op == "protect":
         if not pw:
             raise ProcessError("Enter a password to protect the PDF.")
+        confirm = opt.get("confirm_password", None)
+        if confirm is not None and confirm != pw:
+            raise ProcessError("The passwords don't match — please re-enter them.")
         # Prefer strong AES-256 (needs `cryptography`); fall back to the
         # dependency-free RC4-128 so protection always works.
         try:
@@ -511,12 +514,36 @@ _WM_COLORS = {
 }
 
 
+def _anchor_xy(position: str, pw: float, ph: float, w: float, h: float,
+               margin: float = 28.0) -> tuple[float, float]:
+    """Top-left (x, y) for a w×h watermark placed at *position* on a pw×ph page."""
+    parts = (position or "center").split("-")
+    vert = parts[0] if parts[0] in ("top", "middle", "bottom") else "middle"
+    horiz = parts[1] if len(parts) > 1 else "center"
+    if horiz == "left":
+        x = margin
+    elif horiz == "right":
+        x = pw - margin - w
+    else:
+        x = (pw - w) / 2.0
+    if vert == "top":
+        y = margin
+    elif vert == "bottom":
+        y = ph - margin - h
+    else:
+        y = (ph - h) / 2.0
+    return x, y
+
+
 def pdf_watermark(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
-    """Stamp a watermark on every page — either diagonal text or a logo/image."""
+    """Stamp a watermark on every page — either text or a logo/image, at a
+    chosen position."""
     opacity = _clampi(opt.get("opacity", 20), 1, 100, 20) / 100.0
     rotation = _clampi(opt.get("rotation", 45), -180, 180, 45)
+    position = opt.get("position", "center")
     if opt.get("wm_type", "text") == "image":
-        return _pdf_watermark_image(src, out_dir, opt, report, opacity, rotation)
+        return _pdf_watermark_image(src, out_dir, opt, report, opacity, rotation,
+                                    position)
 
     import fitz
     text = (opt.get("text") or "").strip()
@@ -533,11 +560,12 @@ def pdf_watermark(src: Path, out_dir: Path, opt: dict, report: Report) -> list[P
         for i, page in enumerate(doc):
             _check_cancel(report)
             rect = page.rect
-            cx, cy = rect.width / 2.0, rect.height / 2.0
             tl = fitz.get_text_length(text, fontname="helv", fontsize=size)
+            x, y = _anchor_xy(position, rect.width, rect.height, tl, size)
+            pivot = fitz.Point(x + tl / 2.0, y + size / 2.0)
             tw = fitz.TextWriter(rect, color=color)
-            tw.append(fitz.Point(cx - tl / 2.0, cy + size * 0.30), text, fontsize=size)
-            morph = (fitz.Point(cx, cy), fitz.Matrix(rotation))
+            tw.append(fitz.Point(x, y + size * 0.8), text, fontsize=size)
+            morph = (pivot, fitz.Matrix(rotation))
             tw.write_text(page, opacity=opacity, morph=morph, overlay=True)
             _progress(report, i + 1, doc.page_count)
         out = build_output_path(src, out_dir, ".pdf", name_suffix="_watermarked",
@@ -552,8 +580,9 @@ def pdf_watermark(src: Path, out_dir: Path, opt: dict, report: Report) -> list[P
 
 
 def _pdf_watermark_image(src: Path, out_dir: Path, opt: dict, report: Report,
-                         opacity: float, rotation: int) -> list[Path]:
-    """Overlay a logo/image (PNG transparency honoured) centred on every page."""
+                         opacity: float, rotation: int,
+                         position: str = "center") -> list[Path]:
+    """Overlay a logo/image (PNG transparency honoured) at *position* on every page."""
     import os
     import tempfile
 
@@ -593,8 +622,8 @@ def _pdf_watermark_image(src: Path, out_dir: Path, opt: dict, report: Report,
                 rect = page.rect
                 w = rect.width * scale
                 h = w * ratio
-                cx, cy = rect.width / 2.0, rect.height / 2.0
-                box = fitz.Rect(cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0)
+                x, y = _anchor_xy(position, rect.width, rect.height, w, h)
+                box = fitz.Rect(x, y, x + w, y + h)
                 page.insert_image(box, filename=tmp, overlay=True, keep_proportion=True)
                 _progress(report, i + 1, doc.page_count)
             out = build_output_path(src, out_dir, ".pdf", name_suffix="_watermarked",

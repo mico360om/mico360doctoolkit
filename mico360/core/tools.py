@@ -135,8 +135,10 @@ TOOLS: list[Tool] = [
                 ("protect", "Add a password (encrypt)"),
                 ("unlock", "Remove the password (decrypt)"),
             ]),
-            Option("password", "Password", "text", "",
-                   hint="For Unlock, enter the PDF's current password."),
+            Option("password", "Password", "password", ""),
+            Option("confirm_password", "Confirm password", "password", "",
+                   hint="Re-enter the password to confirm.",
+                   visible_when=("operation", "protect")),
         ],
     ),
     Tool(
@@ -156,40 +158,12 @@ TOOLS: list[Tool] = [
                    suffix=" pt", visible_when=("wm_type", "text")),
             Option("scale", "Size", "int", 40, minimum=5, maximum=100,
                    suffix=" % of page width", visible_when=("wm_type", "image")),
-            Option("opacity", "Opacity", "int", 20, minimum=1, maximum=100, suffix=" %"),
-            Option("rotation", "Angle", "int", 45, minimum=-180, maximum=180, suffix="°"),
             Option("color", "Colour", "choice", "gray", [
                 ("gray", "Grey"), ("red", "Red"), ("blue", "Blue"), ("black", "Black"),
             ], visible_when=("wm_type", "text")),
-        ],
-    ),
-    Tool(
-        id="pdf_rotate", name="Rotate Pages", icon="🔄",
-        tagline="Rotate all or selected pages.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_rotate, group="PDF",
-        options=[
-            Option("angle", "Rotate by", "choice", 90, [
-                (90, "90° clockwise"), (180, "180°"), (270, "270° (anti-clockwise)"),
-            ]),
-            Option("pages", "Pages", "text", "all",
-                   hint="e.g. 1-3, 5  ·  'all' for every page"),
-        ],
-    ),
-    Tool(
-        id="pdf_delete", name="Delete Pages", icon="🗑️",
-        tagline="Remove pages from a PDF.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_delete, group="PDF",
-        options=[
-            Option("pages", "Pages to delete", "text", "", hint="e.g. 2, 5-7"),
-        ],
-    ),
-    Tool(
-        id="pdf_extract", name="Extract Pages", icon="📤",
-        tagline="Save only the pages you choose.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_extract, group="PDF",
-        options=[
-            Option("pages", "Pages to extract", "text", "",
-                   hint="in output order, e.g. 1-5, 10, 15-20"),
+            Option("opacity", "Opacity", "int", 20, minimum=1, maximum=100, suffix=" %"),
+            Option("rotation", "Angle", "int", 45, minimum=-180, maximum=180, suffix="°"),
+            Option("position", "Position", "posgrid", "center"),
         ],
     ),
     Tool(

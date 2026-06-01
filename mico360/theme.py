@@ -148,11 +148,11 @@ QToolTip {{
 #Brand {{ color: {c['text']}; font-size: 16px; font-weight: 800; }}
 #BrandSub {{ color: {c['text_faint']}; font-size: 10px; font-weight: 600; letter-spacing: 1px; }}
 #NavSection {{
-    color: {c['section']}; font-size: 10px; font-weight: 700;
-    letter-spacing: 1.2px; padding: 6px 8px 3px 8px;
+    color: {c['text_muted']}; font-size: 11px; font-weight: 800;
+    letter-spacing: 1.3px; padding: 10px 8px 4px 8px;
     background: transparent; border: none; text-align: left;
 }}
-#NavSection:hover {{ color: {c['text_muted']}; }}
+#NavSection:hover {{ color: {c['text']}; }}
 QLineEdit#NavSearch {{
     background-color: {c['input']};
     border: 1px solid {c['border']};
@@ -332,6 +332,36 @@ QRadioButton::indicator:checked {{ background: {c['primary']}; border: 5px solid
 #FavStar:hover {{ color: #E8B54D; }}
 #FavStar[pinned="true"] {{ color: #E8B54D; }}
 #RecentLink {{ color: {c['text']}; }}
+
+/* =================== Settings tabs =================== */
+QTabWidget#SettingsTabs::pane {{ border: none; top: -1px; }}
+QTabWidget#SettingsTabs > QTabBar {{ qproperty-drawBase: 0; }}
+#SettingsTabs QTabBar::tab {{
+    background: transparent; border: none; color: {c['text_muted']};
+    padding: 8px 16px; margin-right: 6px; font-size: 13px; font-weight: 600;
+    border-bottom: 2px solid transparent;
+}}
+#SettingsTabs QTabBar::tab:hover {{ color: {c['text']}; }}
+#SettingsTabs QTabBar::tab:selected {{
+    color: {c['primary']}; border-bottom: 2px solid {c['primary']};
+}}
+
+/* =================== Password eye + position grid =================== */
+QPushButton#EyeToggle {{
+    background-color: {c['input']}; border: 1px solid {c['border']};
+    border-radius: {RADIUS_SM}px; padding: 4px;
+}}
+QPushButton#EyeToggle:hover {{ border-color: {c['border_strong']}; }}
+QPushButton#EyeToggle:checked {{ border-color: {c['primary']}; color: {c['primary']}; }}
+QRadioButton#PosDot {{ spacing: 0px; }}
+QRadioButton#PosDot::indicator {{
+    width: 18px; height: 18px; border-radius: 9px;
+    border: 2px solid {c['border_strong']}; background: {c['surface_2']};
+}}
+QRadioButton#PosDot::indicator:hover {{ border-color: {c['primary']}; }}
+QRadioButton#PosDot::indicator:checked {{
+    border: 2px solid {c['primary']}; background: {c['primary']};
+}}
 
 /* =================== Lists / tables =================== */
 QListWidget#FileList {{

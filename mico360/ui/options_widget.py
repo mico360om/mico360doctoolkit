@@ -3,14 +3,17 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
+    QRadioButton,
     QSizePolicy,
     QSpinBox,
     QVBoxLayout,
@@ -21,12 +24,48 @@ from mico360.config import settings
 from mico360.core.tools import Option, Tool
 
 
+class _PosGrid(QWidget):
+    """A 3×3 grid of radio buttons for choosing a placement (e.g. watermark)."""
+
+    POSITIONS = [
+        ["top-left", "top-center", "top-right"],
+        ["middle-left", "center", "middle-right"],
+        ["bottom-left", "bottom-center", "bottom-right"],
+    ]
+
+    def __init__(self, default: str = "center", parent: QWidget | None = None):
+        super().__init__(parent)
+        g = QGridLayout(self)
+        g.setContentsMargins(0, 0, 0, 0)
+        g.setSpacing(8)
+        self._group = QButtonGroup(self)
+        self._buttons: dict[str, QRadioButton] = {}
+        for r, row in enumerate(self.POSITIONS):
+            for c, pos in enumerate(row):
+                rb = QRadioButton()
+                rb.setObjectName("PosDot")
+                rb.setCursor(Qt.PointingHandCursor)
+                rb.setToolTip(pos.replace("-", " ").title())
+                self._group.addButton(rb)
+                self._buttons[pos] = rb
+                g.addWidget(rb, r, c, Qt.AlignCenter)
+        self._buttons.get(default if isinstance(default, str) else "center",
+                          self._buttons["center"]).setChecked(True)
+
+    def value(self) -> str:
+        for pos, rb in self._buttons.items():
+            if rb.isChecked():
+                return pos
+        return "center"
+
+
 class OptionsWidget(QWidget):
     def __init__(self, tool: Tool, parent: QWidget | None = None):
         super().__init__(parent)
         self.tool = tool
         self._controls: dict[str, QWidget] = {}
         self._rows: dict[str, tuple[QWidget, QWidget]] = {}  # key -> (label, field)
+        self._password_keys: set[str] = set()   # never stripped, never saved
         self._saved = settings.tool_options(tool.id)  # last-used values, if any
 
         root = QVBoxLayout(self)
@@ -76,6 +115,31 @@ class OptionsWidget(QWidget):
             browse.clicked.connect(_pick)
             field = holder
             read_widget = le
+        elif opt.kind == "password":
+            self._password_keys.add(opt.key)
+            le = QLineEdit("")            # never pre-filled from saved settings
+            le.setEchoMode(QLineEdit.Password)
+            le.setPlaceholderText("••••••••")
+            eye = QPushButton("👁")
+            eye.setObjectName("EyeToggle")
+            eye.setCheckable(True)
+            eye.setFixedWidth(38)
+            eye.setCursor(Qt.PointingHandCursor)
+            eye.setToolTip("Show / hide password")
+
+            def _toggle(checked, _le=le):
+                _le.setEchoMode(QLineEdit.Normal if checked else QLineEdit.Password)
+            eye.toggled.connect(_toggle)
+            holder = QWidget()
+            h = QHBoxLayout(holder)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(8)
+            h.addWidget(le, 1)
+            h.addWidget(eye)
+            field = holder
+            read_widget = le
+        elif opt.kind == "posgrid":
+            field = _PosGrid(default if isinstance(default, str) else "center")
         elif opt.kind == "choice":
             cb = QComboBox()
             for value, label in opt.choices:
@@ -157,10 +221,17 @@ class OptionsWidget(QWidget):
                 out[opt.key] = ctrl.value()
             elif isinstance(ctrl, QCheckBox):
                 out[opt.key] = ctrl.isChecked()
+            elif isinstance(ctrl, _PosGrid):
+                out[opt.key] = ctrl.value()
             elif isinstance(ctrl, QLineEdit):
-                out[opt.key] = ctrl.text().strip()
+                # Passwords are taken verbatim (never stripped).
+                out[opt.key] = (ctrl.text() if opt.key in self._password_keys
+                                else ctrl.text().strip())
         return out
 
     def save(self) -> None:
-        """Remember the current option values for next time."""
-        settings.set_tool_options(self.tool.id, self.values())
+        """Remember the current option values for next time — but never persist
+        passwords to disk."""
+        vals = {k: v for k, v in self.values().items()
+                if k not in self._password_keys}
+        settings.set_tool_options(self.tool.id, vals)

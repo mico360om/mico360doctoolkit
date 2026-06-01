@@ -70,13 +70,14 @@ def main() -> int:
         tmp = Path(td); out = tmp / "out"; out.mkdir()
         settings.output_dir = str(out)
 
-        # --- multi-file batch (Rotate 3 PDFs -> 3 outputs) --------------
-        p = ToolPage(TOOLS_BY_ID["pdf_rotate"])
+        # --- multi-file batch (Organize-rotate 3 PDFs -> 3 outputs) -----
+        p = ToolPage(TOOLS_BY_ID["pdf_organize"])
         p.chk_same.setChecked(False)
         files = [str(make_pdf(tmp / f"r{i}.pdf")) for i in range(3)]
         p.add_paths(files)
-        p.options_widget._controls["angle"].setCurrentIndex(
-            p.options_widget._controls["angle"].findData(90))
+        oc = p.options_widget._controls
+        oc["operation"].setCurrentIndex(oc["operation"].findData("rotate"))
+        oc["angle"].setCurrentIndex(oc["angle"].findData(90))
         s = run(p, out)
         check("multi-file: 3 PDFs -> 3 ok", s.get("ok") == 3 and s.get("failed") == 0,
               f"ok={s.get('ok')} failed={s.get('failed')}")

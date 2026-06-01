@@ -1,20 +1,19 @@
-## MICO360 Doc Toolkit v5.4.1
+## MICO360 Doc Toolkit v5.5.0
 
-**Reliability fixes from a deep QA pass.**
+**Design & usability refresh.**
 
-- **Office conversions no longer hang under load.** Word → PDF, Excel → PDF and
-  PowerPoint → PDF use external converters (LibreOffice / Microsoft Office) that
-  are single-instance; converting **several Office files in one batch** could
-  collide and hang. All Office conversions are now serialised, and each
-  LibreOffice run gets its own private profile — reliable for whole batches.
-- **Toasts** no longer overlap when several appear at once; each is a single,
-  clearly-spaced line.
-- Minor code cleanups (no behaviour change).
+- **Cleaner sidebar** — category headings are now bold, and **Rotate / Delete /
+  Extract / Reorder pages live inside Organize PDF** (the three separate tools were
+  removed to declutter the menu).
+- **Protect PDF** — now asks you to **confirm the password**, with **show/hide**
+  toggles. Passwords are never saved to disk.
+- **Watermark PDF** — choose **where** the watermark sits with a **3×3 position
+  grid** (any corner, edge or centre), for both text and logo watermarks.
+- **Settings** is reorganised into **tabs** (General · Processing · Output ·
+  Updates · Advanced) for a tidier layout.
 
-Everything from v5.4.0: the Dashboard home, searchable/collapsible sidebar, 13 new
-tools (Rotate/Delete/Extract Pages, Add Page Numbers, Sign, Edit Metadata,
-Searchable OCR, PDF↔Excel, Excel/PowerPoint → PDF, image Resize/Convert/Watermark),
-Light/Dark/System theme, detailed progress with ETA, and toasts.
+Includes the v5.4.x reliability fixes (Office conversions serialised, toast
+stacking, headless-mode polish).
 
 ---
 *This release is also the update manifest: the tag is the version, this text is the

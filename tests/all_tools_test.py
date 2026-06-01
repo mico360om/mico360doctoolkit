@@ -141,7 +141,8 @@ def main() -> int:
     overrides = {
         "pdf_delete": {"pages": "2"},
         "pdf_extract": {"pages": "1-2"},
-        "pdf_protect": {"operation": "protect", "password": "secret"},
+        "pdf_protect": {"operation": "protect", "password": "secret",
+                        "confirm_password": "secret"},
         "pdf_organize": {"operation": "delete", "del_pages": "2"},
     }
     # These rely on an external converter (LibreOffice / MS Office). Without one,

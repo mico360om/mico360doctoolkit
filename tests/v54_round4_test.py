@@ -77,6 +77,7 @@ def main() -> int:
         pp.options_widget._controls["operation"].setCurrentIndex(
             pp.options_widget._controls["operation"].findData("protect"))
         pp.options_widget._controls["password"].setText("p@ss")
+        pp.options_widget._controls["confirm_password"].setText("p@ss")
         s = run(pp, out)
         prot = (s.get("outputs") or [None])[0]
         from pypdf import PdfReader

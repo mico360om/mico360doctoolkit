@@ -590,11 +590,16 @@ class ToolPage(QWidget):
         self._log(msg)
         self.activity.emit(f"[{self.tool.name}] {msg}")
 
+        from PySide6.QtGui import QGuiApplication
         if summary["failed"]:
             self.header_chip.set_state("err", "Errors")
-            details = "\n".join(f"• {lbl}: {err}" for lbl, err in summary["errors"][:12])
-            QMessageBox.warning(self, "Completed with errors",
-                                f"{summary['failed']} file(s) failed:\n\n{details}")
+            # The failures are already shown in the status line, toast and log;
+            # only pop a modal dialog on a real desktop (never headless/tests).
+            if QGuiApplication.platformName() != "offscreen":
+                details = "\n".join(f"• {lbl}: {err}"
+                                    for lbl, err in summary["errors"][:12])
+                QMessageBox.warning(self, "Completed with errors",
+                                    f"{summary['failed']} file(s) failed:\n\n{details}")
         elif summary["cancelled"]:
             self.header_chip.set_state("ready", "Cancelled")
         else:
