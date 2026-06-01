@@ -1,38 +1,20 @@
-## MICO360 Doc Toolkit v5.4.0
+## MICO360 Doc Toolkit v5.4.1
 
-**A new Dashboard home, lots of new tools, and UX polish.**
+**Reliability fixes from a deep QA pass.**
 
-### New: Dashboard home page
-- Opens to a **Dashboard** with **Quick actions**, **Favourite tools** (pin any tool
-  with the ☆ button), **Recent files**, and **Last activity**.
-- **Drag & drop anywhere** in the window — files are routed to a sensible tool.
+- **Office conversions no longer hang under load.** Word → PDF, Excel → PDF and
+  PowerPoint → PDF use external converters (LibreOffice / Microsoft Office) that
+  are single-instance; converting **several Office files in one batch** could
+  collide and hang. All Office conversions are now serialised, and each
+  LibreOffice run gets its own private profile — reliable for whole batches.
+- **Toasts** no longer overlap when several appear at once; each is a single,
+  clearly-spaced line.
+- Minor code cleanups (no behaviour change).
 
-### New: sidebar search & collapsible categories
-- **Search** for any tool from the box at the top of the sidebar.
-- **Collapse / expand** each category by clicking its heading (your choice is remembered).
-
-### New PDF tools
-- **Rotate / Delete / Extract Pages** (dedicated tools)
-- **Add Page Numbers** (position, style, start number)
-- **Sign PDF** (stamp a signature image)
-- **Edit Metadata** (title / author / subject / keywords)
-- **Searchable PDF (OCR)** — add an invisible text layer so scans become
-  selectable & searchable
-
-### New conversions
-- **PDF → Excel** (extracts tables), **Excel → PDF**, **PowerPoint → PDF**
-  (via LibreOffice / Microsoft Office)
-
-### New image tools
-- **Resize Image** (dimensions or %), **Convert Image** (PNG/JPG/WEBP/TIFF/BMP),
-  **Watermark Image** (text or logo)
-
-### UX polish
-- **Light / Dark / System** theme (System follows Windows)
-- **Detailed progress**: “Processing 3/25 · Current: Report.pdf · ETA 1m 12s”
-- **Toast notifications** on completion
-- Richer drop zone: supported formats, file count and total size
-- “You're up to date” shows in green; Watermark PDF supports logo/image (v5.3)
+Everything from v5.4.0: the Dashboard home, searchable/collapsible sidebar, 13 new
+tools (Rotate/Delete/Extract Pages, Add Page Numbers, Sign, Edit Metadata,
+Searchable OCR, PDF↔Excel, Excel/PowerPoint → PDF, image Resize/Convert/Watermark),
+Light/Dark/System theme, detailed progress with ETA, and toasts.
 
 ---
 *This release is also the update manifest: the tag is the version, this text is the

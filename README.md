@@ -1,4 +1,4 @@
-# MICO360 Doc Toolkit  ·  v5.4
+# MICO360 Doc Toolkit  ·  v5.4.1
 
 A modern Windows 10/11 desktop app for PDF & image management — a **Dashboard**
 home plus 25 tools to compress, merge, split, organize, protect, watermark, sign,
@@ -194,6 +194,9 @@ python tests\v51_features_test.py        # OCR engine caching, confidence filter
 python tests\update_ui_test.py           # update check/dialog runs on the GUI thread (no crash)
 python tests\v52_features_test.py        # Organize/Protect/Watermark PDF, page-spec parser, merge reorder
 python tests\v54_features_test.py        # Rotate/Delete/Extract, page numbers, sign, metadata, OCR, Office, image tools
+python tests\all_tools_test.py           # EVERY tool driven end-to-end through the real UI + engine
+python tests\v54_behavior_test.py        # multi-file, save-next-to-source, file-option persistence, drop routing
+python tests\v54_round4_test.py          # protect/unlock UI, cancellation, no-results search, fav integration
 python tests\v54_ui_test.py              # Dashboard, drop routing, favourites, theme mode, toast
 python tests\v54_functional_test.py      # new tools driven end-to-end through real UI widgets + engine
 python tests\v54_edge_test.py            # error handling, corrupt input, real PDF->Excel table extraction

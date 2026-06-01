@@ -272,9 +272,9 @@ class Toast(QFrame):
         glyph = {"ok": "✓", "error": "✗", "info": "ℹ"}.get(kind, "✓")
         text = QLabel(f"{glyph}  {message}")
         text.setObjectName("ToastText")
-        text.setWordWrap(True)
+        text.setWordWrap(False)            # single line → consistent height
         lay.addWidget(text)
-        self.setMaximumWidth(420)
+        self.setMaximumWidth(460)
         QTimer.singleShot(duration, self.close)
 
     def show_at(self, offset: int = 0, margin: int = 22) -> None:

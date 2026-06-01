@@ -194,7 +194,6 @@ def main() -> int:
 
     # --- Merge drag-reorder sync ----------------------------------------
     from mico360.ui.tool_page import ToolPage
-    from PySide6.QtCore import Qt
     page = ToolPage(TOOLS_BY_ID["pdf_merge"])
     a, b, c = Path("a.pdf"), Path("b.pdf"), Path("c.pdf")
     page.files = [a, b, c]

@@ -29,12 +29,13 @@ def check(name: str, fn):
 
 # --- imports -------------------------------------------------------------
 def t_imports():
-    import fitz  # noqa: F401
-    import pypdf  # noqa: F401
-    import pptx  # noqa: F401
-    from PIL import Image  # noqa: F401
-    from mico360.core import processors, tools, engine  # noqa: F401
-    from mico360.ui import main_window  # noqa: F401
+    import fitz
+    import pptx
+    import pypdf
+    from PIL import Image
+    from mico360.core import engine, processors, tools
+    from mico360.ui import main_window
+    assert all([fitz, pypdf, pptx, Image, processors, tools, engine, main_window])
 
 
 def _sample_pdf(path: Path, pages: int = 3) -> Path:

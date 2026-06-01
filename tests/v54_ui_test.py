@@ -125,8 +125,15 @@ def main() -> int:
     page = wrap.widget() if isinstance(wrap, QScrollArea) else wrap
     check("open_tool preloads dropped files", len(page.files) == 2, str(len(page.files)))
 
-    w.show_toast("Test toast", "ok")
-    check("toast shown", len(w._toasts) >= 1)
+    w.show_toast("Test toast one", "ok")
+    w.show_toast("Test toast two", "error")
+    app.processEvents()
+    check("two toasts shown", len(w._toasts) == 2, str(len(w._toasts)))
+    # Stacked toasts must not overlap (distinct, non-overlapping y ranges).
+    t0, t1 = w._toasts[0], w._toasts[1]
+    no_overlap = (t1.y() + t1.height() <= t0.y()) or (t0.y() + t0.height() <= t1.y())
+    check("stacked toasts do not overlap",
+          no_overlap, f"t0=({t0.y()},{t0.height()}) t1=({t1.y()},{t1.height()})")
 
     if saved_mode is not None:
         settings._s.setValue("ui/theme_mode", saved_mode); settings._s.sync()

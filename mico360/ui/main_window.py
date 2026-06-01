@@ -171,7 +171,9 @@ class MainWindow(QMainWindow):
             self._toasts = []
         self._toasts = [t for t in self._toasts if t.isVisible()]
         toast = Toast(self, message, kind)
-        toast.show_at(offset=26 * len(self._toasts))
+        # Stack above any existing toasts using their real heights (+ a gap).
+        offset = sum(t.height() + 8 for t in self._toasts)
+        toast.show_at(offset=offset)
         self._toasts.append(toast)
 
     def _build_settings_page(self) -> QWidget:

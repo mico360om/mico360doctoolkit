@@ -945,12 +945,29 @@ def word_to_pdf(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
     raise ProcessError("Word→PDF failed with every engine. " + " | ".join(errors))
 
 
-def _word_to_pdf_libreoffice(soffice: str, src: Path, out_dir: Path,
-                             final: Path, report: Report) -> None:
-    report("LibreOffice converting to PDF…")
-    args = [soffice, "--headless", "--norestore", "--convert-to", "pdf",
-            "--outdir", str(out_dir), str(src)]
-    proc = run_subprocess(args, timeout=300)
+# External Office automation — LibreOffice (headless) and Microsoft Office (COM)
+# — is effectively single-instance: concurrent / rapid invocations collide on a
+# profile or COM lock and HANG. We serialise every Office conversion with one
+# lock, and give each LibreOffice run its own throw-away UserInstallation profile.
+# Reliable for a whole batch of Office files, even with a quickstarter running.
+_office_lock = threading.Lock()
+
+
+def _run_libreoffice(soffice: str, src: Path, out_dir: Path, final: Path,
+                     report: Report, label: str = "LibreOffice") -> None:
+    import shutil
+    import tempfile
+
+    report(f"{label} converting to PDF…")
+    profile = tempfile.mkdtemp(prefix="mico360_lo_")
+    args = [soffice, "--headless", "--norestore", "--invisible", "--nodefault",
+            "--nolockcheck", f"-env:UserInstallation={Path(profile).as_uri()}",
+            "--convert-to", "pdf", "--outdir", str(out_dir), str(src)]
+    try:
+        with _office_lock:
+            proc = run_subprocess(args, timeout=300)
+    finally:
+        shutil.rmtree(profile, ignore_errors=True)
     produced = out_dir / f"{src.stem}.pdf"
     if proc.returncode != 0 or not produced.exists():
         raise RuntimeError((proc.stderr or proc.stdout or "no output").strip()[:200])
@@ -958,6 +975,11 @@ def _word_to_pdf_libreoffice(soffice: str, src: Path, out_dir: Path,
         if final.exists():
             final.unlink()
         produced.rename(final)
+
+
+def _word_to_pdf_libreoffice(soffice: str, src: Path, out_dir: Path,
+                             final: Path, report: Report) -> None:
+    _run_libreoffice(soffice, src, out_dir, final, report)
 
 
 def _word_to_pdf_msword(src: Path, final: Path, report: Report) -> bool:
@@ -975,7 +997,8 @@ def _word_to_pdf_msword(src: Path, final: Path, report: Report) -> bool:
         pass
     try:
         report("Microsoft Word converting to PDF…")
-        convert(str(src), str(final))
+        with _office_lock:          # serialise COM Office automation
+            convert(str(src), str(final))
     finally:
         if com_inited:
             try:
@@ -1476,7 +1499,7 @@ def pdf_sign(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
 
 
 def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
-    from pypdf import PdfReader, PdfWriter
+    from pypdf import PdfWriter
     reader, _ = _open_reader(src)
     writer = PdfWriter()
     writer.append(reader)
@@ -1591,17 +1614,7 @@ def pdf_to_excel(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
 
 def _lo_convert_to_pdf(soffice: str, src: Path, out_dir: Path, final: Path,
                        report: Report) -> None:
-    report("LibreOffice converting to PDF…")
-    args = [soffice, "--headless", "--norestore", "--convert-to", "pdf",
-            "--outdir", str(out_dir), str(src)]
-    proc = run_subprocess(args, timeout=300)
-    produced = out_dir / f"{src.stem}.pdf"
-    if proc.returncode != 0 or not produced.exists():
-        raise RuntimeError((proc.stderr or proc.stdout or "no output").strip()[:200])
-    if produced != final:
-        if final.exists():
-            final.unlink()
-        produced.rename(final)
+    _run_libreoffice(soffice, src, out_dir, final, report)
 
 
 def _office_com_to_pdf(app_name: str, src: Path, final: Path) -> bool:
@@ -1614,21 +1627,22 @@ def _office_com_to_pdf(app_name: str, src: Path, final: Path) -> bool:
     pythoncom.CoInitialize()
     app = None
     try:
-        app = win32.DispatchEx(app_name)
-        src_s, final_s = str(src.resolve()), str(final.resolve())
-        if app_name.startswith("Excel"):
-            try:
-                app.Visible = False
-            except Exception:
-                pass
-            app.DisplayAlerts = False
-            wb = app.Workbooks.Open(src_s, ReadOnly=True)
-            wb.ExportAsFixedFormat(0, final_s)   # 0 = xlTypePDF
-            wb.Close(False)
-        else:  # PowerPoint
-            pres = app.Presentations.Open(src_s, WithWindow=False)
-            pres.SaveAs(final_s, 32)             # 32 = ppSaveAsPDF
-            pres.Close()
+        with _office_lock:          # serialise COM Office automation
+            app = win32.DispatchEx(app_name)
+            src_s, final_s = str(src.resolve()), str(final.resolve())
+            if app_name.startswith("Excel"):
+                try:
+                    app.Visible = False
+                except Exception:
+                    pass
+                app.DisplayAlerts = False
+                wb = app.Workbooks.Open(src_s, ReadOnly=True)
+                wb.ExportAsFixedFormat(0, final_s)   # 0 = xlTypePDF
+                wb.Close(False)
+            else:  # PowerPoint
+                pres = app.Presentations.Open(src_s, WithWindow=False)
+                pres.SaveAs(final_s, 32)             # 32 = ppSaveAsPDF
+                pres.Close()
         return final.exists()
     finally:
         try:
@@ -1653,7 +1667,7 @@ def _office_to_pdf(src: Path, out_dir: Path, opt: dict, report: Report,
         except Exception as exc:  # noqa: BLE001
             errors.append(f"LibreOffice: {exc}")
     try:
-        report(f"Trying Microsoft Office…")
+        report("Trying Microsoft Office…")
         if _office_com_to_pdf(com_app, src, final):
             return [final]
     except Exception as exc:  # noqa: BLE001

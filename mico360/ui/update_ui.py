@@ -4,10 +4,9 @@ Kept apart from updater.py so the core logic stays Qt-free and unit-testable.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog,
-    QDialogButtonBox,
     QHBoxLayout,
     QLabel,
     QProgressBar,
