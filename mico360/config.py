@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from PySide6.QtCore import QSettings
 
@@ -99,11 +100,19 @@ class Settings:
 
     @property
     def output_dir(self) -> str:
-        return self._get("io/output_dir", str(default_output_dir()), str)
+        val = self._get("io/output_dir", "", str)
+        # Guard against a blank / non-absolute / invalid stored value (a deleted
+        # folder, a removed drive, or a stale/corrupted setting): fall back to
+        # the default so the UI never shows garbage and runs never target it.
+        if not val or not os.path.isabs(val):
+            return str(default_output_dir())
+        return val
 
     @output_dir.setter
     def output_dir(self, value: str) -> None:
-        self._set("io/output_dir", value)
+        # Only persist real, absolute folder paths.
+        if value and os.path.isabs(str(value)):
+            self._set("io/output_dir", str(value))
 
     @property
     def same_as_source(self) -> bool:

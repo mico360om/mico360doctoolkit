@@ -73,6 +73,21 @@ def main() -> int:
     settings.add_activity("Compress PDF — 3 file(s) done")
     check("activity recorded", settings.recent_activity[0].startswith("Compress PDF"))
 
+    # --- output_dir guard (rejects invalid / corrupted values) ----------
+    import os
+    saved_out = settings._s.value("io/output_dir", None)
+    settings._s.setValue("io/output_dir", "saved 602.0 B (19%)"); settings._s.sync()
+    check("output_dir ignores a non-absolute/corrupted stored value",
+          os.path.isabs(settings.output_dir), repr(settings.output_dir))
+    settings.output_dir = "not/absolute"
+    check("output_dir setter rejects a non-absolute path",
+          os.path.isabs(settings.output_dir))
+    if saved_out is not None:
+        settings._s.setValue("io/output_dir", saved_out)
+    else:
+        settings._s.remove("io/output_dir")
+    settings._s.sync()
+
     # --- Dashboard builds + refresh ------------------------------------
     from mico360.ui.dashboard_page import DashboardPage
     dash = DashboardPage()

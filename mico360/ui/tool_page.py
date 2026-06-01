@@ -104,10 +104,14 @@ class ToolPage(QWidget):
         title_box.addWidget(sub)
         header.addWidget(icon, 0, Qt.AlignTop)
         header.addLayout(title_box, 1)
+        from PySide6.QtGui import QFont
         self.btn_fav = QPushButton()
         self.btn_fav.setObjectName("FavStar")
         self.btn_fav.setCursor(Qt.PointingHandCursor)
-        self.btn_fav.setFixedSize(30, 30)
+        self.btn_fav.setFixedSize(34, 32)
+        _star_font = QFont("Segoe UI Symbol")
+        _star_font.setPointSize(14)
+        self.btn_fav.setFont(_star_font)
         self.btn_fav.clicked.connect(self._toggle_favorite)
         self._sync_fav()
         header.addWidget(self.btn_fav, 0, Qt.AlignTop)
@@ -118,6 +122,9 @@ class ToolPage(QWidget):
     def _sync_fav(self) -> None:
         on = self.tool.id in settings.favorite_tools
         self.btn_fav.setText("★" if on else "☆")
+        self.btn_fav.setProperty("pinned", "true" if on else "false")
+        self.btn_fav.style().unpolish(self.btn_fav)
+        self.btn_fav.style().polish(self.btn_fav)
         self.btn_fav.setToolTip("Unpin from favourites" if on
                                 else "Pin to favourites (shown on Home)")
 

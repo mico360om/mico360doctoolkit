@@ -259,10 +259,23 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def dropEvent(self, event):  # noqa: N802
+        from pathlib import Path
+
         from mico360.ui.dashboard_page import route_for
+        from mico360.ui.tool_page import ToolPage
         paths = [u.toLocalFile() for u in event.mimeData().urls() if u.toLocalFile()]
         if not paths:
             return
+        # If we're already on a tool page that accepts these files, add them
+        # there instead of jumping to a different default tool.
+        cur = self.stack.currentWidget()
+        page = cur.widget() if isinstance(cur, QScrollArea) else cur
+        if isinstance(page, ToolPage):
+            accepted = [p for p in paths if Path(p).suffix.lower() in page.tool.accept]
+            if accepted:
+                page.add_paths([Path(p) for p in accepted])
+                event.acceptProposedAction()
+                return
         tool = route_for(paths)
         if tool:
             self.open_tool(tool, paths)

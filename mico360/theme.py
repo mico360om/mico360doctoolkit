@@ -325,8 +325,12 @@ QRadioButton::indicator:checked {{ background: {c['primary']}; border: 5px solid
 #DashTileIcon {{ font-size: 22px; }}
 #DashTileName {{ color: {c['text']}; font-size: 13px; font-weight: 700; }}
 #DashGreeting {{ color: {c['text']}; font-size: 22px; font-weight: 800; }}
-#FavStar {{ color: {c['text_faint']}; border: none; background: transparent; font-size: 16px; }}
-#FavStar:hover {{ color: {c['primary']}; }}
+#FavStar {{
+    color: {c['text_muted']}; border: none; background: transparent;
+    font-size: 20px; font-family: "Segoe UI Symbol", "Segoe UI Emoji", "Segoe UI";
+}}
+#FavStar:hover {{ color: #E8B54D; }}
+#FavStar[pinned="true"] {{ color: #E8B54D; }}
 #RecentLink {{ color: {c['text']}; }}
 
 /* =================== Lists / tables =================== */
