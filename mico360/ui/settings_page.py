@@ -25,6 +25,7 @@ from mico360 import __app_name__, __version__, legal
 from mico360.config import settings
 from mico360.core.deps import find_ghostscript, find_libreoffice
 from mico360.paths import logs_dir
+from mico360.theme import palette
 from mico360.ui.widgets import Card, section_label
 
 
@@ -102,7 +103,9 @@ class SettingsPage(QWidget):
 
         def on_up_to_date():
             self.btn_check.setEnabled(True)
-            self.update_status.setText("You're up to date. ✓")
+            green = palette(settings.theme)["success"]
+            self.update_status.setText(
+                f"<span style='color:{green};'>You're up to date. ✓</span>")
 
         def on_failed(msg):
             self.btn_check.setEnabled(True)
