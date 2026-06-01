@@ -5,7 +5,7 @@ reflows its two children from side-by-side to stacked as width changes.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QBoxLayout,
@@ -171,6 +171,13 @@ class DropArea(QFrame):
         hint.setAlignment(Qt.AlignCenter)
         lay.addWidget(hint)
 
+        self._formats = QLabel("")
+        self._formats.setObjectName("DropFormats")
+        self._formats.setAlignment(Qt.AlignCenter)
+        self._formats.setWordWrap(True)
+        self._formats.setVisible(False)
+        lay.addWidget(self._formats)
+
         btns = QHBoxLayout()
         btns.setAlignment(Qt.AlignCenter)
         btns.setSpacing(8)
@@ -186,6 +193,13 @@ class DropArea(QFrame):
         btns.addWidget(b_folder)
         lay.addSpacing(2)
         lay.addLayout(btns)
+
+    def set_formats(self, exts) -> None:
+        """Show the accepted file types under the prompt."""
+        labels = sorted({e.lstrip(".").upper() for e in exts})
+        if labels:
+            self._formats.setText("Supported: " + " · ".join(labels))
+            self._formats.setVisible(True)
 
     # --- drag events -----------------------------------------------------
     def _set_active(self, active: bool) -> None:
@@ -238,3 +252,37 @@ class NavItem(QPushButton):
             self.setText(f"  {self._glyph}   {self._label}")
             self.setToolTip("")
             self.setStyleSheet("text-align: left;")
+
+
+# --------------------------------------------------------------------------
+# Toast notification
+# --------------------------------------------------------------------------
+class Toast(QFrame):
+    """A small auto-dismissing notification, overlaid on its parent window."""
+
+    def __init__(self, parent: QWidget, message: str, kind: str = "ok",
+                 duration: int = 3400):
+        super().__init__(parent)
+        self.setObjectName("Toast")
+        self.setProperty("toastKind", kind)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 10, 16, 10)
+        lay.setSpacing(8)
+        glyph = {"ok": "✓", "error": "✗", "info": "ℹ"}.get(kind, "✓")
+        text = QLabel(f"{glyph}  {message}")
+        text.setObjectName("ToastText")
+        text.setWordWrap(True)
+        lay.addWidget(text)
+        self.setMaximumWidth(420)
+        QTimer.singleShot(duration, self.close)
+
+    def show_at(self, offset: int = 0, margin: int = 22) -> None:
+        p = self.parentWidget()
+        self.adjustSize()
+        if p is not None:
+            x = p.width() - self.width() - margin
+            y = p.height() - self.height() - margin - offset
+            self.move(max(margin, x), max(margin, y))
+        self.show()
+        self.raise_()

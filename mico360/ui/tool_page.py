@@ -41,12 +41,15 @@ log = get_logger("mico360.ui")
 
 
 class ToolPage(QWidget):
-    activity = Signal(str)   # forwards notable lines to the global activity log
+    activity = Signal(str)        # forwards notable lines to the global activity log
+    toast = Signal(str, str)      # (message, kind) for a transient notification
 
     def __init__(self, tool: Tool, parent: QWidget | None = None):
         super().__init__(parent)
         self.tool = tool
         self.files: list[Path] = []
+        self._run_t0 = None
+        self._run_total = 0
         # Per-file processing status: path -> {"state","msg","outputs"}.
         # state is one of: pending | done | failed.
         self.status: dict[Path, dict] = {}
@@ -101,9 +104,26 @@ class ToolPage(QWidget):
         title_box.addWidget(sub)
         header.addWidget(icon, 0, Qt.AlignTop)
         header.addLayout(title_box, 1)
+        self.btn_fav = QPushButton()
+        self.btn_fav.setObjectName("FavStar")
+        self.btn_fav.setCursor(Qt.PointingHandCursor)
+        self.btn_fav.setFixedSize(30, 30)
+        self.btn_fav.clicked.connect(self._toggle_favorite)
+        self._sync_fav()
+        header.addWidget(self.btn_fav, 0, Qt.AlignTop)
         self.header_chip = Chip("Ready", "ready")
         header.addWidget(self.header_chip, 0, Qt.AlignTop)
         return header
+
+    def _sync_fav(self) -> None:
+        on = self.tool.id in settings.favorite_tools
+        self.btn_fav.setText("★" if on else "☆")
+        self.btn_fav.setToolTip("Unpin from favourites" if on
+                                else "Pin to favourites (shown on Home)")
+
+    def _toggle_favorite(self) -> None:
+        settings.toggle_favorite(self.tool.id)
+        self._sync_fav()
 
     def _build_files_card(self) -> Card:
         card = Card()
@@ -116,6 +136,7 @@ class ToolPage(QWidget):
         card.add_layout(head)
 
         self.drop = DropArea()
+        self.drop.set_formats(self.tool.accept)
         self.drop.pathsAdded.connect(self.add_paths)
         self.drop.browseFiles.connect(self._browse_files)
         self.drop.browseFolder.connect(self._browse_folder)
@@ -314,7 +335,13 @@ class ToolPage(QWidget):
         done = sum(1 for p in self.files if self._st(p)["state"] == "done")
         failed = sum(1 for p in self.files if self._st(p)["state"] == "failed")
         pending = n - done - failed
-        bits = [f"{n} file(s)"]
+        total_bytes = 0
+        for p in self.files:
+            try:
+                total_bytes += p.stat().st_size
+            except OSError:
+                pass
+        bits = [f"{n} file(s)", human_size(total_bytes)]
         if done:
             bits.append(f"{done} done")
         if failed:
@@ -469,29 +496,52 @@ class ToolPage(QWidget):
             self.header_chip.set_state("run", "Working…")
 
     def _on_started(self, total: int) -> None:
+        import time
+        self._run_t0 = time.monotonic()
+        self._run_total = total
         if total > 1:
             # Multi-file: determinate from the start; fine_progress fills it as
             # files (and their pages) complete.
             self.progress.setRange(0, 100)
             self.progress.setValue(0)
-            self.status_lbl.setText(f"Processing 0 / {total}…")
         else:
             # Single unit: start as an animated busy bar; it becomes a real
-            # 0→100 bar the moment the processor reports per-page progress
-            # (multi-page PDFs etc.). Opaque one-shot ops stay busy then snap
-            # to 100% on completion.
+            # 0→100 bar the moment the processor reports per-page progress.
             self.progress.setRange(0, 0)
-            self.status_lbl.setText("Processing…")
+        self._update_progress_detail(0.0)
 
     def _on_fine_progress(self, pct: float) -> None:
         if self.progress.maximum() == 0:        # was the busy/animated bar
             self.progress.setRange(0, 100)
         self.progress.setValue(int(round(pct)))
+        self._update_progress_detail(pct)
 
     def _on_progress(self, done: int, total: int) -> None:
-        # Per-unit counter drives only the status text; the bar uses fine_progress.
-        if total > 1:
-            self.status_lbl.setText(f"Processing {done} / {total}…")
+        # Per-unit counter drives the status text; the bar uses fine_progress.
+        self._update_progress_detail(self.progress.value()
+                                     if self.progress.maximum() else 0.0)
+
+    @staticmethod
+    def _fmt_eta(secs: float) -> str:
+        secs = int(max(0, secs))
+        if secs >= 60:
+            return f"{secs // 60}m {secs % 60:02d}s"
+        return f"{secs}s"
+
+    def _update_progress_detail(self, pct: float) -> None:
+        total = self._run_total or len(self.files) or 1
+        done = sum(1 for p in self.files if self._st(p)["state"] in ("done", "failed"))
+        running = next((p.name for p in self.files
+                        if self._st(p)["state"] == "running"), None)
+        parts = [f"Processing {min(done + 1, total)} / {total} files"]
+        if running:
+            parts.append(f"Current: {running}")
+        if self._run_t0 is not None and pct and pct > 1:
+            import time
+            elapsed = time.monotonic() - self._run_t0
+            remaining = elapsed * (100.0 - pct) / max(pct, 1.0)
+            parts.append(f"ETA {self._fmt_eta(remaining)}")
+        self.status_lbl.setText("   ·   ".join(parts))
 
     def _on_unit_log(self, label: str, message: str) -> None:
         self._log(f"  {label}: {message}")
@@ -546,6 +596,23 @@ class ToolPage(QWidget):
         outputs = summary.get("outputs") or []
         self._last_outputs = list(outputs)
         self.btn_open.setEnabled(bool(outputs))
+
+        # Record recent files + activity for the dashboard, and toast the result.
+        if outputs:
+            try:
+                settings.add_recent_files([str(o) for o in outputs])
+            except Exception:
+                pass
+        ok, failed = summary.get("ok", 0), summary.get("failed", 0)
+        if summary.get("cancelled"):
+            settings.add_activity(f"{self.tool.name} — cancelled")
+        elif failed:
+            settings.add_activity(f"{self.tool.name} — {ok} done, {failed} failed")
+            self.toast.emit(f"{self.tool.name}: {failed} file(s) failed", "error")
+        else:
+            settings.add_activity(f"{self.tool.name} — {ok} file(s) done")
+            self.toast.emit(f"{self.tool.name}: {ok} file(s) done", "ok")
+
         if outputs and settings.open_output_when_done and not summary["cancelled"]:
             self._open_in_explorer(outputs[0])
         self.controller = None

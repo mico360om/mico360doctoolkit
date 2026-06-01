@@ -43,6 +43,8 @@ class Tool:
 PDF = {".pdf"}
 IMAGES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 WORD = {".doc", ".docx", ".odt", ".rtf"}
+EXCEL = {".xlsx", ".xls", ".ods", ".csv"}
+PPT = {".pptx", ".ppt", ".odp"}
 
 _QUALITY_CHOICES = [
     ("low", "Low compression — best quality"),
@@ -162,6 +164,89 @@ TOOLS: list[Tool] = [
         ],
     ),
     Tool(
+        id="pdf_rotate", name="Rotate Pages", icon="🔄",
+        tagline="Rotate all or selected pages.",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_rotate, group="PDF",
+        options=[
+            Option("angle", "Rotate by", "choice", 90, [
+                (90, "90° clockwise"), (180, "180°"), (270, "270° (anti-clockwise)"),
+            ]),
+            Option("pages", "Pages", "text", "all",
+                   hint="e.g. 1-3, 5  ·  'all' for every page"),
+        ],
+    ),
+    Tool(
+        id="pdf_delete", name="Delete Pages", icon="🗑️",
+        tagline="Remove pages from a PDF.",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_delete, group="PDF",
+        options=[
+            Option("pages", "Pages to delete", "text", "", hint="e.g. 2, 5-7"),
+        ],
+    ),
+    Tool(
+        id="pdf_extract", name="Extract Pages", icon="📤",
+        tagline="Save only the pages you choose.",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_extract, group="PDF",
+        options=[
+            Option("pages", "Pages to extract", "text", "",
+                   hint="in output order, e.g. 1-5, 10, 15-20"),
+        ],
+    ),
+    Tool(
+        id="pdf_page_numbers", name="Add Page Numbers", icon="#️⃣",
+        tagline="Stamp page numbers onto every page.",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_page_numbers, group="PDF",
+        options=[
+            Option("position", "Position", "choice", "bottom-center", [
+                ("bottom-center", "Bottom centre"), ("bottom-right", "Bottom right"),
+                ("bottom-left", "Bottom left"), ("top-center", "Top centre"),
+                ("top-right", "Top right"), ("top-left", "Top left"),
+            ]),
+            Option("format", "Style", "choice", "n", [
+                ("n", "1, 2, 3 …"), ("n_of_total", "1 / N"), ("page_n", "Page 1"),
+            ]),
+            Option("start", "Start at", "int", 1, minimum=1, maximum=1000000),
+            Option("font_size", "Font size", "int", 11, minimum=6, maximum=72,
+                   suffix=" pt"),
+        ],
+    ),
+    Tool(
+        id="pdf_sign", name="Sign PDF", icon="✍️",
+        tagline="Stamp a signature image onto the PDF.",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_sign, group="PDF",
+        options=[
+            Option("image_path", "Signature image", "file", "",
+                   hint="A PNG with transparency works best."),
+            Option("page", "Apply to", "choice", "last", [
+                ("last", "Last page"), ("first", "First page"), ("all", "Every page"),
+            ]),
+            Option("position", "Position", "choice", "bottom-right", [
+                ("bottom-right", "Bottom right"), ("bottom-left", "Bottom left"),
+                ("bottom-center", "Bottom centre"), ("top-right", "Top right"),
+                ("top-left", "Top left"), ("top-center", "Top centre"),
+            ]),
+            Option("width", "Size", "int", 25, minimum=5, maximum=100,
+                   suffix=" % of page width"),
+        ],
+    ),
+    Tool(
+        id="pdf_metadata", name="Edit Metadata", icon="🏷️",
+        tagline="Edit title, author, subject and keywords.",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_metadata, group="PDF",
+        options=[
+            Option("title", "Title", "text", "", hint="Leave blank to keep existing."),
+            Option("author", "Author", "text", ""),
+            Option("subject", "Subject", "text", ""),
+            Option("keywords", "Keywords", "text", "", hint="comma,separated"),
+        ],
+    ),
+    Tool(
+        id="pdf_ocr", name="Searchable PDF (OCR)", icon="🔍",
+        tagline="Make scanned PDFs selectable & searchable.",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_ocr, group="PDF",
+        options=[],
+    ),
+    Tool(
         id="pdf_to_word", name="PDF → Word", icon="📝",
         tagline="Convert PDF documents to editable Word (.docx).",
         mode=PER_FILE, accept=PDF, runner=processors.pdf_to_word, group="Convert",
@@ -187,9 +272,27 @@ TOOLS: list[Tool] = [
         ],
     ),
     Tool(
+        id="pdf_to_excel", name="PDF → Excel", icon="📈",
+        tagline="Extract tables from a PDF into an Excel workbook.",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_to_excel, group="Convert",
+        options=[],
+    ),
+    Tool(
         id="word_to_pdf", name="Word → PDF", icon="📄",
         tagline="Convert Word documents to PDF — works out of the box.",
         mode=PER_FILE, accept=WORD, runner=processors.word_to_pdf, group="Convert",
+    ),
+    Tool(
+        id="excel_to_pdf", name="Excel → PDF", icon="📃",
+        tagline="Convert Excel workbooks to PDF (LibreOffice / Office).",
+        mode=PER_FILE, accept=EXCEL, runner=processors.excel_to_pdf, group="Convert",
+        options=[],
+    ),
+    Tool(
+        id="pptx_to_pdf", name="PowerPoint → PDF", icon="📰",
+        tagline="Convert PowerPoint decks to PDF (LibreOffice / Office).",
+        mode=PER_FILE, accept=PPT, runner=processors.pptx_to_pdf, group="Convert",
+        options=[],
     ),
     Tool(
         id="pdf_to_image", name="PDF → Image", icon="🖼️",
@@ -215,7 +318,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="image_compress", name="Compress Image", icon="🏞️",
         tagline="Reduce image file size with quality control.",
-        mode=PER_FILE, accept=IMAGES, runner=processors.image_compress, group="Image",
+        mode=PER_FILE, accept=IMAGES, runner=processors.image_compress, group="Images",
         options=[
             Option("level", "Compression", "choice", "medium", _QUALITY_CHOICES,
                    hint="Higher compression = smaller file, lower fidelity."),
@@ -230,6 +333,62 @@ TOOLS: list[Tool] = [
                 ("webp", "WEBP")]),
             Option("max_dimension", "Max width/height (0 = keep)", "int", 0,
                    minimum=0, maximum=20000, suffix=" px"),
+        ],
+    ),
+    Tool(
+        id="image_resize", name="Resize Image", icon="📐",
+        tagline="Batch-resize images by dimensions or percentage.",
+        mode=PER_FILE, accept=IMAGES, runner=processors.image_resize, group="Images",
+        options=[
+            Option("mode", "Resize by", "choice", "dimensions", [
+                ("dimensions", "Width / height (px)"), ("percent", "Percentage"),
+            ]),
+            Option("width", "Width", "int", 1280, minimum=0, maximum=60000,
+                   suffix=" px", visible_when=("mode", "dimensions")),
+            Option("height", "Height (0 = auto)", "int", 0, minimum=0, maximum=60000,
+                   suffix=" px", visible_when=("mode", "dimensions")),
+            Option("keep_aspect", "Keep aspect ratio", "bool", True,
+                   visible_when=("mode", "dimensions")),
+            Option("percent", "Scale", "int", 50, minimum=1, maximum=1000,
+                   suffix=" %", visible_when=("mode", "percent")),
+        ],
+    ),
+    Tool(
+        id="image_convert", name="Convert Image", icon="🔁",
+        tagline="Change image format (PNG ⇄ JPG ⇄ WEBP ⇄ TIFF).",
+        mode=PER_FILE, accept=IMAGES, runner=processors.image_convert, group="Images",
+        options=[
+            Option("format", "Convert to", "choice", "png", [
+                ("png", "PNG"), ("jpg", "JPEG"), ("webp", "WEBP"),
+                ("tiff", "TIFF"), ("bmp", "BMP"),
+            ]),
+            Option("quality", "Quality", "int", 90, minimum=5, maximum=100,
+                   suffix=" %", hint="Applies to JPEG / WEBP."),
+        ],
+    ),
+    Tool(
+        id="image_watermark", name="Watermark Image", icon="💧",
+        tagline="Stamp text or a logo onto images.",
+        mode=PER_FILE, accept=IMAGES, runner=processors.image_watermark, group="Images",
+        options=[
+            Option("wm_type", "Watermark", "choice", "text", [
+                ("text", "Text"), ("image", "Logo / image"),
+            ]),
+            Option("text", "Watermark text", "text", "CONFIDENTIAL",
+                   visible_when=("wm_type", "text")),
+            Option("image_path", "Logo / image file", "file", "",
+                   hint="A PNG with transparency works best.",
+                   visible_when=("wm_type", "image")),
+            Option("font_size", "Font size", "int", 48, minimum=6, maximum=2000,
+                   suffix=" px", visible_when=("wm_type", "text")),
+            Option("scale", "Size", "int", 40, minimum=5, maximum=100,
+                   suffix=" % of width", visible_when=("wm_type", "image")),
+            Option("color", "Colour", "choice", "gray", [
+                ("gray", "Grey"), ("red", "Red"), ("blue", "Blue"),
+                ("black", "Black"), ("white", "White"),
+            ], visible_when=("wm_type", "text")),
+            Option("opacity", "Opacity", "int", 25, minimum=1, maximum=100, suffix=" %"),
+            Option("rotation", "Angle", "int", 30, minimum=-180, maximum=180, suffix="°"),
         ],
     ),
 ]

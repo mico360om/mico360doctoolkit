@@ -103,8 +103,9 @@ def main() -> int:
     from PySide6.QtWidgets import QLabel
     from mico360.ui.widgets import ResponsiveRow
 
-    w.sidebar.select(0); app.processEvents()      # build the first tool page
-    cont = w._widgets[0]
+    tool_idx = min(w._tool_index.values())        # first actual tool page (Home is 0)
+    w.sidebar.select(tool_idx); app.processEvents()
+    cont = w._widgets[tool_idx]
     page = cont.widget() if isinstance(cont, QScrollArea) else cont
     check("tool page body is a ResponsiveRow", isinstance(page.body, ResponsiveRow))
 

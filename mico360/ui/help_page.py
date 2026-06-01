@@ -8,6 +8,13 @@ from mico360 import __version__
 from mico360.ui.widgets import Card, section_label
 
 _HELP_HTML = """
+<h3>The Dashboard (Home)</h3>
+<p>The app opens on a <b>Dashboard</b>: <b>Quick actions</b> for common jobs,
+<b>Favourite tools</b> you've pinned (click the ☆ on any tool to pin it),
+<b>Recent files</b> you've created, and your <b>Last activity</b>. You can
+<b>drag &amp; drop files anywhere</b> in the window — they're sent to a sensible
+tool automatically.</p>
+
 <h3>Getting started</h3>
 <ol>
   <li><b>Pick a tool</b> from the sidebar on the left (grouped into PDF, Convert and Image).</li>
@@ -52,6 +59,21 @@ _HELP_HTML = """
   <li><b>Watermark PDF</b> — stamp <i>text</i> (e.g. “CONFIDENTIAL”) or a <i>logo/image</i>
       across every page, with adjustable size, opacity and angle. For an image watermark,
       a PNG with transparency works best.</li>
+  <li><b>Rotate / Delete / Extract Pages</b> — quick, dedicated versions of the Organize
+      actions. Give pages 1-based (e.g. <i>1-5, 10, 15-20</i>).</li>
+  <li><b>Add Page Numbers</b> — choose the position, style (<i>1, 2, 3</i> · <i>1 / N</i>
+      · <i>Page 1</i>) and starting number.</li>
+  <li><b>Sign PDF</b> — stamp a signature image on the last/first/every page.</li>
+  <li><b>Edit Metadata</b> — set the document Title, Author, Subject and Keywords.</li>
+  <li><b>Searchable PDF (OCR)</b> — add an invisible text layer to a scanned PDF so it
+      becomes selectable and searchable (the look of the page is unchanged).</li>
+  <li><b>PDF → Excel</b> — pull tables out of a PDF into an Excel workbook (falls back to
+      page text when no tables are found).</li>
+  <li><b>Excel → PDF</b> / <b>PowerPoint → PDF</b> — convert via LibreOffice or Microsoft
+      Office.</li>
+  <li><b>Resize Image</b> — batch-resize by width/height or percentage.</li>
+  <li><b>Convert Image</b> — change format between PNG / JPG / WEBP / TIFF / BMP.</li>
+  <li><b>Watermark Image</b> — stamp text or a logo onto images.</li>
   <li><b>PDF → Word</b> — produces a fully <b>editable .docx</b> (text + layout). For scanned,
       image-only PDFs, turn on <b>OCR</b> to recognise the text.</li>
   <li><b>PDF → PowerPoint</b> — <i>Auto</i> makes editable text boxes where there's a text
@@ -110,8 +132,8 @@ and recovers the text.</p>
 
 <h3>Settings</h3>
 <ul>
-  <li><b>Appearance</b> — switch Light / Dark (also via the ☀/🌙 button in the top bar). On first
-      run the app follows your Windows theme; after that it remembers your choice.</li>
+  <li><b>Appearance</b> — choose <b>System</b> (follow Windows), <b>Light</b> or <b>Dark</b>
+      (the ☀/🌙 button in the top bar pins Light/Dark). Defaults to System on first run.</li>
   <li><b>Output</b> — default output folder, “open the folder when a batch finishes”, and
       overwrite behaviour.</li>
   <li><b>Performance</b> — number of parallel workers (0 = automatic, uses CPU cores − 1).</li>

@@ -38,7 +38,11 @@ def main() -> int:
     check("system_theme returns light/dark", st in ("light", "dark"), st)
 
     saved = settings._s.value("ui/theme", None)
-    settings._s.remove("ui/theme"); settings._s.sync()
+    saved_mode = settings._s.value("ui/theme_mode", None)
+    settings._s.remove("ui/theme"); settings._s.remove("ui/theme_mode")
+    settings._s.sync()
+    check("theme mode defaults to 'system' on first run",
+          settings.theme_mode == "system", settings.theme_mode)
     check("theme defaults to the system mode on first run",
           settings.theme == system_theme(), f"{settings.theme} vs {system_theme()}")
     settings.theme = "light"
@@ -48,6 +52,10 @@ def main() -> int:
         settings._s.remove("ui/theme")
     else:
         settings._s.setValue("ui/theme", saved)
+    if saved_mode is None:
+        settings._s.remove("ui/theme_mode")
+    else:
+        settings._s.setValue("ui/theme_mode", saved_mode)
     settings._s.sync()
 
     # --- borderless checkbox in the stylesheet --------------------------
@@ -65,8 +73,8 @@ def main() -> int:
     check("startup builds only the first page (lazy)", len(w._widgets) == 1,
           f"{len(w._widgets)} pages built at startup")
     from mico360.core.tools import TOOLS
-    check("nav entries = tools + 3 system pages",
-          len(w._titles) == len(TOOLS) + 3, str(len(w._titles)))
+    check("nav entries = Home + tools + 3 system pages",
+          len(w._titles) == len(TOOLS) + 4, str(len(w._titles)))
     # settings/help not built until visited
     check("settings page not built until opened", w.settings_page is None)
 

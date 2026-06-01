@@ -1,12 +1,19 @@
-# MICO360 Doc Toolkit  ·  v5.3
+# MICO360 Doc Toolkit  ·  v5.4
 
-A modern Windows 10/11 desktop app for PDF & image management — compress, merge,
-split, organize, protect, watermark, and convert between PDF, Office, and image
-formats. Clean themed UI, drag-and-drop, bulk/folder processing, multi-threaded
-batches, and activity logs.
+A modern Windows 10/11 desktop app for PDF & image management — a **Dashboard**
+home plus 25 tools to compress, merge, split, organize, protect, watermark, sign,
+OCR, and convert between PDF, Office, and image formats. Clean themed UI,
+drag-and-drop anywhere, bulk/folder processing, multi-threaded batches, toasts and
+activity logs.
 
 ![brand: maroon / black / white]
 
+> **v5.4** — a new **Dashboard** home (quick actions, favourites, recent files,
+> drop-anywhere); new PDF tools (**Rotate / Delete / Extract Pages, Add Page
+> Numbers, Sign, Edit Metadata, Searchable OCR**); new conversions (**PDF→Excel,
+> Excel→PDF, PowerPoint→PDF**); new image tools (**Resize, Convert, Watermark**);
+> **Light/Dark/System** theme, **detailed progress with ETA**, and **toasts**.
+>
 > **v5.3** — **Watermark PDF** can now stamp a **logo / image** (not just text) —
 > choose a picture, size, opacity and angle.
 >
@@ -185,6 +192,8 @@ python tests\updater_test.py             # version compare, release parsing, dow
 python tests\v51_features_test.py        # OCR engine caching, confidence filter, row reconstruction, Help
 python tests\update_ui_test.py           # update check/dialog runs on the GUI thread (no crash)
 python tests\v52_features_test.py        # Organize/Protect/Watermark PDF, page-spec parser, merge reorder
+python tests\v54_features_test.py        # Rotate/Delete/Extract, page numbers, sign, metadata, OCR, Office, image tools
+python tests\v54_ui_test.py              # Dashboard, drop routing, favourites, theme mode, toast
 ```
 
 ## Compatibility

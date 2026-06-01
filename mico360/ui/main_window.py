@@ -48,12 +48,15 @@ class MainWindow(QMainWindow):
         if logo_png.exists():
             self.setWindowIcon(QIcon(str(logo_png)))
 
+        self.setAcceptDrops(True)       # drag & drop anywhere routes to a tool
         self.stack = QStackedWidget()
         self.sidebar = Sidebar()
         self.sidebar.navigated.connect(self._navigate)
         self.log_page = LogPage()       # lightweight; shared by every tool page
         self.settings_page = None       # built lazily on first visit
         self.help_page = None
+        self.dashboard = None           # built lazily on first visit
+        self._toasts: list = []
         self._titles: dict[int, str] = {}
         self._factories: dict[int, object] = {}  # page_index -> builder
         self._widgets: dict[int, QWidget] = {}    # page_index -> built widget
@@ -61,7 +64,7 @@ class MainWindow(QMainWindow):
 
         self._build_pages()
         self._build_layout()
-        self.apply_theme(settings.theme)
+        self._apply_visuals()
         self.sidebar.select_first()
 
         log.info("%s v%s started", __app_name__, __version__)
@@ -99,13 +102,22 @@ class MainWindow(QMainWindow):
         for tool in TOOLS:
             groups.setdefault(tool.group, []).append(tool)
 
-        page_index = 0
+        self._tool_index: dict[str, int] = {}   # tool_id -> page index
+
+        # Home / Dashboard (the default landing page).
+        self.sidebar.add_section("Home")
+        self._factories[0] = self._build_dashboard
+        self.sidebar.add_item("🏠", "Home", 0)
+        self._titles[0] = "Home"
+        page_index = 1
+
         for group_name, tools in groups.items():
             self.sidebar.add_section(group_name)
             for tool in tools:
                 self._factories[page_index] = (lambda t=tool: self._build_tool_page(t))
                 self.sidebar.add_item(tool.icon, tool.name, page_index)
                 self._titles[page_index] = tool.name
+                self._tool_index[tool.id] = page_index
                 page_index += 1
 
         self.sidebar.add_section("System")
@@ -126,10 +138,41 @@ class MainWindow(QMainWindow):
 
         self.sidebar.finish()
 
+    def _build_dashboard(self) -> QWidget:
+        from mico360.ui.dashboard_page import DashboardPage
+        self.dashboard = DashboardPage()
+        self.dashboard.openTool.connect(lambda tid: self.open_tool(tid))
+        self.dashboard.openToolWithFiles.connect(self.open_tool)
+        return self.dashboard
+
     def _build_tool_page(self, tool) -> QWidget:
         page = ToolPage(tool)
         page.activity.connect(self.log_page.append)
+        page.toast.connect(self.show_toast)
         return self._scrollable(page)
+
+    def open_tool(self, tool_id: str, files=None) -> None:
+        """Navigate to a tool by id, optionally pre-loading dropped files."""
+        idx = self._tool_index.get(tool_id)
+        if idx is None:
+            return
+        self.sidebar.select(idx)          # builds + shows the page
+        if files:
+            from pathlib import Path
+            wrap = self._widgets.get(idx)
+            page = wrap.widget() if isinstance(wrap, QScrollArea) else wrap
+            if hasattr(page, "add_paths"):
+                page.add_paths([Path(f) for f in files])
+
+    # --- toast notifications ------------------------------------------
+    def show_toast(self, message: str, kind: str = "ok") -> None:
+        from mico360.ui.widgets import Toast
+        if not hasattr(self, "_toasts"):
+            self._toasts = []
+        self._toasts = [t for t in self._toasts if t.isVisible()]
+        toast = Toast(self, message, kind)
+        toast.show_at(offset=26 * len(self._toasts))
+        self._toasts.append(toast)
 
     def _build_settings_page(self) -> QWidget:
         self.settings_page = SettingsPage()
@@ -207,6 +250,23 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(widget)
         self.stack.setCurrentWidget(widget)
         self.top_title.setText(self._titles.get(page_index, ""))
+        if page_index == 0 and getattr(self, "dashboard", None) is not None:
+            self.dashboard.refresh()    # show the latest recents / favourites
+
+    # --- drag & drop anywhere -----------------------------------------
+    def dragEnterEvent(self, event):  # noqa: N802
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):  # noqa: N802
+        from mico360.ui.dashboard_page import route_for
+        paths = [u.toLocalFile() for u in event.mimeData().urls() if u.toLocalFile()]
+        if not paths:
+            return
+        tool = route_for(paths)
+        if tool:
+            self.open_tool(tool, paths)
+            event.acceptProposedAction()
 
     def _toggle_sidebar(self) -> None:
         self.sidebar.set_collapsed(not self.sidebar.collapsed)
@@ -216,12 +276,18 @@ class MainWindow(QMainWindow):
         return "☀" if settings.theme == "dark" else "🌙"
 
     def _toggle_theme(self) -> None:
+        # The top-bar button pins an explicit light/dark (overriding 'system').
         self.apply_theme("light" if settings.theme == "dark" else "dark")
         if self.settings_page is not None:
             self.settings_page.sync_theme_combo()
 
-    def apply_theme(self, theme: str) -> None:
-        settings.theme = theme
+    def apply_theme(self, mode: str) -> None:
+        """Persist the theme *mode* ('system'|'light'|'dark') and repaint."""
+        settings.theme_mode = mode
+        self._apply_visuals()
+
+    def _apply_visuals(self) -> None:
+        theme = settings.theme  # effective light/dark (resolves 'system')
         app = QApplication.instance()
         if app:
             app.setStyleSheet(stylesheet(theme))

@@ -51,19 +51,51 @@ class Settings:
         except (TypeError, ValueError):
             pass
 
+    # --- JSON helpers ----------------------------------------------------
+    def _get_json(self, key: str, default):
+        raw = self._get(key, "", str)
+        if not raw:
+            return default
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return default
+
+    def _set_json(self, key: str, value) -> None:
+        try:
+            self._set(key, json.dumps(value))
+        except (TypeError, ValueError):
+            pass
+
     # --- typed properties ------------------------------------------------
     @property
+    def theme_mode(self) -> str:
+        """'system' | 'light' | 'dark'. Defaults to 'system' on first run; an
+        older saved ui/theme is migrated to an explicit light/dark pin."""
+        if self._s.contains("ui/theme_mode"):
+            return self._get("ui/theme_mode", "system", str)
+        if self._s.contains("ui/theme"):
+            return self._get("ui/theme", "dark", str)
+        return "system"
+
+    @theme_mode.setter
+    def theme_mode(self, value: str) -> None:
+        self._set("ui/theme_mode", value if value in ("system", "light", "dark")
+                  else "system")
+
+    @property
     def theme(self) -> str:
-        # Default to the OS appearance on first run; once the user picks a theme
-        # it is remembered (saved) and used from then on.
-        if not self._s.contains("ui/theme"):
+        """The *effective* theme ('light' or 'dark'), resolving 'system'."""
+        mode = self.theme_mode
+        if mode == "system":
             from mico360.theme import system_theme
             return system_theme()
-        return self._get("ui/theme", "dark", str)
+        return mode if mode in ("light", "dark") else "dark"
 
     @theme.setter
     def theme(self, value: str) -> None:
-        self._set("ui/theme", value)
+        # Setting an explicit theme pins light/dark (e.g. the top-bar toggle).
+        self.theme_mode = value
 
     @property
     def output_dir(self) -> str:
@@ -128,6 +160,58 @@ class Settings:
     @libreoffice_path.setter
     def libreoffice_path(self, value: str) -> None:
         self._set("deps/libreoffice", value)
+
+    # --- dashboard / home data ------------------------------------------
+    _DEFAULT_FAVS = ["pdf_compress", "pdf_merge", "pdf_to_word", "image_compress"]
+
+    @property
+    def favorite_tools(self) -> list:
+        v = self._get_json("home/favorites", None)
+        return v if isinstance(v, list) else list(self._DEFAULT_FAVS)
+
+    @favorite_tools.setter
+    def favorite_tools(self, value) -> None:
+        self._set_json("home/favorites", list(value))
+
+    def toggle_favorite(self, tool_id: str) -> bool:
+        """Pin/unpin a tool. Returns the new pinned state."""
+        favs = self.favorite_tools
+        if tool_id in favs:
+            favs.remove(tool_id)
+            pinned = False
+        else:
+            favs.append(tool_id)
+            pinned = True
+        self.favorite_tools = favs
+        return pinned
+
+    @property
+    def recent_files(self) -> list:
+        v = self._get_json("home/recent_files", [])
+        return v if isinstance(v, list) else []
+
+    def add_recent_files(self, paths, cap: int = 12) -> None:
+        cur = self.recent_files
+        for p in paths:
+            p = str(p)
+            if p in cur:
+                cur.remove(p)
+            cur.insert(0, p)
+        self._set_json("home/recent_files", cur[:cap])
+
+    def clear_recent(self) -> None:
+        self._set_json("home/recent_files", [])
+        self._set_json("home/recent_activity", [])
+
+    @property
+    def recent_activity(self) -> list:
+        v = self._get_json("home/recent_activity", [])
+        return v if isinstance(v, list) else []
+
+    def add_activity(self, line: str, cap: int = 10) -> None:
+        cur = self.recent_activity
+        cur.insert(0, str(line))
+        self._set_json("home/recent_activity", cur[:cap])
 
 
 settings = Settings()

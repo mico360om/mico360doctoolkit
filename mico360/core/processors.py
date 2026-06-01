@@ -1301,3 +1301,545 @@ def _image_compress_to_target(im, out: Path, ext: str, target_bytes: int,
         best = _encode_image(im, ext, 5)
     out.write_bytes(best)
     return len(best)
+
+
+# =========================================================================
+# v5.4 — dedicated page tools, page numbers, sign, metadata, searchable OCR
+# =========================================================================
+def _open_reader(src: Path):
+    from pypdf import PdfReader
+    try:
+        reader = PdfReader(str(src))
+        return reader, len(reader.pages)
+    except Exception as exc:
+        raise ProcessError(f"Couldn't read '{src.name}' — it may be corrupt or "
+                           f"password-protected ({exc}).")
+
+
+def _write_pdf(writer, src: Path, out_dir: Path, opt: dict, suffix: str,
+               report: Report) -> list[Path]:
+    out = build_output_path(src, out_dir, ".pdf", name_suffix=suffix,
+                            overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+    with open(out, "wb") as fh:
+        writer.write(fh)
+    report(f"Saved {len(writer.pages)} page(s) → {out.name}")
+    return [out]
+
+
+def pdf_rotate(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    from pypdf import PdfWriter
+    reader, n = _open_reader(src)
+    angle = _clampi(opt.get("angle", 90), -270, 270, 90)
+    if angle % 90 != 0:
+        raise ProcessError("Rotation must be a multiple of 90°.")
+    targets = _page_set(opt.get("pages", "all"), n, default_all=True)
+    writer = PdfWriter()
+    for i in range(n):
+        page = reader.pages[i]
+        if i in targets:
+            page.rotate(angle)
+        writer.add_page(page)
+        _progress(report, i + 1, n)
+    return _write_pdf(writer, src, out_dir, opt, "_rotated", report)
+
+
+def pdf_delete(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    from pypdf import PdfWriter
+    reader, n = _open_reader(src)
+    remove = _page_set(opt.get("pages", ""), n)
+    if not remove:
+        raise ProcessError("Enter the page(s) to delete, e.g. 2, 5-7.")
+    kept = [i for i in range(n) if i not in remove]
+    if not kept:
+        raise ProcessError("That would delete every page.")
+    writer = PdfWriter()
+    for j, i in enumerate(kept):
+        writer.add_page(reader.pages[i])
+        _progress(report, j + 1, len(kept))
+    return _write_pdf(writer, src, out_dir, opt, "_pages-removed", report)
+
+
+def pdf_extract(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    from pypdf import PdfWriter
+    reader, n = _open_reader(src)
+    order = _page_list(opt.get("pages", ""), n)
+    if not order:
+        raise ProcessError("Enter the pages to extract, e.g. 1-5, 10, 15-20.")
+    writer = PdfWriter()
+    for j, i in enumerate(order):
+        writer.add_page(reader.pages[i])
+        _progress(report, j + 1, len(order))
+    return _write_pdf(writer, src, out_dir, opt, "_extracted", report)
+
+
+# (halign, valign) for each named position
+_PN_POS = {
+    "bottom-center": ("center", "bottom"), "bottom-right": ("right", "bottom"),
+    "bottom-left": ("left", "bottom"), "top-center": ("center", "top"),
+    "top-right": ("right", "top"), "top-left": ("left", "top"),
+}
+
+
+def pdf_page_numbers(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    import fitz
+    fmt = opt.get("format", "n")
+    halign, valign = _PN_POS.get(opt.get("position", "bottom-center"),
+                                 ("center", "bottom"))
+    size = _clampi(opt.get("font_size", 11), 6, 72, 11)
+    start = _clampi(opt.get("start", 1), 1, 1000000, 1)
+    margin = 28
+    try:
+        doc = fitz.open(str(src))
+    except Exception as exc:
+        raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
+    try:
+        total = doc.page_count
+        for i, page in enumerate(doc):
+            _check_cancel(report)
+            num = start + i
+            label = ({"n_of_total": f"{num} / {total}", "page_n": f"Page {num}"}
+                     .get(fmt, str(num)))
+            rect = page.rect
+            tlen = fitz.get_text_length(label, fontname="helv", fontsize=size)
+            if halign == "left":
+                x = margin
+            elif halign == "right":
+                x = rect.width - margin - tlen
+            else:
+                x = (rect.width - tlen) / 2.0
+            y = margin + size if valign == "top" else rect.height - margin
+            page.insert_text(fitz.Point(x, y), label, fontsize=size,
+                             fontname="helv", color=(0, 0, 0))
+            _progress(report, i + 1, total)
+        out = build_output_path(src, out_dir, ".pdf", name_suffix="_numbered",
+                                overwrite=opt.get("overwrite", False),
+                                numbered=opt.get("same_as_source", False))
+        doc.save(str(out), garbage=3, deflate=True)
+    finally:
+        doc.close()
+    report(f"Numbered {total} page(s) → {out.name}")
+    return [out]
+
+
+def pdf_sign(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    """Stamp a signature/image onto a chosen page (or all pages)."""
+    import fitz
+
+    raw = (opt.get("image_path") or "").strip()
+    if not raw:
+        raise ProcessError("Choose a signature image.")
+    sigpath = Path(raw)
+    if not sigpath.exists():
+        raise ProcessError(f"Signature image not found: {raw}")
+    halign, valign = _PN_POS.get(opt.get("position", "bottom-right"),
+                                 ("right", "bottom"))
+    width_pct = _clampi(opt.get("width", 25), 5, 100, 25) / 100.0
+    which = opt.get("page", "last")  # last | first | all
+    margin = 24
+    try:
+        doc = fitz.open(str(src))
+    except Exception as exc:
+        raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
+    try:
+        from PIL import Image
+        with Image.open(sigpath) as im:
+            ratio = (im.height / im.width) if im.width else 0.4
+        if which == "first":
+            pages = [0]
+        elif which == "all":
+            pages = list(range(doc.page_count))
+        else:
+            pages = [doc.page_count - 1]
+        for n, pidx in enumerate(pages):
+            _check_cancel(report)
+            page = doc[pidx]
+            rect = page.rect
+            w = rect.width * width_pct
+            h = w * ratio
+            x0 = (margin if halign == "left"
+                  else rect.width - margin - w if halign == "right"
+                  else (rect.width - w) / 2.0)
+            y0 = (margin if valign == "top" else rect.height - margin - h)
+            box = fitz.Rect(x0, y0, x0 + w, y0 + h)
+            page.insert_image(box, filename=str(sigpath), overlay=True,
+                              keep_proportion=True)
+            _progress(report, n + 1, len(pages))
+        out = build_output_path(src, out_dir, ".pdf", name_suffix="_signed",
+                                overwrite=opt.get("overwrite", False),
+                                numbered=opt.get("same_as_source", False))
+        doc.save(str(out), garbage=3, deflate=True)
+    finally:
+        doc.close()
+    report(f"Signed → {out.name}")
+    return [out]
+
+
+def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    from pypdf import PdfReader, PdfWriter
+    reader, _ = _open_reader(src)
+    writer = PdfWriter()
+    writer.append(reader)
+    existing = dict(reader.metadata or {})
+    fields = {"/Title": "title", "/Author": "author",
+              "/Subject": "subject", "/Keywords": "keywords"}
+    meta = {}
+    changed = []
+    for pdfkey, optkey in fields.items():
+        val = opt.get(optkey, None)
+        if val is None or str(val).strip() == "":
+            if existing.get(pdfkey):
+                meta[pdfkey] = existing[pdfkey]   # keep what's there
+        else:
+            meta[pdfkey] = str(val)
+            changed.append(optkey)
+    try:
+        writer.add_metadata(meta)
+    except Exception as exc:
+        raise ProcessError(f"Couldn't write metadata ({exc}).")
+    out = build_output_path(src, out_dir, ".pdf", name_suffix="_metadata",
+                            overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+    with open(out, "wb") as fh:
+        writer.write(fh)
+    report(f"Updated metadata ({', '.join(changed) or 'no changes'}) → {out.name}")
+    return [out]
+
+
+def pdf_ocr(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    """Make a scanned PDF searchable by overlaying an invisible OCR text layer."""
+    import fitz
+
+    engine = _make_ocr_engine()
+    try:
+        doc = fitz.open(str(src))
+    except Exception as exc:
+        raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
+    try:
+        added = 0
+        for i, page in enumerate(doc):
+            _check_cancel(report)
+            if _page_has_text(page):
+                report(f"Page {i + 1}: already has text — kept")
+                _progress(report, i + 1, doc.page_count)
+                continue
+            report(f"OCR page {i + 1}/{doc.page_count}…")
+            for text, (x0, y0, x1, y1) in _ocr_page_lines(engine, page):
+                fontsize = max(4.0, (y1 - y0) * 0.9)
+                # render_mode=3 → invisible text (selectable/searchable only)
+                page.insert_text(fitz.Point(x0, y1), text, fontsize=fontsize,
+                                 fontname="helv", render_mode=3)
+                added += 1
+            _progress(report, i + 1, doc.page_count)
+        out = build_output_path(src, out_dir, ".pdf", name_suffix="_searchable",
+                                overwrite=opt.get("overwrite", False),
+                                numbered=opt.get("same_as_source", False))
+        doc.save(str(out), garbage=3, deflate=True)
+    finally:
+        doc.close()
+    report(f"Added a searchable text layer ({added} snippets) → {out.name}")
+    return [out]
+
+
+# =========================================================================
+# v5.4 — Office conversions (PDF↔Excel, Excel→PDF, PowerPoint→PDF)
+# =========================================================================
+def _sanitize_sheet(name: str) -> str:
+    for ch in r"[]:*?/\\":
+        name = name.replace(ch, " ")
+    return (name.strip() or "Sheet")[:31]
+
+
+def pdf_to_excel(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    """Extract tables from a PDF into an .xlsx (one sheet per table); falls back
+    to page text when no tables are detected."""
+    import pdfplumber
+    from openpyxl import Workbook
+
+    out = build_output_path(src, out_dir, ".xlsx", overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+    wb = Workbook()
+    wb.remove(wb.active)
+    tables_found = 0
+    try:
+        with pdfplumber.open(str(src)) as pdf:
+            total = len(pdf.pages) or 1
+            for pi, page in enumerate(pdf.pages):
+                _check_cancel(report)
+                report(f"Scanning page {pi + 1}/{total} for tables…")
+                for ti, table in enumerate(page.extract_tables() or []):
+                    ws = wb.create_sheet(_sanitize_sheet(f"P{pi + 1}_T{ti + 1}"))
+                    for row in table:
+                        ws.append([("" if c is None else str(c)) for c in row])
+                    tables_found += 1
+                _progress(report, pi + 1, total)
+            if not tables_found:
+                report("No tables detected — exporting page text instead.")
+                for pi, page in enumerate(pdf.pages):
+                    ws = wb.create_sheet(_sanitize_sheet(f"Page {pi + 1}"))
+                    for line in (page.extract_text() or "").splitlines():
+                        ws.append([line])
+    except Exception as exc:
+        raise ProcessError(f"Couldn't read '{src.name}' ({exc}).")
+    if not wb.sheetnames:
+        wb.create_sheet("Empty")
+    wb.save(str(out))
+    report(f"{tables_found} table(s) → {out.name}" if tables_found
+           else f"Text export → {out.name}")
+    return [out]
+
+
+def _lo_convert_to_pdf(soffice: str, src: Path, out_dir: Path, final: Path,
+                       report: Report) -> None:
+    report("LibreOffice converting to PDF…")
+    args = [soffice, "--headless", "--norestore", "--convert-to", "pdf",
+            "--outdir", str(out_dir), str(src)]
+    proc = run_subprocess(args, timeout=300)
+    produced = out_dir / f"{src.stem}.pdf"
+    if proc.returncode != 0 or not produced.exists():
+        raise RuntimeError((proc.stderr or proc.stdout or "no output").strip()[:200])
+    if produced != final:
+        if final.exists():
+            final.unlink()
+        produced.rename(final)
+
+
+def _office_com_to_pdf(app_name: str, src: Path, final: Path) -> bool:
+    """Use Microsoft Office (Excel/PowerPoint) via COM if installed."""
+    try:
+        import win32com.client as win32
+    except Exception:
+        return False
+    import pythoncom
+    pythoncom.CoInitialize()
+    app = None
+    try:
+        app = win32.DispatchEx(app_name)
+        src_s, final_s = str(src.resolve()), str(final.resolve())
+        if app_name.startswith("Excel"):
+            try:
+                app.Visible = False
+            except Exception:
+                pass
+            app.DisplayAlerts = False
+            wb = app.Workbooks.Open(src_s, ReadOnly=True)
+            wb.ExportAsFixedFormat(0, final_s)   # 0 = xlTypePDF
+            wb.Close(False)
+        else:  # PowerPoint
+            pres = app.Presentations.Open(src_s, WithWindow=False)
+            pres.SaveAs(final_s, 32)             # 32 = ppSaveAsPDF
+            pres.Close()
+        return final.exists()
+    finally:
+        try:
+            if app is not None:
+                app.Quit()
+        except Exception:
+            pass
+        pythoncom.CoUninitialize()
+
+
+def _office_to_pdf(src: Path, out_dir: Path, opt: dict, report: Report,
+                   com_app: str) -> list[Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    final = build_output_path(src, out_dir, ".pdf", overwrite=opt.get("overwrite", False),
+                              numbered=opt.get("same_as_source", False))
+    errors: list[str] = []
+    soffice = find_libreoffice()
+    if soffice:
+        try:
+            _lo_convert_to_pdf(soffice, src, out_dir, final, report)
+            return [final]
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"LibreOffice: {exc}")
+    try:
+        report(f"Trying Microsoft Office…")
+        if _office_com_to_pdf(com_app, src, final):
+            return [final]
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"MS Office: {exc}")
+    raise ProcessError(
+        "Converting to PDF needs LibreOffice (recommended) or Microsoft Office. "
+        "Install LibreOffice or set its path in Settings → External tools."
+        + (f"\nDetails: {'; '.join(errors)}" if errors else ""))
+
+
+def excel_to_pdf(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    return _office_to_pdf(src, out_dir, opt, report, "Excel.Application")
+
+
+def pptx_to_pdf(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    return _office_to_pdf(src, out_dir, opt, report, "PowerPoint.Application")
+
+
+# =========================================================================
+# v5.4 — dedicated image tools: Resize, Convert, Watermark
+# =========================================================================
+def _save_image(im, out: Path, fmt: str, quality: int = 90) -> None:
+    """Save *im* to *out* in *fmt* (jpg/png/webp/tiff/bmp), handling mode."""
+    fmt = fmt.lower()
+    if fmt in ("jpg", "jpeg"):
+        if im.mode != "RGB":
+            im = im.convert("RGB")
+        im.save(out, "JPEG", quality=quality, optimize=True, progressive=True)
+    elif fmt == "webp":
+        im.save(out, "WEBP", quality=quality, method=6)
+    elif fmt == "png":
+        if im.mode not in ("RGBA", "RGB", "P", "L"):
+            im = im.convert("RGBA")
+        im.save(out, "PNG", optimize=True)
+    elif fmt in ("tif", "tiff"):
+        im.save(out, "TIFF")
+    elif fmt == "bmp":
+        if im.mode not in ("RGB", "L", "P"):
+            im = im.convert("RGB")
+        im.save(out, "BMP")
+    else:
+        im.save(out)
+
+
+_IMG_EXT = {"jpg": ".jpg", "jpeg": ".jpg", "png": ".png", "webp": ".webp",
+            "tiff": ".tiff", "tif": ".tiff", "bmp": ".bmp"}
+
+
+def image_resize(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    from PIL import Image
+
+    if src.suffix.lower() not in IMAGE_EXTS:
+        raise ProcessError(f"Unsupported image type: {src.suffix}")
+    try:
+        im = Image.open(src)
+        im.load()
+    except Exception as exc:
+        raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
+    w, h = im.size
+    mode = opt.get("mode", "dimensions")
+    if mode == "percent":
+        pct = _clampi(opt.get("percent", 50), 1, 1000, 50) / 100.0
+        nw, nh = max(1, int(w * pct)), max(1, int(h * pct))
+    else:
+        tw = _clampi(opt.get("width", 0), 0, 60000, 0)
+        th = _clampi(opt.get("height", 0), 0, 60000, 0)
+        keep = bool(opt.get("keep_aspect", True))
+        if not tw and not th:
+            raise ProcessError("Enter a width and/or height (px).")
+        if tw and th and not keep:
+            nw, nh = tw, th
+        elif tw and th:
+            r = min(tw / w, th / h)
+            nw, nh = max(1, int(w * r)), max(1, int(h * r))
+        elif tw:
+            nw, nh = tw, max(1, int(h * tw / w))
+        else:
+            nh, nw = th, max(1, int(w * th / h))
+    im = im.resize((nw, nh), Image.LANCZOS)
+    ext = src.suffix.lower()
+    if ext not in IMAGE_EXTS:
+        ext = ".png"
+    out = build_output_path(src, out_dir, ext, name_suffix="_resized",
+                            overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+    _save_image(im, out, ext.lstrip("."), _clampi(opt.get("quality", 90), 5, 100, 90))
+    report(f"{w}×{h} → {nw}×{nh}  ({out.name})")
+    return [out]
+
+
+def image_convert(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    from PIL import Image
+
+    if src.suffix.lower() not in IMAGE_EXTS:
+        raise ProcessError(f"Unsupported image type: {src.suffix}")
+    fmt = opt.get("format", "png")
+    ext = _IMG_EXT.get(fmt, ".png")
+    try:
+        im = Image.open(src)
+        im.load()
+    except Exception as exc:
+        raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
+    out = build_output_path(src, out_dir, ext, overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+    _save_image(im, out, fmt, _clampi(opt.get("quality", 90), 5, 100, 90))
+    report(f"{src.suffix.lstrip('.').upper()} → {ext.lstrip('.').upper()}  ({out.name})")
+    return [out]
+
+
+def _load_font(size: int):
+    from PIL import ImageFont
+    for name in ("arial.ttf", "Arial.ttf", "DejaVuSans.ttf",
+                 r"C:\Windows\Fonts\arial.ttf", r"C:\Windows\Fonts\segoeui.ttf"):
+        try:
+            return ImageFont.truetype(name, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def image_watermark(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    """Stamp text or a logo across the centre of an image."""
+    from PIL import Image
+
+    if src.suffix.lower() not in IMAGE_EXTS:
+        raise ProcessError(f"Unsupported image type: {src.suffix}")
+    try:
+        base = Image.open(src).convert("RGBA")
+    except Exception as exc:
+        raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
+    opacity = _clampi(opt.get("opacity", 25), 1, 100, 25) / 100.0
+    rotation = _clampi(opt.get("rotation", 30), -180, 180, 30)
+    bw, bh = base.size
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+
+    if opt.get("wm_type", "text") == "image":
+        raw = (opt.get("image_path") or "").strip()
+        if not raw or not Path(raw).exists():
+            raise ProcessError("Choose a logo / image for the watermark.")
+        try:
+            logo = Image.open(raw).convert("RGBA")
+        except Exception as exc:
+            raise ProcessError(f"Couldn't open logo ({exc}).")
+        scale = _clampi(opt.get("scale", 40), 5, 100, 40) / 100.0
+        tw = max(1, int(bw * scale))
+        th = max(1, int(logo.height * tw / logo.width))
+        logo = logo.resize((tw, th), Image.LANCZOS)
+        if opacity < 1.0:
+            logo.putalpha(logo.split()[3].point(lambda a: int(a * opacity)))
+        if rotation % 360:
+            logo = logo.rotate(rotation, expand=True, resample=Image.BICUBIC)
+        overlay.alpha_composite(logo, ((bw - logo.width) // 2, (bh - logo.height) // 2))
+    else:
+        from PIL import ImageDraw
+        text = (opt.get("text") or "").strip()
+        if not text:
+            raise ProcessError("Enter the watermark text.")
+        size = _clampi(opt.get("font_size", max(24, bw // 12)), 6, 2000,
+                       max(24, bw // 12))
+        font = _load_font(size)
+        col = {"gray": (128, 128, 128), "red": (200, 30, 30),
+               "blue": (33, 70, 160), "black": (0, 0, 0),
+               "white": (255, 255, 255)}.get(opt.get("color", "gray"),
+                                             (128, 128, 128))
+        alpha = int(opacity * 255)
+        tmp = Image.new("RGBA", base.size, (0, 0, 0, 0))
+        d = ImageDraw.Draw(tmp)
+        try:
+            box = d.textbbox((0, 0), text, font=font)
+            tw, th = box[2] - box[0], box[3] - box[1]
+        except Exception:
+            tw, th = d.textlength(text, font=font), size
+        d.text(((bw - tw) / 2, (bh - th) / 2), text, font=font, fill=col + (alpha,))
+        if rotation % 360:
+            tmp = tmp.rotate(rotation, expand=False, resample=Image.BICUBIC)
+        overlay = tmp
+
+    out_img = Image.alpha_composite(base, overlay)
+    ext = src.suffix.lower()
+    if ext in (".jpg", ".jpeg", ".bmp"):
+        out_img = out_img.convert("RGB")
+    out = build_output_path(src, out_dir, ext if ext in IMAGE_EXTS else ".png",
+                            name_suffix="_watermarked",
+                            overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+    _save_image(out_img, out, (ext.lstrip(".") or "png"),
+                _clampi(opt.get("quality", 90), 5, 100, 90))
+    report(f"Watermarked → {out.name}")
+    return [out]

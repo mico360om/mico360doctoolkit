@@ -168,9 +168,10 @@ class SettingsPage(QWidget):
         row = QHBoxLayout()
         row.addWidget(QLabel("Theme"))
         self.theme_combo = QComboBox()
-        self.theme_combo.addItem("Dark", "dark")
+        self.theme_combo.addItem("System", "system")
         self.theme_combo.addItem("Light", "light")
-        self.theme_combo.setCurrentIndex(0 if settings.theme == "dark" else 1)
+        self.theme_combo.addItem("Dark", "dark")
+        self.sync_theme_combo()
         self.theme_combo.currentIndexChanged.connect(
             lambda: self.themeChanged.emit(self.theme_combo.currentData()))
         row.addWidget(self.theme_combo)
@@ -179,10 +180,11 @@ class SettingsPage(QWidget):
         return card
 
     def sync_theme_combo(self) -> None:
-        """Reflect the current theme without re-emitting themeChanged
+        """Reflect the current theme mode without re-emitting themeChanged
         (used when the theme is toggled from the top bar)."""
         self.theme_combo.blockSignals(True)
-        self.theme_combo.setCurrentIndex(0 if settings.theme == "dark" else 1)
+        idx = self.theme_combo.findData(settings.theme_mode)
+        self.theme_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.theme_combo.blockSignals(False)
 
     def _output_card(self) -> Card:

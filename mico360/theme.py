@@ -289,7 +289,34 @@ QRadioButton::indicator:checked {{ background: {c['primary']}; border: 5px solid
 }}
 #DropTitle {{ font-size: 15px; font-weight: 700; color: {c['text']}; }}
 #DropHint {{ color: {c['text_muted']}; font-size: 12px; }}
+#DropFormats {{ color: {c['text_faint']}; font-size: 11px; }}
 #DropGlyph {{ color: {c['primary']}; }}
+
+/* =================== Toast notifications =================== */
+#Toast {{
+    background-color: {c['surface_2']};
+    border: 1px solid {c['border']};
+    border-left: 4px solid {c['primary']};
+    border-radius: {RADIUS_SM}px;
+}}
+#Toast[toastKind="ok"] {{ border-left-color: {c['success']}; }}
+#Toast[toastKind="error"] {{ border-left-color: {c['error']}; }}
+#Toast[toastKind="info"] {{ border-left-color: {c['info']}; }}
+#ToastText {{ color: {c['text']}; font-size: 13px; font-weight: 600; }}
+
+/* =================== Dashboard =================== */
+#DashTile {{
+    background-color: {c['surface_2']};
+    border: 1px solid {c['border']};
+    border-radius: {RADIUS}px;
+}}
+#DashTile:hover {{ border-color: {c['primary']}; }}
+#DashTileIcon {{ font-size: 22px; }}
+#DashTileName {{ color: {c['text']}; font-size: 13px; font-weight: 700; }}
+#DashGreeting {{ color: {c['text']}; font-size: 22px; font-weight: 800; }}
+#FavStar {{ color: {c['text_faint']}; border: none; background: transparent; font-size: 16px; }}
+#FavStar:hover {{ color: {c['primary']}; }}
+#RecentLink {{ color: {c['text']}; }}
 
 /* =================== Lists / tables =================== */
 QListWidget#FileList {{
