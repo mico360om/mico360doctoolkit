@@ -91,18 +91,49 @@ def _run_in_thread(parent, worker: QObject) -> QThread:
     return thread
 
 
-def start_check(parent, on_found, on_up_to_date=None, on_failed=None) -> QThread:
-    worker = CheckWorker()
-    thread = _run_in_thread(parent, worker)
+class _CheckController(QObject):
+    """Runs a CheckWorker on a background thread and delivers the result to the
+    callbacks **on the GUI thread**.
 
-    def finish(fn, *args):
-        if fn:
-            fn(*args)
-        thread.quit()
-    worker.found.connect(lambda info: finish(on_found, info))
-    worker.up_to_date.connect(lambda: finish(on_up_to_date))
-    worker.failed.connect(lambda msg: finish(on_failed, msg))
-    return thread
+    This object is parented to a main-thread widget and is NOT moved to the
+    worker thread, so the worker's cross-thread signals are delivered to these
+    slots via Qt's automatic queued connection — i.e. the callbacks (and any
+    widgets they create, like the update dialog) run on the GUI thread.
+    """
+
+    def __init__(self, parent, on_found, on_up_to_date, on_failed):
+        super().__init__(parent)
+        self._callbacks = (on_found, on_up_to_date, on_failed)
+        self._thread = QThread(self)
+        self._worker = CheckWorker()
+        self._worker.moveToThread(self._thread)
+        self._thread.started.connect(self._worker.run)
+        self._worker.found.connect(self._on_found)
+        self._worker.up_to_date.connect(self._on_up_to_date)
+        self._worker.failed.connect(self._on_failed)
+        self._thread.start()
+
+    def _finish(self, index: int, *args) -> None:
+        self._thread.quit()
+        self._thread.wait(3000)
+        cb = self._callbacks[index]
+        if cb:
+            cb(*args)
+        self.deleteLater()
+
+    def _on_found(self, info) -> None:
+        self._finish(0, info)
+
+    def _on_up_to_date(self) -> None:
+        self._finish(1)
+
+    def _on_failed(self, msg: str) -> None:
+        self._finish(2, msg)
+
+
+def start_check(parent, on_found, on_up_to_date=None, on_failed=None) -> "_CheckController":
+    """Check for updates off the GUI thread; deliver results on the GUI thread."""
+    return _CheckController(parent, on_found, on_up_to_date, on_failed)
 
 
 # --- dialog --------------------------------------------------------------

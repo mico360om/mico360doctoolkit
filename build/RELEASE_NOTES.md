@@ -1,18 +1,18 @@
-## MICO360 Doc Toolkit v5.1.0
+## MICO360 Doc Toolkit v5.1.1
 
-**Better OCR and a more helpful Help.**
+**Critical fix: the auto-update window.**
 
-- **Smarter OCR for scanned PDFs** (PDF → Word / PowerPoint):
-  - Recognises at a higher resolution for noticeably better accuracy on small text.
-  - Filters out low-confidence noise, so you get cleaner results.
-  - Rebuilds text in proper reading order — words on a line stay together and
-    clear gaps become paragraph breaks, so the Word output reads naturally.
-  - Loads the OCR engine once and reuses it, so batches of scanned files are faster.
-- **Expanded Help** — new sections on OCR, staying up to date (auto-update), and
-  keyboard & mouse shortcuts, plus clearer per-tool guidance.
+- Fixed a crash where checking for updates could show a blank window and close the
+  app. The update check runs in the background, and its result (and the update
+  dialog) now correctly run on the app's main thread.
 
-Includes the v5.0 built-in auto-update: the app checks GitHub for new releases,
-verifies them with SHA-256, and upgrades in place — keeping your settings.
+> If you're on v5.0.0 or v5.1.0 and the in-app updater doesn't work, download and
+> run this installer once from the releases page; auto-update works normally from
+> v5.1.1 onward.
+
+Also includes everything from v5.1: improved OCR for scanned PDFs (higher-resolution
+recognition, low-confidence noise filtered out, text rebuilt in proper reading
+order, engine loaded once for faster batches) and an expanded Help.
 
 ---
 *This release is also the update manifest: the tag is the version, this text is the
