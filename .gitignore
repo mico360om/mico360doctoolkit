@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Build artifacts
+build/_work/
+build/_work_onefile/
+build/_build_v5.ps1
+build/_build_v5.log
+dist/
+*.spec.bak
+*.tmp
+*.tmp.*
+
+# Bundled engines (large binaries — provide separately, see vendor/README.md)
+vendor/ghostscript/
+vendor/libreoffice/
+
+# OS / IDE
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
+
+# App runtime
+*.log
