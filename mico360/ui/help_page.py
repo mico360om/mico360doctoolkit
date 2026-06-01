@@ -17,7 +17,9 @@ tool automatically.</p>
 
 <h3>Getting started</h3>
 <ol>
-  <li><b>Pick a tool</b> from the sidebar on the left (grouped into PDF, Convert and Image).</li>
+  <li><b>Pick a tool</b> from the sidebar on the left (grouped into PDF, Convert and Images).
+      <b>Search</b> for a tool with the box at the top of the sidebar, and click a
+      <b>category heading</b> to collapse or expand it.</li>
   <li><b>Add your files</b> — drag &amp; drop files or whole folders onto the drop zone, or
       click <b>Browse files</b> / <b>Browse folder</b>. Folders are scanned recursively, and
       only the file types that tool accepts are added.</li>

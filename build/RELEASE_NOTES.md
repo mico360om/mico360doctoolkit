@@ -7,6 +7,10 @@
   with the ☆ button), **Recent files**, and **Last activity**.
 - **Drag & drop anywhere** in the window — files are routed to a sensible tool.
 
+### New: sidebar search & collapsible categories
+- **Search** for any tool from the box at the top of the sidebar.
+- **Collapse / expand** each category by clicking its heading (your choice is remembered).
+
 ### New PDF tools
 - **Rotate / Delete / Extract Pages** (dedicated tools)
 - **Add Page Numbers** (position, style, start number)

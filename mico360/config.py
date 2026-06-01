@@ -204,6 +204,15 @@ class Settings:
         self._set_json("home/recent_activity", [])
 
     @property
+    def collapsed_groups(self) -> list:
+        v = self._get_json("ui/collapsed_groups", [])
+        return v if isinstance(v, list) else []
+
+    @collapsed_groups.setter
+    def collapsed_groups(self, value) -> None:
+        self._set_json("ui/collapsed_groups", list(value))
+
+    @property
     def recent_activity(self) -> list:
         v = self._get_json("home/recent_activity", [])
         return v if isinstance(v, list) else []

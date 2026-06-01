@@ -7,12 +7,15 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from mico360 import __version__
+from mico360.config import settings
 from mico360.paths import resource_path
 from mico360.ui.widgets import NavItem
 
@@ -28,7 +31,10 @@ class Sidebar(QWidget):
         self.setObjectName("Sidebar")
         self._collapsed = False
         self._items: list[NavItem] = []
-        self._sections: list[QLabel] = []
+        self._sections: list[QPushButton] = []
+        self._groups: list[dict] = []     # {name, header, items, collapsed}
+        self._cur_group: dict | None = None
+        self._searching = False
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         self.setFixedWidth(EXPANDED_W)
@@ -65,6 +71,18 @@ class Sidebar(QWidget):
         h.addStretch(1)
         root.addWidget(header)
 
+        # --- search ---
+        self._search_wrap = QWidget()
+        sw = QHBoxLayout(self._search_wrap)
+        sw.setContentsMargins(12, 0, 12, 8)
+        self._search = QLineEdit()
+        self._search.setObjectName("NavSearch")
+        self._search.setPlaceholderText("Search tools…")
+        self._search.setClearButtonEnabled(True)
+        self._search.textChanged.connect(self._on_search)
+        sw.addWidget(self._search)
+        root.addWidget(self._search_wrap)
+
         # --- scrollable nav ---
         self._nav_host = QWidget()
         self._nav = QVBoxLayout(self._nav_host)
@@ -86,27 +104,44 @@ class Sidebar(QWidget):
 
     # -- building -----------------------------------------------------------
     def add_section(self, name: str) -> None:
-        lbl = QLabel(name.upper())
-        lbl.setObjectName("NavSection")
-        lbl.setContentsMargins(2, 8, 0, 2)
-        self._nav.addWidget(lbl)
-        self._sections.append(lbl)
+        btn = QPushButton()
+        btn.setObjectName("NavSection")
+        btn.setCursor(Qt.PointingHandCursor)
+        grp = {"name": name, "header": btn, "items": [], "collapsed": False}
+        btn.clicked.connect(lambda _=False, g=grp: self._toggle_group(g))
+        self._groups.append(grp)
+        self._cur_group = grp
+        self._sections.append(btn)
+        self._update_section_text(grp)
+        self._nav.addWidget(btn)
 
     def add_item(self, glyph: str, label: str, page_index: int) -> NavItem:
         item = NavItem(glyph, label)
         item.clicked.connect(lambda: self.navigated.emit(page_index))
         item._page_index = page_index  # type: ignore[attr-defined]
+        item._group = self._cur_group  # type: ignore[attr-defined]
         self._group.addButton(item)
         self._nav.addWidget(item)
         self._items.append(item)
+        if self._cur_group is not None:
+            self._cur_group["items"].append(item)
         return item
 
     def finish(self) -> None:
         self._nav.addStretch(1)
+        # Restore the user's collapsed sections.
+        for name in settings.collapsed_groups:
+            for grp in self._groups:
+                if grp["name"] == name:
+                    grp["collapsed"] = True
+                    for it in grp["items"]:
+                        it.setVisible(False)
+                    self._update_section_text(grp)
 
     def select(self, page_index: int) -> None:
         for it in self._items:
             if getattr(it, "_page_index", None) == page_index:
+                self._expand_group_of(it)
                 it.setChecked(True)
                 self.navigated.emit(page_index)
                 break
@@ -115,6 +150,45 @@ class Sidebar(QWidget):
         if self._items:
             self._items[0].setChecked(True)
             self.navigated.emit(getattr(self._items[0], "_page_index", 0))
+
+    # -- search & collapsible groups ---------------------------------------
+    def _update_section_text(self, grp: dict) -> None:
+        name = (grp["name"] or "").upper()
+        if self._searching:
+            chevron = ""
+        else:
+            chevron = "▸  " if grp["collapsed"] else "▾  "
+        grp["header"].setText(f"{chevron}{name}")
+
+    def _toggle_group(self, grp: dict) -> None:
+        if self._searching:
+            return
+        grp["collapsed"] = not grp["collapsed"]
+        for it in grp["items"]:
+            it.setVisible(not grp["collapsed"])
+        self._update_section_text(grp)
+        settings.collapsed_groups = [g["name"] for g in self._groups if g["collapsed"]]
+
+    def _expand_group_of(self, item: NavItem) -> None:
+        grp = getattr(item, "_group", None)
+        if grp and grp.get("collapsed") and not self._searching:
+            self._toggle_group(grp)
+
+    def _on_search(self, text: str) -> None:
+        q = (text or "").strip().lower()
+        self._searching = bool(q)
+        for grp in self._groups:
+            any_match = False
+            for it in grp["items"]:
+                if q:
+                    match = q in it._label.lower()
+                    it.setVisible(match)
+                    any_match = any_match or match
+                else:
+                    it.setVisible(not grp["collapsed"])
+            # During a search, hide empty sections; otherwise always show headers.
+            grp["header"].setVisible(any_match if q else True)
+            self._update_section_text(grp)
 
     # -- collapse -----------------------------------------------------------
     @property
@@ -126,14 +200,24 @@ class Sidebar(QWidget):
             return
         self._collapsed = collapsed
         self.setFixedWidth(COLLAPSED_W if collapsed else EXPANDED_W)
+        self._search_wrap.setVisible(not collapsed)
         for it in self._items:
             it.set_collapsed(collapsed)
         for s in self._sections:
             s.setVisible(not collapsed)
+        if collapsed:
+            # Icon-only mode shows every tool, ignoring group-collapse/search.
+            for it in self._items:
+                it.setVisible(True)
+        else:
+            self._reapply_visibility()
         self._brand.setVisible(not collapsed)
         self._brand_sub.setVisible(not collapsed)
         self._ver.setVisible(not collapsed)
         self._apply_logo()
+
+    def _reapply_visibility(self) -> None:
+        self._on_search(self._search.text())
 
     def set_theme(self, theme: str) -> None:
         """Use the white logo on the dark sidebar, the normal logo on the light."""

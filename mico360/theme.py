@@ -149,8 +149,19 @@ QToolTip {{
 #BrandSub {{ color: {c['text_faint']}; font-size: 10px; font-weight: 600; letter-spacing: 1px; }}
 #NavSection {{
     color: {c['section']}; font-size: 10px; font-weight: 700;
-    letter-spacing: 1.2px; padding: 2px 8px;
+    letter-spacing: 1.2px; padding: 6px 8px 3px 8px;
+    background: transparent; border: none; text-align: left;
 }}
+#NavSection:hover {{ color: {c['text_muted']}; }}
+QLineEdit#NavSearch {{
+    background-color: {c['input']};
+    border: 1px solid {c['border']};
+    border-radius: {RADIUS_SM}px;
+    padding: 6px 10px;
+    color: {c['text']};
+    font-size: 12px;
+}}
+QLineEdit#NavSearch:focus {{ border: 1px solid {c['primary']}; }}
 
 QPushButton#NavItem {{
     background: transparent;
