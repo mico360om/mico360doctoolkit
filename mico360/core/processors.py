@@ -1777,6 +1777,183 @@ def pptx_to_pdf(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
 
 
 # =========================================================================
+# Word → Markdown  (bulk .docx → .md)
+# =========================================================================
+def _lo_convert_to_docx(soffice: str, src: Path) -> Path:
+    """Convert a .doc/.odt/.rtf to a temporary .docx via LibreOffice."""
+    import tempfile
+
+    tmpdir = Path(tempfile.mkdtemp(prefix="mico360_md_"))
+    profile = Path(tempfile.mkdtemp(prefix="mico360_lo_"))
+    args = [soffice, "--headless", "--norestore", "--invisible", "--nodefault",
+            "--nolockcheck", f"-env:UserInstallation={profile.as_uri()}",
+            "--convert-to", "docx", "--outdir", str(tmpdir), str(src)]
+    try:
+        with _office_lock:
+            proc = run_subprocess(args, timeout=300)
+    finally:
+        import shutil
+        shutil.rmtree(profile, ignore_errors=True)
+    produced = tmpdir / f"{src.stem}.docx"
+    if proc.returncode != 0 or not produced.exists():
+        raise RuntimeError((proc.stderr or proc.stdout or "no output").strip()[:200])
+    return produced
+
+
+def _md_escape(text: str) -> str:
+    # Light escaping so literal Markdown characters survive as text.
+    return text.replace("\\", "\\\\").replace("|", "\\|")
+
+
+def _runs_to_md(para) -> str:
+    """Inline runs of a paragraph -> Markdown with **bold** / *italic* / `code`."""
+    out = []
+    for run in para.runs:
+        t = run.text
+        if not t:
+            continue
+        t = t.replace("\\", "\\\\")
+        bold = bool(run.bold)
+        italic = bool(run.italic)
+        name = (run.font.name or "").lower()
+        if "mono" in name or "courier" in name or "consol" in name:
+            t = f"`{t}`"
+        else:
+            if bold and italic:
+                t = f"***{t}***"
+            elif bold:
+                t = f"**{t}**"
+            elif italic:
+                t = f"*{t}*"
+        out.append(t)
+    return "".join(out).strip() or para.text.strip()
+
+
+def _para_to_md(para) -> str:
+    style = (para.style.name or "").lower() if para.style else ""
+    text = _runs_to_md(para)
+    if not text:
+        return ""
+    if style.startswith("heading"):
+        try:
+            level = int("".join(c for c in style if c.isdigit()) or "1")
+        except ValueError:
+            level = 1
+        return f"{'#' * max(1, min(6, level))} {text}"
+    if style in ("title",):
+        return f"# {text}"
+    if style in ("subtitle",):
+        return f"## {text}"
+    if style.startswith("quote") or style == "intense quote":
+        return f"> {text}"
+    # Lists: numbered vs bulleted (numbering present on the paragraph).
+    is_list = "list" in style
+    numbered = "number" in style
+    try:
+        from docx.oxml.ns import qn
+        if para._p.pPr is not None and para._p.pPr.find(qn("w:numPr")) is not None:
+            is_list = True
+            fmt = para._p.pPr.find(qn("w:numPr"))
+            ilvl = fmt.find(qn("w:ilvl"))
+            numbered = numbered or ("number" in style)
+            indent = int(ilvl.get(qn("w:val"))) if ilvl is not None else 0
+        else:
+            indent = 0
+    except Exception:
+        indent = 0
+    if is_list:
+        pad = "  " * max(0, indent)
+        return f"{pad}{'1.' if numbered else '-'} {text}"
+    return text
+
+
+def _table_to_md(table) -> list[str]:
+    rows = []
+    for r in table.rows:
+        cells = []
+        for c in r.cells:
+            text = " ".join(p.text for p in c.paragraphs)
+            cells.append(" ".join(_md_escape(text).split()))   # collapse whitespace
+        rows.append("| " + " | ".join(cells) + " |")
+    if not rows:
+        return []
+    ncol = max(1, rows[0].count("|") - 1)
+    sep = "| " + " | ".join(["---"] * ncol) + " |"
+    return [rows[0], sep] + rows[1:]
+
+
+def _docx_to_markdown(path: Path) -> str:
+    import docx
+    from docx.oxml.ns import qn
+    from docx.table import Table
+    from docx.text.paragraph import Paragraph
+
+    doc = docx.Document(str(path))
+    blocks: list[str] = []
+    for child in doc.element.body.iterchildren():
+        if child.tag == qn("w:p"):
+            blocks.append(_para_to_md(Paragraph(child, doc)))
+        elif child.tag == qn("w:tbl"):
+            blocks.append("")
+            blocks.extend(_table_to_md(Table(child, doc)))
+            blocks.append("")
+    # Collapse 3+ blank lines down to a single blank line.
+    md_lines: list[str] = []
+    blank = 0
+    for line in blocks:
+        if line.strip() == "":
+            blank += 1
+            if blank <= 1:
+                md_lines.append("")
+        else:
+            blank = 0
+            md_lines.append(line)
+    return "\n".join(md_lines).strip() + "\n"
+
+
+def word_to_md(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    """Convert a Word document to Markdown (.md)."""
+    try:
+        import docx
+        _ = docx.Document
+    except Exception as exc:  # pragma: no cover
+        raise ProcessError(f"python-docx is not available: {exc}")
+
+    work = src
+    cleanup: Path | None = None
+    if src.suffix.lower() != ".docx":
+        soffice = find_libreoffice()
+        if not soffice:
+            raise ProcessError(
+                f"'{src.name}' isn't a .docx. Converting .doc/.odt/.rtf to Markdown "
+                "needs LibreOffice (install it or set its path in Settings → "
+                "External tools), or save the file as .docx first.")
+        report("Converting to .docx via LibreOffice…")
+        try:
+            work = _lo_convert_to_docx(soffice, src)
+            cleanup = work.parent
+        except Exception as exc:
+            raise ProcessError(f"Couldn't read '{src.name}' ({exc}).")
+
+    try:
+        report("Converting to Markdown…")
+        try:
+            md = _docx_to_markdown(work)
+        except Exception as exc:
+            raise ProcessError(f"Couldn't convert '{src.name}' to Markdown ({exc}).")
+    finally:
+        if cleanup is not None:
+            import shutil
+            shutil.rmtree(cleanup, ignore_errors=True)
+
+    out = build_output_path(src, out_dir, ".md", overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+    out.write_text(md, encoding="utf-8")
+    report(f"Markdown written → {out.name}")
+    return [out]
+
+
+# =========================================================================
 # v5.4 — dedicated image tools: Resize, Convert, Watermark
 # =========================================================================
 def _save_image(im, out: Path, fmt: str, quality: int = 90) -> None:

@@ -269,6 +269,12 @@ TOOLS: list[Tool] = [
         options=[],
     ),
     Tool(
+        id="word_to_md", name="Word → Markdown", icon="📋",
+        tagline="Bulk-convert Word documents to Markdown (.md).",
+        mode=PER_FILE, accept=WORD, runner=processors.word_to_md, group="Convert",
+        options=[],
+    ),
+    Tool(
         id="pdf_to_image", name="PDF → Image", icon="🖼️",
         tagline="Render PDF pages to image files.",
         mode=PER_FILE, accept=PDF, runner=processors.pdf_to_image, group="Convert",

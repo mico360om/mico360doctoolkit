@@ -84,6 +84,9 @@ tool automatically.</p>
       or <i>Exact page image</i>.</li>
   <li><b>Word → PDF</b> — works out of the box: it uses LibreOffice or Microsoft Word when
       present, and a built-in converter otherwise.</li>
+  <li><b>Word → Markdown</b> — bulk-convert Word documents to clean Markdown (.md),
+      keeping headings, <b>bold</b>/<i>italic</i>, lists and tables. <i>.docx</i> works
+      directly; <i>.doc/.odt/.rtf</i> need LibreOffice.</li>
   <li><b>PDF → Image</b> — render each page to JPG / PNG / WEBP / BMP / TIFF at a chosen DPI.</li>
   <li><b>Image → PDF</b> — combine images into one PDF, or make one PDF per image.</li>
   <li><b>Compress Image</b> — presets, a <i>Target file size</i>, or custom quality; optional
