@@ -1,23 +1,14 @@
-## MICO360 Doc Toolkit v5.7.0
+## MICO360 Doc Toolkit v5.7.1
 
-**A cleaner, smarter Convert section — fewer tools, more power.**
+**Fix:** on tools that accept many file types (e.g. **Document → Markdown**), the
+long "Supported:" list inside the drop zone could push the **Browse files / Browse
+folder** buttons past the edge and clip them. The supported-formats list now sits
+just **below** the drop zone, and the drop area never shrinks below its content, so
+the buttons are always fully visible.
 
-The Convert group went from **9 tools to 4** by combining related conversions
-into single, auto-detecting tools:
-
-- **PDF → …** — one tool converts a PDF to **Word**, **PowerPoint**, **Excel**, or
-  **Images**. Pick the target from a *Convert to* dropdown and only its relevant
-  options appear. (Replaces the four separate PDF→ converters.)
-- **Office → PDF** — drop a **Word, Excel, or PowerPoint** file and it converts to
-  PDF automatically, detecting the type for you. (Replaces three tools.)
-- **Document → Markdown** — now converts **Word, Excel, PowerPoint *and* PDF** to
-  Markdown (.md), not just Word: a table per Excel sheet, a section per slide, and
-  page text + tables for PDFs. (Was Word → Markdown.)
-
-Plus the v5.6.1 improvements: a **stable tool layout** (the panel no longer changes
-width when you switch tools), tidier controls, **OCR paragraph reflow + de-hyphenation**
-for cleaner editable text, and an OCR **Recognition quality** (200/300/400 dpi) control —
-and the v5.6.0 bulk converter and corrected app icon.
+Everything else is unchanged from v5.7.0: the consolidated **PDF → …**,
+**Office → PDF**, and **Document → Markdown** converters, the stable tool layout,
+and the OCR text improvements.
 
 ---
 *This release is also the update manifest: the tag is the version, this text is the

@@ -148,11 +148,18 @@ class ToolPage(QWidget):
         card.add_layout(head)
 
         self.drop = DropArea()
-        self.drop.set_formats(self.tool.accept)
         self.drop.pathsAdded.connect(self.add_paths)
         self.drop.browseFiles.connect(self._browse_files)
         self.drop.browseFolder.connect(self._browse_folder)
         card.add(self.drop)
+
+        # Accepted formats live *below* the drop zone (not inside it) so a long
+        # list never pushes the Browse buttons out of the drop area.
+        formats = QLabel("Supported: " + " · ".join(
+            sorted(e.lstrip(".").upper() for e in self.tool.accept)))
+        formats.setObjectName("DropFormats")
+        formats.setWordWrap(True)
+        card.add(formats)
 
         self.file_list = QListWidget()
         self.file_list.setObjectName("FileList")

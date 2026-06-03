@@ -6,7 +6,7 @@
 ; ..\vendor and installed alongside the app. See vendor\README.md.
 
 #define AppName "MICO360 Doc Toolkit"
-#define AppVersion "5.7.0"
+#define AppVersion "5.7.1"
 #define AppPublisher "MICO360"
 #define AppExeName "MICO360DocToolkit.exe"
 

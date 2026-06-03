@@ -161,7 +161,10 @@ class DropArea(QFrame):
         self.setObjectName("DropArea")
         self.setAcceptDrops(True)
         self.setProperty("dragActive", False)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # MinimumExpanding (vertical): the area grows to fill spare space but is
+        # never squeezed below its own content, so the Browse buttons can't be
+        # clipped — if room is tight the page scrolls instead.
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
         self.setMinimumHeight(150)
 
         lay = QVBoxLayout(self)
@@ -189,13 +192,6 @@ class DropArea(QFrame):
         hint.setWordWrap(True)
         lay.addWidget(hint)
 
-        self._formats = QLabel("")
-        self._formats.setObjectName("DropFormats")
-        self._formats.setAlignment(Qt.AlignCenter)
-        self._formats.setWordWrap(True)
-        self._formats.setVisible(False)
-        lay.addWidget(self._formats)
-
         btns = QHBoxLayout()
         btns.setAlignment(Qt.AlignCenter)
         btns.setSpacing(8)
@@ -211,13 +207,6 @@ class DropArea(QFrame):
         btns.addWidget(b_folder)
         lay.addSpacing(2)
         lay.addLayout(btns)
-
-    def set_formats(self, exts) -> None:
-        """Show the accepted file types under the prompt."""
-        labels = sorted({e.lstrip(".").upper() for e in exts})
-        if labels:
-            self._formats.setText("Supported: " + " · ".join(labels))
-            self._formats.setVisible(True)
 
     # --- drag events -----------------------------------------------------
     def _set_active(self, active: bool) -> None:
