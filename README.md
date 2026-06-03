@@ -8,6 +8,15 @@ activity logs.
 
 ![brand: maroon / black / white]
 
+## ⬇ Download
+
+**[Download MICO360 Doc Toolkit — Windows Installer (.exe)](https://github.com/mico360om/mico360doctoolkit/releases/latest/download/MICO360-DocToolkit-Setup-Latest.exe)**
+
+That link always serves the **latest** installer directly. You can also grab a
+specific version (and its `.sha256` checksum) from the
+[Releases page](https://github.com/mico360om/mico360doctoolkit/releases/latest).
+After installing, the app keeps itself up to date automatically.
+
 > **v5.6** — new **Word → Markdown**: bulk-convert Word documents to clean
 > Markdown (`.md`) — headings, **bold**/*italic*, lists and tables preserved.
 >

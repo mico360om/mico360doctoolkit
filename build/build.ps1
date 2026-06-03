@@ -48,6 +48,24 @@ if ($iscc) {
     Write-Host "Compiling installer with Inno Setup..." -ForegroundColor Cyan
     & $iscc.Source build\installer.iss
     Write-Host "Installer written to dist\installer\" -ForegroundColor Green
+
+    # Emit a stable, version-less copy (+ .sha256) so the README "direct
+    # download" link (releases/latest/download/...-Setup-Latest.exe) and the
+    # auto-updater both keep working across versions.
+    $built = Get-ChildItem dist\installer\MICO360-DocToolkit-Setup-*.exe -Exclude *Latest* -ErrorAction SilentlyContinue |
+             Sort-Object LastWriteTime | Select-Object -Last 1
+    if ($built) {
+        $latest = Join-Path $built.DirectoryName "MICO360-DocToolkit-Setup-Latest.exe"
+        Copy-Item $built.FullName $latest -Force
+        $hash = (Get-FileHash $latest -Algorithm SHA256).Hash.ToLower()
+        "$hash  MICO360-DocToolkit-Setup-Latest.exe" |
+            Out-File "$latest.sha256" -Encoding ascii -NoNewline
+        # Also write the versioned .sha256 the updater verifies against.
+        $vhash = (Get-FileHash $built.FullName -Algorithm SHA256).Hash.ToLower()
+        "$vhash  $($built.Name)" |
+            Out-File "$($built.FullName).sha256" -Encoding ascii -NoNewline
+        Write-Host "Stable copy: $latest  (sha256 $hash)" -ForegroundColor Green
+    }
 } else {
     Write-Host "Inno Setup (iscc) not found on PATH - skipping installer step." -ForegroundColor Yellow
     Write-Host "Install from https://jrsoftware.org/isdl.php then run: iscc build\installer.iss" -ForegroundColor Yellow
