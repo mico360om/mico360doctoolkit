@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -68,9 +69,13 @@ class ToolPage(QWidget):
 
         root.addLayout(self._build_header())
 
+        # The options column is clamped to a stable width range so the split is
+        # identical on every tool (no per-selection width jump) and the form
+        # never sprawls on very wide windows; the files column takes the rest.
         self.body = ResponsiveRow(self._build_files_card(),
                                   self._build_options_card(),
-                                  threshold=860, stretch=(3, 2))
+                                  threshold=820, stretch=(3, 2),
+                                  secondary_width=(320, 460))
         root.addWidget(self.body)
 
         # Activity log (this run)
@@ -137,9 +142,9 @@ class ToolPage(QWidget):
         head = QHBoxLayout()
         head.addWidget(section_label("Input files"))
         head.addStretch(1)
-        types = QLabel(" · ".join(e.lstrip(".").upper() for e in sorted(self.tool.accept)))
-        types.setObjectName("Muted")
-        head.addWidget(types)
+        # Accepted formats are shown inside the drop area ("Supported: …"); no
+        # need to repeat the (sometimes long) list here — it only inflated the
+        # panel's minimum width on image tools.
         card.add_layout(head)
 
         self.drop = DropArea()
@@ -173,8 +178,10 @@ class ToolPage(QWidget):
         row = QHBoxLayout()
         self.count_lbl = QLabel("No files yet")
         self.count_lbl.setObjectName("Hint")
-        row.addWidget(self.count_lbl)
-        row.addStretch(1)
+        # Let the summary text yield width to the action buttons when space is
+        # tight, so this row never forces the panel wider than it needs to be.
+        self.count_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        row.addWidget(self.count_lbl, 1)
         self.btn_redo = QPushButton("Redo")
         self.btn_redo.setObjectName("Subtle")
         self.btn_redo.setCursor(Qt.PointingHandCursor)
@@ -214,7 +221,7 @@ class ToolPage(QWidget):
         out_row.addWidget(btn_out)
         card.add_layout(out_row)
 
-        self.chk_same = QCheckBox("Save next to the original files")
+        self.chk_same = QCheckBox("Save beside originals")
         self.chk_same.setToolTip(
             "Saves each result in the same folder as its source, named "
             '"name (1).ext", "name (2).ext", … so your originals are never changed.')
@@ -223,7 +230,10 @@ class ToolPage(QWidget):
         self.out_edit.setEnabled(not self.chk_same.isChecked())
         card.add(self.chk_same)
 
-        self.chk_overwrite = QCheckBox("Overwrite files with the same name")
+        self.chk_overwrite = QCheckBox("Overwrite same-named files")
+        self.chk_overwrite.setToolTip(
+            "When an output file already exists, replace it instead of adding a "
+            "number to the name.")
         self.chk_overwrite.setChecked(settings.overwrite)
         card.add(self.chk_overwrite)
 
@@ -245,9 +255,13 @@ class ToolPage(QWidget):
         card.add(self.status_lbl)
 
         actions = QHBoxLayout()
-        self.btn_start = QPushButton(f"Start  ·  {self.tool.name}")
+        # A constant "Start" label (the tool's name is already in the page
+        # header and top bar) keeps the button — and therefore the options
+        # column's minimum width — identical across tools.
+        self.btn_start = QPushButton("Start")
         self.btn_start.setObjectName("Primary")
         self.btn_start.setCursor(Qt.PointingHandCursor)
+        self.btn_start.setToolTip(f"Start {self.tool.name}")
         self.btn_start.clicked.connect(self.start)
         self.btn_open = QPushButton("Open output")
         self.btn_open.setObjectName("Ghost")

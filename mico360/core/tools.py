@@ -218,7 +218,13 @@ TOOLS: list[Tool] = [
         id="pdf_ocr", name="Searchable PDF (OCR)", icon="🔍",
         tagline="Make scanned PDFs selectable & searchable.",
         mode=PER_FILE, accept=PDF, runner=processors.pdf_ocr, group="PDF",
-        options=[],
+        options=[
+            Option("quality", "Recognition quality", "choice", "balanced", [
+                ("fast", "Fast — 200 dpi"),
+                ("balanced", "Balanced — 300 dpi (recommended)"),
+                ("high", "High — 400 dpi (best on small text)"),
+            ], hint="Higher quality reads small or faint text better, but is slower."),
+        ],
     ),
     Tool(
         id="pdf_to_word", name="PDF → Word", icon="📝",

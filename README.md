@@ -1,4 +1,4 @@
-# MICO360 Doc Toolkit  ·  v5.6.0
+# MICO360 Doc Toolkit  ·  v5.6.1
 
 A modern Windows 10/11 desktop app for PDF & image management — a **Dashboard**
 home plus tools to compress, merge, split, organize, protect, watermark, sign,
@@ -17,6 +17,11 @@ specific version (and its `.sha256` checksum) from the
 [Releases page](https://github.com/mico360om/mico360doctoolkit/releases/latest).
 After installing, the app keeps itself up to date automatically.
 
+> **v5.6.1** — **stable tool layout** (the panel no longer changes width when you
+> switch tools), tidier output controls, and **better OCR text**: scanned lines
+> reflow into real paragraphs with hyphenated words rejoined, plus a new OCR
+> **Recognition quality** (200/300/400 dpi) control.
+>
 > **v5.6** — new **Word → Markdown**: bulk-convert Word documents to clean
 > Markdown (`.md`) — headings, **bold**/*italic*, lists and tables preserved.
 >
@@ -215,6 +220,7 @@ python tests\v54_edge_test.py            # error handling, corrupt input, real P
 python tests\sidebar_test.py             # tool search + collapsible categories
 python tests\v55_features_test.py        # consolidated Organize, Protect confirm/show-hide, Watermark position, posgrid/password kinds
 python tests\v56_features_test.py        # bulk Word -> Markdown: headings, bold/italic, lists, tables + end-to-end UI run
+python tests\ocr_quality_test.py         # OCR paragraph reflow + de-hyphenation, DPI quality option, end-to-end searchable PDF
 ```
 
 ## Compatibility

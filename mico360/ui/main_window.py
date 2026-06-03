@@ -187,11 +187,17 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _scrollable(page: QWidget) -> QScrollArea:
-        """Wrap a page so it scrolls vertically on short windows."""
+        """Wrap a page so it scrolls vertically on short windows.
+
+        The vertical scrollbar is always reserved (``ScrollBarAlwaysOn``) so the
+        usable content width is identical on every page — otherwise the bar
+        appearing only on taller tools would shift the layout by ~17px each time
+        you switch tools, which reads as the panel "changing width"."""
         area = QScrollArea()
         area.setWidgetResizable(True)
         area.setFrameShape(QScrollArea.NoFrame)
         area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         area.setWidget(page)
         return area
 

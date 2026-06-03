@@ -95,14 +95,22 @@ class ResponsiveRow(QWidget):
     """Holds two widgets side-by-side, stacking them vertically when the
     available width drops below ``threshold`` pixels."""
 
+    # Effective "no maximum" for a widget width (Qt's QWIDGETSIZE_MAX).
+    _WIDE = 16777215
+
     def __init__(self, primary: QWidget, secondary: QWidget,
                  threshold: int = 820, stretch=(3, 2),
+                 secondary_width: tuple[int, int] | None = None,
                  parent: QWidget | None = None):
         super().__init__(parent)
         self._threshold = threshold
         self._stretch = stretch
         self._primary = primary
         self._secondary = secondary
+        # Optional (min, max) width clamp applied to the secondary pane *only*
+        # when side-by-side, so the options column is the same width on every
+        # tool (a stable split) and never sprawls on very wide windows.
+        self._secondary_width = secondary_width
         self._horizontal: bool | None = None
 
         self._lay = QBoxLayout(QBoxLayout.LeftToRight, self)
@@ -120,10 +128,18 @@ class ResponsiveRow(QWidget):
             self._lay.setDirection(QBoxLayout.LeftToRight)
             self._lay.setStretch(0, self._stretch[0])
             self._lay.setStretch(1, self._stretch[1])
+            if self._secondary_width:
+                lo, hi = self._secondary_width
+                self._secondary.setMinimumWidth(lo)
+                self._secondary.setMaximumWidth(hi)
         else:
             self._lay.setDirection(QBoxLayout.TopToBottom)
             self._lay.setStretch(0, 0)
             self._lay.setStretch(1, 0)
+            if self._secondary_width:
+                # Stacked: let the pane fill the column width again.
+                self._secondary.setMinimumWidth(0)
+                self._secondary.setMaximumWidth(self._WIDE)
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
@@ -164,11 +180,13 @@ class DropArea(QFrame):
         title = QLabel("Drag & drop files or folders")
         title.setObjectName("DropTitle")
         title.setAlignment(Qt.AlignCenter)
+        title.setWordWrap(True)
         lay.addWidget(title)
 
         hint = QLabel("Folders are scanned recursively for supported files")
         hint.setObjectName("DropHint")
         hint.setAlignment(Qt.AlignCenter)
+        hint.setWordWrap(True)
         lay.addWidget(hint)
 
         self._formats = QLabel("")

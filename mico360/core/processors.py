@@ -693,18 +693,16 @@ def _ocr_pdf_to_docx(src: Path, out: Path, report: Report) -> None:
 
     document = docx.Document()
     for i in range(npages):
-        # Reconstruct visual rows (same-line fragments joined L→R, top→bottom).
+        # Reconstruct visual rows, then reflow them into readable paragraphs
+        # (merge wrapped lines, de-hyphenate, break on real gaps/indents).
         rows = _ocr_rows(page_lines.get(i, []))
+        paras = _rows_to_paragraphs(rows)
         if i:
             document.add_page_break()
-        if not rows:
+        if not paras:
             document.add_paragraph("(No text recognised on this page.)")
-        prev_bottom = None
-        for text, y_top, height in rows:
-            if prev_bottom is not None and (y_top - prev_bottom) > height * 1.2:
-                document.add_paragraph("")
-            document.add_paragraph(text)
-            prev_bottom = y_top + height
+        for para in paras:
+            document.add_paragraph(para)
     document.save(str(out))
     if not out.exists():
         raise ProcessError("OCR produced no output.")
@@ -747,7 +745,7 @@ def _render_page_image(page, dpi: int = _OCR_DPI):
     """Rasterise a page to an RGB numpy array for OCR. Returns (image, dpi)."""
     import numpy as np
 
-    dpi = _clampi(dpi, 72, 400, _OCR_DPI)
+    dpi = _clampi(dpi, 72, 600, _OCR_DPI)
     pix = page.get_pixmap(dpi=dpi)
     img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, pix.n)
     if pix.n == 4:
@@ -760,8 +758,15 @@ def _render_page_image(page, dpi: int = _OCR_DPI):
 def _ocr_image_lines(engine, img, dpi: int,
                      min_score: float = _OCR_MIN_SCORE) -> list[tuple[str, tuple]]:
     """Run OCR on an already-rendered image; return [(text, (x0,y0,x1,y1))] in
-    PDF points. Drops detections below ``min_score`` so noise stays out."""
-    result, _ = engine(img)
+    PDF points. Drops detections below ``min_score`` so noise stays out.
+
+    Angle classification (``use_cls``) is requested so upside-down / 180°-rotated
+    lines on a scan are still read in the correct orientation.
+    """
+    try:
+        result, _ = engine(img, use_cls=True)
+    except TypeError:                        # older RapidOCR without the kwarg
+        result, _ = engine(img)
     scale = 72.0 / dpi
     lines: list[tuple[str, tuple]] = []
     for box, text, score in (result or []):
@@ -789,7 +794,8 @@ def _ocr_page_lines(engine, page, dpi: int = _OCR_DPI,
 
 
 def _ocr_pages_concurrent(src: Path, indices: list[int],
-                          report: Report) -> dict[int, list[tuple[str, tuple]]]:
+                          report: Report,
+                          dpi: int = _OCR_DPI) -> dict[int, list[tuple[str, tuple]]]:
     """OCR many pages of one PDF in parallel and return {page_index: lines}.
 
     The slow part — model inference — is concurrent (RapidOCR/onnxruntime is
@@ -815,7 +821,7 @@ def _ocr_pages_concurrent(src: Path, indices: list[int],
             out = {}
             for n, i in enumerate(indices):
                 _check_cancel(report)
-                out[i] = _ocr_page_lines(engine, doc[i])
+                out[i] = _ocr_page_lines(engine, doc[i], dpi)
                 _progress(report, n + 1, len(indices))
             return out
         finally:
@@ -830,7 +836,7 @@ def _ocr_pages_concurrent(src: Path, indices: list[int],
             for start in range(0, len(indices), chunk):
                 _check_cancel(report)
                 batch = indices[start:start + chunk]
-                imgs = {i: _render_page_image(doc[i]) for i in batch}   # render (1 thread)
+                imgs = {i: _render_page_image(doc[i], dpi) for i in batch}  # render (1 thread)
                 for i, lines in zip(batch, ex.map(
                         lambda i: _ocr_image_lines(engine, *imgs[i]), batch)):
                     results[i] = lines
@@ -841,12 +847,12 @@ def _ocr_pages_concurrent(src: Path, indices: list[int],
     return results
 
 
-def _ocr_rows(lines: list[tuple[str, tuple]]) -> list[tuple[str, float, float]]:
+def _ocr_rows(lines: list[tuple[str, tuple]]) -> list[tuple[str, float, float, float]]:
     """Group OCR fragments into visual rows for clean, readable output.
 
     Fragments whose vertical centres are within a tolerance of each other are
     treated as one line and joined left→right. Returns
-    ``[(row_text, y_top, row_height)]`` ordered top→bottom.
+    ``[(row_text, x_left, y_top, row_height)]`` ordered top→bottom.
     """
     if not lines:
         return []
@@ -867,14 +873,53 @@ def _ocr_rows(lines: list[tuple[str, tuple]]) -> list[tuple[str, float, float]]:
             rows.append([it])
         centre = sum(c[4] for c in rows[-1]) / len(rows[-1])
 
-    out: list[tuple[str, float, float]] = []
+    out: list[tuple[str, float, float, float]] = []
     for row in rows:
         row.sort(key=lambda it: it[1])  # left → right
         text = " ".join(c[0] for c in row).strip()
         if not text:
             continue
-        out.append((text, min(c[2] for c in row), max(c[3] for c in row)))
+        out.append((text, min(c[1] for c in row),
+                    min(c[2] for c in row), max(c[3] for c in row)))
     return out
+
+
+def _rows_to_paragraphs(rows: list[tuple[str, float, float, float]]) -> list[str]:
+    """Reflow visual OCR rows into readable paragraphs.
+
+    Consecutive rows with normal line spacing are merged into one paragraph;
+    a larger vertical gap, or a clearly indented new line, starts a new one.
+    Words split across a line break with a trailing hyphen are re-joined
+    (``inter-\\nnational`` → ``international``). Produces clean, editable prose
+    instead of one stranded paragraph per scanned line.
+    """
+    if not rows:
+        return []
+    heights = sorted(h for _, _, _, h in rows)
+    med_h = heights[len(heights) // 2] or 10.0
+    lefts = sorted(x for _, x, _, _ in rows)
+    base_left = lefts[len(lefts) // 4]            # typical left margin (robust)
+
+    paras: list[str] = []
+    cur = ""
+    prev_bottom = None
+    for text, x_left, y_top, height in rows:
+        gap = (y_top - prev_bottom) if prev_bottom is not None else 0.0
+        indented = (x_left - base_left) > med_h * 1.2
+        new_para = prev_bottom is not None and (gap > med_h * 0.8 or indented)
+        if new_para and cur:
+            paras.append(cur)
+            cur = ""
+        if not cur:
+            cur = text
+        elif cur.endswith("-") and len(cur) >= 2 and cur[-2].isalpha():
+            cur = cur[:-1] + text.lstrip()        # de-hyphenate across the break
+        else:
+            cur = cur + " " + text
+        prev_bottom = y_top + height
+    if cur:
+        paras.append(cur)
+    return paras
 
 
 # =========================================================================
@@ -1620,11 +1665,20 @@ def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
     return [out]
 
 
+# OCR recognition DPI by quality preset (higher = sharper on small text, slower).
+_OCR_QUALITY_DPI = {"fast": 200, "balanced": _OCR_DPI, "high": 400}
+
+
+def _ocr_dpi_from_opt(opt: dict) -> int:
+    return _OCR_QUALITY_DPI.get(str(opt.get("quality", "balanced")), _OCR_DPI)
+
+
 def pdf_ocr(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
     """Make a scanned PDF searchable by overlaying an invisible OCR text layer."""
     import fitz
 
     _make_ocr_engine()   # ensure OCR is available (raises a clear error if not)
+    dpi = _ocr_dpi_from_opt(opt)
     try:
         doc = fitz.open(str(src))
     except Exception as exc:
@@ -1635,7 +1689,7 @@ def pdf_ocr(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
         report(f"OCR {len(todo)} page(s)…"
                + (f"  ({kept} already searchable)" if kept else ""))
         # OCR the image-only pages in parallel, then write text in page order.
-        page_lines = _ocr_pages_concurrent(src, todo, report)
+        page_lines = _ocr_pages_concurrent(src, todo, report, dpi)
         added = 0
         for i in todo:
             for text, (x0, y0, x1, y1) in page_lines.get(i, []):
