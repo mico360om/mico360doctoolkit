@@ -101,21 +101,28 @@ def make_pptx(p):
 
 
 def samples_for(tool, tmp, png):
-    """Return a list of sample input paths appropriate for the tool."""
+    """Return a list of sample input paths appropriate for the tool.
+
+    Tools may accept a *family* of types (e.g. Office → PDF, Document →
+    Markdown), so pick one representative sample by membership/priority rather
+    than exact set equality."""
     n = 2 if tool.mode == AGGREGATE else 1
-    out = []
-    for i in range(n):
-        if tool.accept == PDF:
-            out.append(str(make_pdf(tmp / f"{tool.id}_{i}.pdf")))
-        elif tool.accept == WORD:
-            out.append(str(make_docx(tmp / f"{tool.id}_{i}.docx")))
-        elif tool.accept == EXCEL:
-            out.append(str(make_xlsx(tmp / f"{tool.id}_{i}.xlsx")))
-        elif tool.accept == PPT:
-            out.append(str(make_pptx(tmp / f"{tool.id}_{i}.pptx")))
-        elif tool.accept == IMAGES:
-            out.append(str(make_png(tmp / f"{tool.id}_{i}.png")))
-    return out
+    a = tool.accept
+
+    def make_one(i):
+        if a & IMAGES:
+            return str(make_png(tmp / f"{tool.id}_{i}.png"))
+        if a & PDF:
+            return str(make_pdf(tmp / f"{tool.id}_{i}.pdf"))
+        if a & WORD:
+            return str(make_docx(tmp / f"{tool.id}_{i}.docx"))
+        if a & EXCEL:
+            return str(make_xlsx(tmp / f"{tool.id}_{i}.xlsx"))
+        if a & PPT:
+            return str(make_pptx(tmp / f"{tool.id}_{i}.pptx"))
+        return None
+
+    return [s for s in (make_one(i) for i in range(n)) if s]
 
 
 def _kill_office():
@@ -147,7 +154,7 @@ def main() -> int:
     }
     # These rely on an external converter (LibreOffice / MS Office). Without one,
     # or under COM contention, they may not complete — accept that, don't fail.
-    engine_dependent = {"word_to_pdf", "excel_to_pdf", "pptx_to_pdf"}
+    engine_dependent = {"office_to_pdf"}
     # In an automated run, the MS-Office-COM path is unreliable (single-instance,
     # COM can degrade). So only EXERCISE the Office->PDF tools when LibreOffice
     # (headless, deterministic) is available; otherwise skip them with a note.

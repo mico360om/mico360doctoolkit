@@ -45,6 +45,8 @@ IMAGES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
 WORD = {".doc", ".docx", ".odt", ".rtf"}
 EXCEL = {".xlsx", ".xls", ".ods", ".csv"}
 PPT = {".pptx", ".ppt", ".odp"}
+OFFICE = WORD | EXCEL | PPT                 # Office → PDF (auto-detected)
+MARKDOWN_INPUTS = WORD | EXCEL | PPT | PDF  # anything → Markdown
 
 _QUALITY_CHOICES = [
     ("low", "Low compression — best quality"),
@@ -227,69 +229,50 @@ TOOLS: list[Tool] = [
         ],
     ),
     Tool(
-        id="pdf_to_word", name="PDF → Word", icon="📝",
-        tagline="Convert PDF documents to editable Word (.docx).",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_to_word, group="Convert",
+        id="pdf_convert", name="PDF → …", icon="🔄",
+        tagline="Convert a PDF to Word, PowerPoint, Excel or images.",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_convert, group="Convert",
         options=[
-            Option("ocr", "OCR scanned pages (recognise text from images)", "bool", False,
-                   hint="Turn on for scanned PDFs with no selectable text."),
-        ],
-    ),
-    Tool(
-        id="pdf_to_pptx", name="PDF → PowerPoint", icon="📊",
-        tagline="Turn each PDF page into a PowerPoint slide.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_to_pptx, group="Convert",
-        options=[
+            Option("target", "Convert to", "choice", "word", [
+                ("word", "Word document (.docx)"),
+                ("pptx", "PowerPoint slides (.pptx)"),
+                ("excel", "Excel workbook (.xlsx)"),
+                ("image", "Images (one per page)"),
+            ]),
+            # Word target
+            Option("word_ocr", "OCR scanned pages (recognise text from images)",
+                   "bool", False, hint="Turn on for scanned PDFs with no selectable text.",
+                   visible_when=("target", "word")),
+            # PowerPoint target
             Option("mode", "Slides", "choice", "auto", [
                 ("auto", "Auto — editable text, image where needed (recommended)"),
                 ("text", "Editable text only"),
                 ("image", "Exact page image (not editable)"),
-            ], hint="Auto keeps text editable but never leaves a slide empty for "
-                    "scanned / image-only PDFs."),
-            Option("ocr", "OCR scanned pages (recognise text from images)", "bool", False,
+            ], visible_when=("target", "pptx")),
+            Option("pptx_ocr", "OCR scanned pages (recognise text from images)",
+                   "bool", False,
                    hint="Makes scanned / image-only pages editable instead of flat images.",
-                   visible_when=("mode", "auto")),
-        ],
-    ),
-    Tool(
-        id="pdf_to_excel", name="PDF → Excel", icon="📈",
-        tagline="Extract tables from a PDF into an Excel workbook.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_to_excel, group="Convert",
-        options=[],
-    ),
-    Tool(
-        id="word_to_pdf", name="Word → PDF", icon="📄",
-        tagline="Convert Word documents to PDF — works out of the box.",
-        mode=PER_FILE, accept=WORD, runner=processors.word_to_pdf, group="Convert",
-    ),
-    Tool(
-        id="excel_to_pdf", name="Excel → PDF", icon="📃",
-        tagline="Convert Excel workbooks to PDF (LibreOffice / Office).",
-        mode=PER_FILE, accept=EXCEL, runner=processors.excel_to_pdf, group="Convert",
-        options=[],
-    ),
-    Tool(
-        id="pptx_to_pdf", name="PowerPoint → PDF", icon="📰",
-        tagline="Convert PowerPoint decks to PDF (LibreOffice / Office).",
-        mode=PER_FILE, accept=PPT, runner=processors.pptx_to_pdf, group="Convert",
-        options=[],
-    ),
-    Tool(
-        id="word_to_md", name="Word → Markdown", icon="📋",
-        tagline="Bulk-convert Word documents to Markdown (.md).",
-        mode=PER_FILE, accept=WORD, runner=processors.word_to_md, group="Convert",
-        options=[],
-    ),
-    Tool(
-        id="pdf_to_image", name="PDF → Image", icon="🖼️",
-        tagline="Render PDF pages to image files.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_to_image, group="Convert",
-        options=[
-            Option("format", "Image format", "choice", "png", IMG_FMT_CHOICES),
-            Option("dpi", "Resolution", "int", 150, minimum=72, maximum=600, suffix=" dpi"),
+                   visible_when=("target", "pptx")),
+            # Image target
+            Option("format", "Image format", "choice", "png", IMG_FMT_CHOICES,
+                   visible_when=("target", "image")),
+            Option("dpi", "Resolution", "int", 150, minimum=72, maximum=600,
+                   suffix=" dpi", visible_when=("target", "image")),
             Option("jpeg_quality", "JPEG quality", "int", 90, minimum=10, maximum=100,
-                   suffix=" %", visible_when=("format", "jpg")),
+                   suffix=" %", visible_when=("target", "image")),
         ],
+    ),
+    Tool(
+        id="office_to_pdf", name="Office → PDF", icon="📄",
+        tagline="Convert Word, Excel or PowerPoint to PDF — type auto-detected.",
+        mode=PER_FILE, accept=OFFICE, runner=processors.office_to_pdf, group="Convert",
+        options=[],
+    ),
+    Tool(
+        id="to_markdown", name="Document → Markdown", icon="📋",
+        tagline="Convert Word, Excel, PowerPoint or PDF to Markdown (.md).",
+        mode=PER_FILE, accept=MARKDOWN_INPUTS, runner=processors.to_markdown,
+        group="Convert", options=[],
     ),
     Tool(
         id="image_to_pdf", name="Image → PDF", icon="📑",

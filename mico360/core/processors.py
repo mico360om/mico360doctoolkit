@@ -1285,6 +1285,10 @@ def pdf_to_image(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
 # =========================================================================
 def image_to_pdf(srcs: list[Path], out_dir: Path, opt: dict, report: Report) -> list[Path]:
     from PIL import Image
+    # Saving a PDF from Pillow uses the JPEG encoder internally; make sure all
+    # plugins are registered first, or Pillow raises KeyError('JPEG') when its
+    # lazy plugin init hasn't run yet (seen on Pillow 12 / frozen builds).
+    Image.init()
 
     out_dir.mkdir(parents=True, exist_ok=True)
     overwrite = opt.get("overwrite", False)
@@ -1830,28 +1834,72 @@ def pptx_to_pdf(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
     return _office_to_pdf(src, out_dir, opt, report, "PowerPoint.Application")
 
 
+# Input extension families (kept local so processors never imports the UI/tools).
+_WORD_EXTS = {".doc", ".docx", ".odt", ".rtf"}
+_EXCEL_EXTS = {".xlsx", ".xls", ".ods", ".csv"}
+_PPT_EXTS = {".pptx", ".ppt", ".odp"}
+
+
+def office_to_pdf(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    """Convert a Word, Excel or PowerPoint file to PDF — the type is detected
+    automatically from the file, so one tool handles all three."""
+    ext = src.suffix.lower()
+    if ext in _WORD_EXTS:
+        return word_to_pdf(src, out_dir, opt, report)
+    if ext in _EXCEL_EXTS:
+        return excel_to_pdf(src, out_dir, opt, report)
+    if ext in _PPT_EXTS:
+        return pptx_to_pdf(src, out_dir, opt, report)
+    raise ProcessError(
+        f"'{src.name}' isn't a Word, Excel or PowerPoint file.")
+
+
+def pdf_convert(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    """Convert a PDF to another format chosen by ``target``
+    (word / pptx / excel / image), routing to the matching converter. The
+    per-target options live under distinct keys in the combined tool, so they
+    are mapped back to what each converter expects."""
+    target = str(opt.get("target", "word"))
+    if target == "word":
+        return pdf_to_word(src, out_dir, {**opt, "ocr": bool(opt.get("word_ocr"))}, report)
+    if target == "pptx":
+        return pdf_to_pptx(src, out_dir, {**opt, "ocr": bool(opt.get("pptx_ocr"))}, report)
+    if target == "excel":
+        return pdf_to_excel(src, out_dir, opt, report)
+    if target == "image":
+        return pdf_to_image(src, out_dir, opt, report)
+    raise ProcessError(f"Unknown conversion target '{target}'.")
+
+
 # =========================================================================
 # Word → Markdown  (bulk .docx → .md)
 # =========================================================================
-def _lo_convert_to_docx(soffice: str, src: Path) -> Path:
-    """Convert a .doc/.odt/.rtf to a temporary .docx via LibreOffice."""
+def _lo_convert_to(soffice: str, src: Path, to_ext: str) -> Path:
+    """Convert ``src`` to a temporary file of type ``to_ext`` (e.g. 'docx',
+    'xlsx', 'pptx') via LibreOffice. Returns the produced file's path."""
     import tempfile
 
+    to_ext = to_ext.lstrip(".")
     tmpdir = Path(tempfile.mkdtemp(prefix="mico360_md_"))
     profile = Path(tempfile.mkdtemp(prefix="mico360_lo_"))
     args = [soffice, "--headless", "--norestore", "--invisible", "--nodefault",
             "--nolockcheck", f"-env:UserInstallation={profile.as_uri()}",
-            "--convert-to", "docx", "--outdir", str(tmpdir), str(src)]
+            "--convert-to", to_ext, "--outdir", str(tmpdir), str(src)]
     try:
         with _office_lock:
             proc = run_subprocess(args, timeout=300)
     finally:
         import shutil
         shutil.rmtree(profile, ignore_errors=True)
-    produced = tmpdir / f"{src.stem}.docx"
+    produced = tmpdir / f"{src.stem}.{to_ext}"
     if proc.returncode != 0 or not produced.exists():
         raise RuntimeError((proc.stderr or proc.stdout or "no output").strip()[:200])
     return produced
+
+
+def _lo_convert_to_docx(soffice: str, src: Path) -> Path:
+    """Convert a .doc/.odt/.rtf to a temporary .docx via LibreOffice."""
+    return _lo_convert_to(soffice, src, "docx")
 
 
 def _md_escape(text: str) -> str:
@@ -1999,6 +2047,171 @@ def word_to_md(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path
         if cleanup is not None:
             import shutil
             shutil.rmtree(cleanup, ignore_errors=True)
+
+    out = build_output_path(src, out_dir, ".md", overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+    out.write_text(md, encoding="utf-8")
+    report(f"Markdown written → {out.name}")
+    return [out]
+
+
+def _grid_to_md(rows: list[list[str]]) -> str:
+    """Render a 2-D grid of cell strings as a GitHub-flavoured Markdown table
+    (first row = header)."""
+    rows = [r for r in rows if any((c or "").strip() for c in r)]
+    if not rows:
+        return ""
+    ncol = max(len(r) for r in rows)
+    rows = [list(r) + [""] * (ncol - len(r)) for r in rows]
+    lines = ["| " + " | ".join(_md_escape(c) for c in rows[0]) + " |",
+             "| " + " | ".join(["---"] * ncol) + " |"]
+    for r in rows[1:]:
+        lines.append("| " + " | ".join(_md_escape(c) for c in r) + " |")
+    return "\n".join(lines)
+
+
+def _excel_to_markdown(src: Path, report: Report) -> str:
+    """Workbook → Markdown: one '## Sheet' section with a table per sheet."""
+    ext = src.suffix.lower()
+    if ext == ".csv":
+        import csv
+        with src.open("r", encoding="utf-8", errors="replace", newline="") as f:
+            rows = [[("" if c is None else str(c)) for c in row]
+                    for row in csv.reader(f)]
+        return f"# {src.stem}\n\n{_grid_to_md(rows)}\n"
+
+    work, cleanup = src, None
+    if ext != ".xlsx":
+        soffice = find_libreoffice()
+        if not soffice:
+            raise ProcessError(
+                f"Converting {ext} to Markdown needs LibreOffice (install it or set "
+                "its path in Settings → External tools), or save it as .xlsx / .csv.")
+        report("Converting to .xlsx via LibreOffice…")
+        try:
+            work = _lo_convert_to(soffice, src, "xlsx")
+            cleanup = work.parent
+        except Exception as exc:
+            raise ProcessError(f"Couldn't read '{src.name}' ({exc}).")
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(str(work), read_only=True, data_only=True)
+        parts: list[str] = [f"# {src.stem}"]
+        for ws in wb.worksheets:
+            rows = [["" if c is None else str(c) for c in row]
+                    for row in ws.iter_rows(values_only=True)]
+            table = _grid_to_md(rows)
+            parts.append(f"## {ws.title}\n\n{table}" if table else f"## {ws.title}\n\n_(empty)_")
+        wb.close()
+        return "\n\n".join(parts).strip() + "\n"
+    finally:
+        if cleanup is not None:
+            import shutil
+            shutil.rmtree(cleanup, ignore_errors=True)
+
+
+def _pptx_to_markdown(src: Path, report: Report) -> str:
+    """Deck → Markdown: one '## Slide N' heading per slide, text as bullets."""
+    ext = src.suffix.lower()
+    work, cleanup = src, None
+    if ext != ".pptx":
+        soffice = find_libreoffice()
+        if not soffice:
+            raise ProcessError(
+                f"Converting {ext} to Markdown needs LibreOffice (install it or set "
+                "its path in Settings → External tools), or save it as .pptx.")
+        report("Converting to .pptx via LibreOffice…")
+        try:
+            work = _lo_convert_to(soffice, src, "pptx")
+            cleanup = work.parent
+        except Exception as exc:
+            raise ProcessError(f"Couldn't read '{src.name}' ({exc}).")
+    try:
+        from pptx import Presentation
+        prs = Presentation(str(work))
+        parts: list[str] = [f"# {src.stem}"]
+        for i, slide in enumerate(prs.slides, 1):
+            title_shape = None
+            try:
+                title_shape = slide.shapes.title
+            except Exception:
+                title_shape = None
+            title = (title_shape.text.strip() if title_shape and title_shape.text else "")
+            title_id = getattr(title_shape, "shape_id", None)
+            parts.append(f"## Slide {i}" + (f": {title}" if title else ""))
+            lines: list[str] = []
+            for shape in slide.shapes:
+                if not getattr(shape, "has_text_frame", False):
+                    continue
+                if title_id is not None and getattr(shape, "shape_id", None) == title_id:
+                    continue
+                for para in shape.text_frame.paragraphs:
+                    txt = "".join(r.text for r in para.runs).strip() or para.text.strip()
+                    if txt:
+                        lines.append("  " * max(0, para.level) + "- " + txt)
+            parts.append("\n".join(lines) if lines else "_(no text)_")
+        return "\n\n".join(parts).strip() + "\n"
+    finally:
+        if cleanup is not None:
+            import shutil
+            shutil.rmtree(cleanup, ignore_errors=True)
+
+
+def _pdf_to_markdown(src: Path, report: Report) -> str:
+    """PDF → Markdown: page text as paragraphs, with detected tables rendered as
+    Markdown tables. Image-only (scanned) pages are flagged so the user knows to
+    OCR them first."""
+    import fitz
+    parts: list[str] = [f"# {src.stem}"]
+    doc = fitz.open(str(src))
+    try:
+        multi = doc.page_count > 1
+        for i in range(doc.page_count):
+            _check_cancel(report)
+            page = doc[i]
+            if multi:
+                parts.append(f"## Page {i + 1}")
+            tables_md: list[str] = []
+            try:                                  # PyMuPDF table detection (best-effort)
+                for tab in page.find_tables().tables:
+                    grid = [["" if c is None else str(c) for c in row]
+                            for row in tab.extract()]
+                    md = _grid_to_md(grid)
+                    if md:
+                        tables_md.append(md)
+            except Exception:
+                pass
+            text = (page.get_text("text") or "").strip()
+            if text:
+                # Blank-line-separate the visual blocks for readable paragraphs.
+                blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
+                parts.append("\n\n".join(blocks) if blocks else text)
+            elif not tables_md:
+                parts.append("_(no selectable text — this page looks scanned; run "
+                             "Searchable PDF (OCR) on it first.)_")
+            parts.extend(tables_md)
+            _progress(report, i + 1, doc.page_count)
+    finally:
+        doc.close()
+    return "\n\n".join(parts).strip() + "\n"
+
+
+def to_markdown(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    """Convert a Word / Excel / PowerPoint / PDF file to Markdown (.md). The
+    source type is detected automatically from the file."""
+    ext = src.suffix.lower()
+    if ext in _WORD_EXTS:
+        return word_to_md(src, out_dir, opt, report)   # handles .docx + LO fallback
+
+    report("Converting to Markdown…")
+    if ext == ".pdf":
+        md = _pdf_to_markdown(src, report)
+    elif ext in _EXCEL_EXTS:
+        md = _excel_to_markdown(src, report)
+    elif ext in _PPT_EXTS:
+        md = _pptx_to_markdown(src, report)
+    else:
+        raise ProcessError(f"Can't convert '{src.name}' to Markdown.")
 
     out = build_output_path(src, out_dir, ".md", overwrite=opt.get("overwrite", False),
                             numbered=opt.get("same_as_source", False))

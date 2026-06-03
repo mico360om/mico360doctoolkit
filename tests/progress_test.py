@@ -59,7 +59,8 @@ def main() -> int:
 
         # --- single multi-page file: must show intermediate progress --------
         pdf = _pdf(tmp / "deck.pdf", 12)
-        vals = run_batch("pdf_to_image", [pdf], out, {"format": "png", "dpi": 72})
+        vals = run_batch("pdf_convert", [pdf], out,
+                         {"target": "image", "format": "png", "dpi": 72})
         mids = [v for v in vals if 1.0 < v < 99.0]
         check("single multi-page job emits progress values", bool(vals), f"{len(vals)} values")
         check("progress has intermediate steps (not a 0->100 jump)",

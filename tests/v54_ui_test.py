@@ -37,9 +37,9 @@ def main() -> int:
     # --- drop routing ---------------------------------------------------
     from mico360.ui.dashboard_page import route_for
     check("route .pdf -> pdf_compress", route_for(["a.pdf"]) == "pdf_compress")
-    check("route .docx -> word_to_pdf", route_for(["a.docx"]) == "word_to_pdf")
-    check("route .xlsx -> excel_to_pdf", route_for(["a.xlsx"]) == "excel_to_pdf")
-    check("route .pptx -> pptx_to_pdf", route_for(["a.pptx"]) == "pptx_to_pdf")
+    check("route .docx -> office_to_pdf", route_for(["a.docx"]) == "office_to_pdf")
+    check("route .xlsx -> office_to_pdf", route_for(["a.xlsx"]) == "office_to_pdf")
+    check("route .pptx -> office_to_pdf", route_for(["a.pptx"]) == "office_to_pdf")
     check("route .png -> image_compress", route_for(["a.png"]) == "image_compress")
     check("route unknown -> None", route_for(["a.zzz"]) is None)
 

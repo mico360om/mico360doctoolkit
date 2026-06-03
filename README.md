@@ -1,4 +1,4 @@
-# MICO360 Doc Toolkit  ·  v5.6.1
+# MICO360 Doc Toolkit  ·  v5.7.0
 
 A modern Windows 10/11 desktop app for PDF & image management — a **Dashboard**
 home plus tools to compress, merge, split, organize, protect, watermark, sign,
@@ -17,6 +17,10 @@ specific version (and its `.sha256` checksum) from the
 [Releases page](https://github.com/mico360om/mico360doctoolkit/releases/latest).
 After installing, the app keeps itself up to date automatically.
 
+> **v5.7** — a **cleaner Convert section** (9 tools → 4): **PDF → …** (one tool to
+> Word / PowerPoint / Excel / Images), **Office → PDF** (Word / Excel / PowerPoint,
+> auto-detected), and **Document → Markdown** (now also Excel, PowerPoint & PDF).
+>
 > **v5.6.1** — **stable tool layout** (the panel no longer changes width when you
 > switch tools), tidier output controls, and **better OCR text**: scanned lines
 > reflow into real paragraphs with hyphenated words rejoined, plus a new OCR
@@ -76,10 +80,10 @@ After installing, the app keeps itself up to date automatically.
 | **Organize PDF** | Rotate, delete, extract, or reorder pages |
 | **Protect PDF** | Add an **AES-256** password, or unlock with the current one |
 | **Watermark PDF** | Text **or logo/image** stamp — size, opacity, angle, colour |
-| **PDF → Word** | Fully editable `.docx` text + layout (pdf2docx) |
-| **PDF → PowerPoint** | **Editable text boxes**, one slide per page |
-| **Word → PDF** | Engine chain: LibreOffice → MS Word → built-in fallback (always works) |
-| **PDF → Image** | JPG / PNG / WEBP / BMP / TIFF, selectable DPI |
+| **PDF → …** | One tool: PDF to **Word** (editable, OCR optional), **PowerPoint**, **Excel** (tables), or **Images** |
+| **Office → PDF** | **Word / Excel / PowerPoint → PDF**, type auto-detected (LibreOffice → MS Office → built-in fallback) |
+| **Document → Markdown** | **Word / Excel / PowerPoint / PDF → `.md`** — headings, tables, slide sections, page text |
+| **Searchable PDF (OCR)** | Invisible text layer; **Recognition quality** 200/300/400 dpi |
 | **Image → PDF** | One PDF each, or combined |
 | **Compress Image** | Presets, **target file size**, or custom quality + resize / format change |
 
@@ -221,6 +225,7 @@ python tests\sidebar_test.py             # tool search + collapsible categories
 python tests\v55_features_test.py        # consolidated Organize, Protect confirm/show-hide, Watermark position, posgrid/password kinds
 python tests\v56_features_test.py        # bulk Word -> Markdown: headings, bold/italic, lists, tables + end-to-end UI run
 python tests\ocr_quality_test.py         # OCR paragraph reflow + de-hyphenation, DPI quality option, end-to-end searchable PDF
+python tests\consolidated_convert_test.py # PDF→… routing, Office→PDF auto-detect, Document→Markdown (Word/Excel/PPT/PDF)
 ```
 
 ## Compatibility

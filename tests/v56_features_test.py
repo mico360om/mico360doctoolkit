@@ -54,13 +54,13 @@ def main() -> int:
     from mico360.core import processors as P
     from mico360.core.tools import TOOLS_BY_ID
 
-    check("word_to_md tool registered", "word_to_md" in TOOLS_BY_ID)
-    check("word_to_md accepts .docx", ".docx" in TOOLS_BY_ID["word_to_md"].accept)
+    check("to_markdown tool registered", "to_markdown" in TOOLS_BY_ID)
+    check("to_markdown accepts .docx", ".docx" in TOOLS_BY_ID["to_markdown"].accept)
 
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td); out = tmp / "out"; out.mkdir()
         src = _make_docx(tmp / "report.docx")
-        r = P.word_to_md(src, out, {"overwrite": True}, rep)
+        r = P.to_markdown(src, out, {"overwrite": True}, rep)
         check("produced a .md file", r and r[0].suffix == ".md" and r[0].exists())
         md = r[0].read_text(encoding="utf-8")
         print("---- markdown ----\n" + md + "\n------------------")
@@ -80,7 +80,7 @@ def main() -> int:
         if not find_libreoffice():
             fake = tmp / "old.doc"; fake.write_bytes(b"\xd0\xcf not really")
             try:
-                P.word_to_md(fake, out, {"overwrite": True}, rep)
+                P.to_markdown(fake, out, {"overwrite": True}, rep)
                 check(".doc w/o LibreOffice -> clear error", False, "no error raised")
             except P.ProcessError as exc:
                 check(".doc w/o LibreOffice -> clear error",
@@ -92,7 +92,7 @@ def main() -> int:
         from mico360.ui.tool_page import ToolPage
         saved = settings.output_dir
         settings.output_dir = str(out)
-        page = ToolPage(TOOLS_BY_ID["word_to_md"])
+        page = ToolPage(TOOLS_BY_ID["to_markdown"])
         page.chk_same.setChecked(False); page.chk_overwrite.setChecked(True)
         page.out_edit.setText(str(out))
         page.add_paths([str(_make_docx(tmp / "doc2.docx"))])

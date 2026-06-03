@@ -69,26 +69,22 @@ tool automatically.</p>
   <li><b>Edit Metadata</b> — set the document Title, Author, Subject and Keywords.</li>
   <li><b>Searchable PDF (OCR)</b> — add an invisible text layer to a scanned PDF so it
       becomes selectable and searchable (the look of the page is unchanged).</li>
-  <li><b>PDF → Excel</b> — pull tables out of a PDF into an Excel workbook (falls back to
-      page text when no tables are found).</li>
-  <li><b>Excel → PDF</b> / <b>PowerPoint → PDF</b> — convert via LibreOffice or Microsoft
-      Office.</li>
+  <li><b>PDF → …</b> — one tool to convert a PDF to <b>Word</b> (editable .docx; turn on
+      <b>OCR</b> for scanned pages), <b>PowerPoint</b> (<i>Auto</i> keeps text editable and
+      falls back to a page image so slides are never empty; OCR optional), <b>Excel</b>
+      (pulls out tables, or page text when none are found), or <b>Images</b> (one per page,
+      JPG / PNG / WEBP / BMP / TIFF at a chosen DPI). Pick the target from <i>Convert to</i>.</li>
+  <li><b>Office → PDF</b> — convert <b>Word, Excel or PowerPoint</b> to PDF; the type is
+      detected from the file automatically. Uses LibreOffice or Microsoft Office, with a
+      built-in fallback for Word so it always works.</li>
+  <li><b>Document → Markdown</b> — convert <b>Word, Excel, PowerPoint or PDF</b> to clean
+      Markdown (.md): headings, <b>bold</b>/<i>italic</i>, lists and tables for Word; a table
+      per sheet for Excel; a section per slide for PowerPoint; page text (and tables) for PDF.
+      <i>.docx/.xlsx/.pptx/.pdf/.csv</i> work directly; other Office formats need LibreOffice.</li>
+  <li><b>Image → PDF</b> — combine images into one PDF, or make one PDF per image.</li>
   <li><b>Resize Image</b> — batch-resize by width/height or percentage.</li>
   <li><b>Convert Image</b> — change format between PNG / JPG / WEBP / TIFF / BMP.</li>
   <li><b>Watermark Image</b> — stamp text or a logo onto images.</li>
-  <li><b>PDF → Word</b> — produces a fully <b>editable .docx</b> (text + layout). For scanned,
-      image-only PDFs, turn on <b>OCR</b> to recognise the text.</li>
-  <li><b>PDF → PowerPoint</b> — <i>Auto</i> makes editable text boxes where there's a text
-      layer and falls back to a page image otherwise (so slides are never empty); turn on
-      <b>OCR</b> to make scanned pages editable too. You can also force <i>Editable text only</i>
-      or <i>Exact page image</i>.</li>
-  <li><b>Word → PDF</b> — works out of the box: it uses LibreOffice or Microsoft Word when
-      present, and a built-in converter otherwise.</li>
-  <li><b>Word → Markdown</b> — bulk-convert Word documents to clean Markdown (.md),
-      keeping headings, <b>bold</b>/<i>italic</i>, lists and tables. <i>.docx</i> works
-      directly; <i>.doc/.odt/.rtf</i> need LibreOffice.</li>
-  <li><b>PDF → Image</b> — render each page to JPG / PNG / WEBP / BMP / TIFF at a chosen DPI.</li>
-  <li><b>Image → PDF</b> — combine images into one PDF, or make one PDF per image.</li>
   <li><b>Compress Image</b> — presets, a <i>Target file size</i>, or custom quality; optional
       resize and format change (JPEG / PNG / WEBP).</li>
 </ul>
@@ -98,7 +94,7 @@ tool automatically.</p>
 searched or edited. <b>OCR</b> (Optical Character Recognition) reads those pictures
 and recovers the text.</p>
 <ul>
-  <li>Turn on <b>OCR</b> in <b>PDF → Word</b> or <b>PDF → PowerPoint</b> when your PDF
+  <li>Turn on <b>OCR</b> in <b>PDF → …</b> (Word or PowerPoint target) when your PDF
       is scanned or image-only. Pages that already have a real text layer are converted
       directly (no OCR needed), so it’s safe to leave on.</li>
   <li>Recognised text is laid out in reading order — words on the same line are kept
@@ -145,7 +141,7 @@ and recovers the text.</p>
   <li><b>Updates</b> — see your current version, check for updates on demand, and turn the
       automatic startup check on or off.</li>
   <li><b>External tools</b> — set or auto-detect Ghostscript (best PDF compression) and
-      LibreOffice (Word → PDF). Both are optional; the app works without them.</li>
+      LibreOffice (Office → PDF). Both are optional; the app works without them.</li>
   <li><b>About &amp; Legal</b> — About Us, Terms &amp; Conditions, Privacy Policy, and contact info.</li>
 </ul>
 
@@ -156,7 +152,7 @@ and recovers the text.</p>
       <b>Settings → Performance</b>.</li>
   <li>If a file fails, hover it for the reason, or open <b>Activity</b> /
       <b>Settings → Open logs folder</b> for details.</li>
-  <li>Word → PDF gives the most exact result with LibreOffice or Microsoft Word installed.</li>
+  <li>Office → PDF gives the most exact result with LibreOffice or Microsoft Office installed.</li>
   <li>For the best PDF compression, install or bundle Ghostscript (Settings → External tools).</li>
 </ul>
 

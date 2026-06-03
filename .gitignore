@@ -31,3 +31,7 @@ Thumbs.db
 
 # QA render previews
 _*.png
+
+# Build scratch logs
+build/_*.txt
+build/_*.log

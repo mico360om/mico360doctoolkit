@@ -171,7 +171,7 @@ class Settings:
         self._set("deps/libreoffice", value)
 
     # --- dashboard / home data ------------------------------------------
-    _DEFAULT_FAVS = ["pdf_compress", "pdf_merge", "pdf_to_word", "image_compress"]
+    _DEFAULT_FAVS = ["pdf_compress", "pdf_merge", "pdf_convert", "image_compress"]
 
     @property
     def favorite_tools(self) -> list:
