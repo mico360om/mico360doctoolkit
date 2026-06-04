@@ -99,6 +99,33 @@ def _qt_unused(entry) -> bool:
 a.binaries = [x for x in a.binaries if not _qt_unused(x)]
 a.datas = [x for x in a.datas if not _qt_unused(x)]
 
+# Drop large bundled files we never use, to shrink the installer / download:
+#   * OpenCV video I/O (ffmpeg) — OCR only does image ops (verified safe)
+#   * Qt software-OpenGL — a Widgets app renders with the raster engine
+#   * Pillow AVIF codec — not in our supported image formats (PIL skips it)
+#   * Pythonwin / MFC runtime — win32com (Office COM) doesn't need them
+# Saves ~60 MB uncompressed (~25-30 MB off the installer).
+_HEAVY_DROP_SUBSTR = ("opencv_videoio_ffmpeg", "opengl32sw")
+_HEAVY_DROP_BASE = ("mfc140u.dll", "mfcm140u.dll")
+
+
+def _heavy_unused(entry) -> bool:
+    n = str(entry[0]).lower().replace("\\", "/")
+    base = n.rsplit("/", 1)[-1]
+    if any(s in base for s in _HEAVY_DROP_SUBSTR):
+        return True
+    if base in _HEAVY_DROP_BASE:
+        return True
+    if "/pythonwin/" in n or n.startswith("pythonwin/"):
+        return True
+    if base.startswith("_avif") and base.endswith(".pyd"):
+        return True
+    return False
+
+
+a.binaries = [x for x in a.binaries if not _heavy_unused(x)]
+a.datas = [x for x in a.datas if not _heavy_unused(x)]
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
