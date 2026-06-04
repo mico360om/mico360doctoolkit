@@ -165,9 +165,10 @@ class SettingsPage(QWidget):
         return card
 
     def _show_doc(self, title: str, html: str) -> None:
+        from mico360.ui.widgets import clamp_to_screen
         dlg = QDialog(self)
         dlg.setWindowTitle(f"{title} — {__app_name__}")
-        dlg.resize(620, 560)
+        clamp_to_screen(dlg, 620, 560)
         lay = QVBoxLayout(dlg)
         lay.setContentsMargins(16, 16, 16, 16)
         browser = QTextBrowser()

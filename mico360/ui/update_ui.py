@@ -145,7 +145,8 @@ class UpdateDialog(QDialog):
         self._thread: QThread | None = None
         self._worker: DownloadWorker | None = None
         self.setWindowTitle(f"Update available — {__app_name__}")
-        self.resize(560, 480)
+        from mico360.ui.widgets import clamp_to_screen
+        clamp_to_screen(self, 560, 480)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(20, 18, 20, 18)

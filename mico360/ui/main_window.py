@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QCursor, QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -33,16 +33,37 @@ log = get_logger("mico360.ui")
 NARROW = 860
 WIDE = 1040
 
+# Preferred opening size (device-independent px); clamped to the screen at runtime.
+PREF_W, PREF_H = 1180, 760
+# Smallest window we allow. Kept low so it still fits comfortably on small or
+# heavily-scaled displays (e.g. 1080p @ 250 % = 768×432 logical px); content
+# scrolls inside rather than being clipped.
+MIN_W, MIN_H = 480, 420
+
 # Friendly section glyphs (fallback when a tool has none).
 _SECTION_GLYPH = {"PDF": "📄", "Convert": "🔁", "Image": "🖼️", "System": "⚙"}
+
+
+def fit_window_size(pref_w: int, pref_h: int, min_w: int, min_h: int,
+                    avail_w: int, avail_h: int, margin: int = 0) -> tuple[int, int]:
+    """Clamp a preferred window size to the available screen area.
+
+    Never larger than the screen (minus ``margin``) and never smaller than the
+    minimum — so the window always opens fully on-screen, on a 1280×720 panel or
+    a 4K display alike. Pure function (no Qt) so it is unit-testable."""
+    w = max(min_w, min(pref_w, avail_w - margin))
+    h = max(min_h, min(pref_h, avail_h - margin))
+    return w, h
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"{__app_name__}  v{__version__}")
-        self.resize(1180, 760)
-        self.setMinimumSize(560, 480)
+        self.setMinimumSize(MIN_W, MIN_H)
+        self._geom_applied = False
+        self._screen_hooked = False
+        self._apply_initial_geometry()   # size + centre, clamped to the screen
 
         logo_png = resource_path("logo.png")
         if logo_png.exists():
@@ -72,6 +93,52 @@ class MainWindow(QMainWindow):
         # Background update check (deferred so it never blocks startup).
         if settings.auto_check_updates:
             QTimer.singleShot(2500, self._auto_check_updates)
+
+    # --- responsive window geometry / multi-monitor -------------------
+    def _current_screen(self):
+        return (QGuiApplication.screenAt(QCursor.pos())
+                or self.screen() or QGuiApplication.primaryScreen())
+
+    def _apply_initial_geometry(self) -> None:
+        """Open at the preferred size but always fully on the current screen,
+        centred. Works on a small 1280×720 laptop panel and a 4K monitor alike,
+        and picks the monitor under the cursor on multi-monitor setups."""
+        screen = self._current_screen()
+        if screen is None:
+            self.resize(PREF_W, PREF_H)
+            return
+        avail = screen.availableGeometry()
+        w, h = fit_window_size(PREF_W, PREF_H, self.minimumWidth(),
+                               self.minimumHeight(), avail.width(), avail.height())
+        self.resize(w, h)
+        frame = self.frameGeometry()
+        frame.moveCenter(avail.center())
+        # Keep the whole frame inside the available area.
+        frame.moveLeft(max(avail.left(), min(frame.left(), avail.right() - frame.width())))
+        frame.moveTop(max(avail.top(), min(frame.top(), avail.bottom() - frame.height())))
+        self.move(frame.topLeft())
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        # Re-centre now that real frame margins are known, and listen for the
+        # window being dragged to another (possibly smaller / differently-scaled)
+        # monitor so it never ends up larger than that screen.
+        if not self._geom_applied:
+            self._apply_initial_geometry()
+            self._geom_applied = True
+        handle = self.windowHandle()
+        if handle is not None and not self._screen_hooked:
+            handle.screenChanged.connect(self._on_screen_changed)
+            self._screen_hooked = True
+
+    def _on_screen_changed(self, screen) -> None:
+        if screen is None or self.isMaximized() or self.isFullScreen():
+            return
+        avail = screen.availableGeometry()
+        w = min(self.width(), avail.width())
+        h = min(self.height(), avail.height())
+        if w != self.width() or h != self.height():
+            self.resize(max(self.minimumWidth(), w), max(self.minimumHeight(), h))
 
     # ------------------------------------------------------------------
     def _auto_check_updates(self) -> None:
@@ -196,7 +263,11 @@ class MainWindow(QMainWindow):
         area = QScrollArea()
         area.setWidgetResizable(True)
         area.setFrameShape(QScrollArea.NoFrame)
-        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Horizontal bar only appears if a very narrow / highly-scaled window
+        # can't fit the content — so it scrolls instead of clipping. The vertical
+        # bar is always reserved so the usable width is identical on every page
+        # (no shift when switching tools).
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         area.setWidget(page)
         return area

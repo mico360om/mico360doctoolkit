@@ -43,7 +43,12 @@ def main() -> int:
     from mico360.ui.main_window import MainWindow
     w = MainWindow()
     w.setAttribute(Qt.WA_DontShowOnScreen, True)
-    w.show(); app.processEvents()
+    w.show()
+    # Use a wide window so the sidebar starts expanded (this test drives the
+    # expanded search/collapse behaviour); the app otherwise auto-collapses the
+    # sidebar on narrow/small screens.
+    w.resize(1180, 760)
+    app.processEvents()
     sb = w.sidebar
 
     # --- search filters by label ----------------------------------------

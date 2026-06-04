@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication
 
 from mico360 import __app_name__
@@ -25,14 +25,35 @@ def _set_windows_app_id() -> None:
             pass
 
 
+def configure_high_dpi() -> None:
+    """Make the app crisp and correctly sized at every Windows display-scaling
+    level (100 / 125 / 150 / 175 / 200 / 250 / 300 %) and on per-monitor
+    mixed-DPI multi-monitor setups.
+
+    The key piece is the *rounding policy*: ``PassThrough`` keeps fractional
+    scale factors (1.25, 1.5, 1.75, 2.5 …) exact instead of rounding them to a
+    whole number, so the UI neither shrinks nor balloons on those settings.
+    Must run **before** the QApplication is created.
+    """
+    try:
+        QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    except Exception:
+        pass
+    # Harmless on Qt 6 (scaling is always on there); kept for safety/back-compat.
+    for attr in ("AA_EnableHighDpiScaling", "AA_UseHighDpiPixmaps"):
+        if hasattr(Qt, attr):
+            try:
+                QApplication.setAttribute(getattr(Qt, attr), True)
+            except Exception:
+                pass
+
+
 def main() -> int:
     setup_logging()
     log = get_logger()
     _set_windows_app_id()
-
-    if hasattr(Qt, "AA_EnableHighDpiScaling"):
-        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    configure_high_dpi()
 
     app = QApplication(sys.argv)
     app.setApplicationName(__app_name__)

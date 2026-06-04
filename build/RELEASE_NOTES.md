@@ -1,19 +1,30 @@
-## MICO360 Doc Toolkit v5.7.1
+## MICO360 Doc Toolkit v6.0.0
 
-**Fix:** on tools that accept many file types (e.g. **Document → Markdown**), the
-long "Supported:" list inside the drop zone could push the **Browse files / Browse
-folder** buttons past the edge and clip them. The supported-formats list now sits
-just **below** the drop zone, and the drop area never shrinks below its content, so
-the buttons are always fully visible.
+**Display-ready everywhere — full multi-resolution, high-DPI and multi-monitor support.**
 
-**Smaller download:** the installer is now ~14% lighter (125 MB → **108 MB**) by
-dropping bundled components the app never uses (OpenCV's video codec, Qt's
-software-OpenGL fallback, the AVIF image codec, and the Pythonwin/MFC runtime) —
-OCR, image export and Office conversion are unaffected.
+The app now adapts cleanly to any screen, scaling level, and window size:
 
-Everything else is unchanged from v5.7.0: the consolidated **PDF → …**,
-**Office → PDF**, and **Document → Markdown** converters, the stable tool layout,
-and the OCR text improvements.
+- **Every resolution** — HD (1280×720), Full HD, QHD/2K, 4K UHD, 5K+, and
+  ultrawide (21:9 / 32:9) panels.
+- **Every Windows scaling setting** — 100 %, 125 %, 150 %, 175 %, 200 %, 250 %,
+  300 %. Fractional scales now render the UI at its exact size (no shrinking or
+  ballooning) thanks to an explicit *PassThrough* DPI rounding policy, with
+  crisp text and graphics.
+- **Opens fully on-screen, always** — the window is sized and centred to the
+  monitor it opens on, so it never starts larger than a small or heavily-scaled
+  display. The minimum size was lowered so it fits comfortably even at 250–300 %.
+- **Multi-monitor** — opens on the monitor under your cursor, and when dragged to
+  a smaller or differently-scaled monitor it shrinks to fit instead of spilling
+  off-screen.
+- **No clipping** — narrow or highly-scaled windows scroll their content rather
+  than cutting it off, while the layout stays the same width as you switch tools.
+
+Built on Qt's layout engine (docking / grids / flex-style rows), so panels,
+forms, dialogs and the dashboard reflow to the available space at any size.
+
+Everything from v5.7.x carries over: the consolidated **PDF → …**,
+**Office → PDF**, and **Document → Markdown** converters, the OCR improvements,
+and the lighter ~108 MB installer.
 
 ---
 *This release is also the update manifest: the tag is the version, this text is the

@@ -6,7 +6,7 @@ reflows its two children from side-by-side to stacked as width changes.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QCursor, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QBoxLayout,
     QFrame,
@@ -17,6 +17,20 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+def clamp_to_screen(widget, pref_w: int, pref_h: int, margin: int = 48) -> None:
+    """Size a top-level widget (e.g. a dialog) to its preferred size but never
+    larger than the screen it's on — so it can't open partly off-screen on small
+    or heavily-scaled displays. Content inside should scroll if it doesn't fit."""
+    screen = QGuiApplication.screenAt(QCursor.pos()) or QGuiApplication.primaryScreen()
+    if screen is None:
+        widget.resize(pref_w, pref_h)
+        return
+    avail = screen.availableGeometry()
+    w = max(320, min(pref_w, avail.width() - margin))
+    h = max(240, min(pref_h, avail.height() - margin))
+    widget.resize(w, h)
 
 
 # --------------------------------------------------------------------------
