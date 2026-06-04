@@ -1,22 +1,24 @@
-## MICO360 Doc Toolkit v6.1.0
+## MICO360 Doc Toolkit v6.1.1
 
-**UI/UX refresh — clearer, more polished, easier to use.**
+**Faster, more reliable update downloads.**
 
-- **Helpful empty states** — the file list now shows friendly guidance
-  ("No files added yet — drag files onto the zone above, or use Browse…")
-  instead of a blank box, so it's always clear what to do next.
-- **No more hidden text** — long output paths and the file summary now show a
-  full **tooltip** on hover and reveal their meaningful end, so nothing important
-  is silently cut off.
-- **Stronger visual hierarchy** — section headers (Input files / Options /
-  Output) are more readable, and the drag-and-drop zone is a touch more
-  prominent and inviting.
-- **Consistent across light & dark themes** and stable at every display-scaling
-  level — no clipped buttons, labels, or controls.
+The previous updater opened a **single connection** and rode it to the end — so
+if the download server handed it a slow edge, the whole update crawled at that
+speed with no way out. The downloader is now smarter:
 
-All existing functionality is unchanged. Everything from v6.0.0 carries over:
-full multi-resolution / high-DPI / multi-monitor support, single-instance, the
-crash guard, and the low-resource optimizations.
+- **Reconnects off a slow connection** — if throughput drops, it drops that
+  connection and grabs a fresh (often much faster) one, *resuming* via HTTP Range
+  instead of starting over. So it rides the fast moments instead of getting stuck
+  on a slow one.
+- **Resumes after stalls/drops** — a hiccup no longer fails the update or
+  restarts it from zero; it picks up exactly where it left off.
+- **Lighter on your PC while downloading** — progress updates are throttled, so
+  the download thread isn't competing with constant UI refreshes (which could
+  slow it on a busy or low-end machine).
+- The finished file is still **SHA-256 verified** before it installs.
+
+Everything from v6.1.0 (UI/UX refresh) and v6.0.0 (multi-resolution / high-DPI,
+single-instance, crash guard) carries over.
 
 ---
 *This release is also the update manifest: the tag is the version, this text is the

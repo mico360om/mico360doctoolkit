@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.request
 from dataclasses import dataclass
 
@@ -117,49 +118,124 @@ def check_for_update(json_fetcher=_get_json) -> UpdateInfo | None:
 
 
 # --- download + verify ---------------------------------------------------
+# Reconnect tuning. GitHub's release CDN throughput can swing wildly per
+# connection (seen: 0.2–14 MB/s within seconds), so if a connection runs slow we
+# drop it and reconnect — resuming via HTTP Range — to chase a faster edge and to
+# survive stalls, without ever re-downloading the bytes we already have.
+_DL_WINDOW = 6.0            # seconds per throughput sample
+_DL_MIN_SPEED = 300 * 1024  # below this for a full window → reconnect
+_DL_MAX_STUCK = 6           # consecutive no-progress reconnects before giving up
+
+
+class _Cancelled(Exception):
+    pass
+
+
+def _safe_remove(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 def download(info: UpdateInfo, dest_dir: str | None = None,
              progress=None, is_cancelled=None) -> str:
-    """Download the installer to a temp file, verifying its SHA-256 if known.
+    """Download the installer (resumable), verifying its SHA-256 if known.
 
-    ``progress(done, total)`` and ``is_cancelled() -> bool`` are optional.
-    Returns the downloaded file path. Raises on cancellation or checksum failure.
+    The download survives a flaky/variable connection: it writes to a ``.part``
+    file and, on a stall, drop, or a sustained-slow window, reconnects with an
+    HTTP ``Range`` request to resume from where it left off (and to grab a faster
+    CDN edge). ``progress(done, total)`` and ``is_cancelled() -> bool`` are
+    optional. Returns the final file path; raises on cancellation or checksum
+    failure.
     """
     dest_dir = dest_dir or tempfile.mkdtemp(prefix="mico360_update_")
     os.makedirs(dest_dir, exist_ok=True)
     path = os.path.join(dest_dir, info.asset_name)
+    part = path + ".part"
 
-    req = urllib.request.Request(info.url, headers=_HEADERS)
-    with urllib.request.urlopen(req, timeout=30) as resp, open(path, "wb") as fh:  # noqa: S310
-        total = int(resp.headers.get("Content-Length") or 0)
-        done = 0
-        while True:
-            if is_cancelled and is_cancelled():
-                fh.close()
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
-                raise RuntimeError("Update cancelled.")
-            chunk = resp.read(_CHUNK)
-            if not chunk:
-                break
-            fh.write(chunk)
-            done += len(chunk)
-            if progress:
-                progress(done, total)
+    total: int | None = None
+    stuck = 0
+    while True:
+        existing = os.path.getsize(part) if os.path.exists(part) else 0
+        if total is not None and existing >= total > 0:
+            break
+        headers = dict(_HEADERS)
+        headers["Accept"] = "application/octet-stream"   # we want the raw asset
+        if existing:
+            headers["Range"] = f"bytes={existing}-"
+        try:
+            req = urllib.request.Request(info.url, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+                ranged = getattr(resp, "status", 200) == 206
+                if total is None:
+                    crange = resp.headers.get("Content-Range") or ""
+                    if "/" in crange:
+                        total = int(crange.rsplit("/", 1)[-1])
+                    else:
+                        total = int(resp.headers.get("Content-Length") or 0) or None
+                if existing and not ranged:      # server ignored Range → restart
+                    existing = 0
+                done = existing
+                with open(part, "ab" if existing else "wb") as fh:
+                    win_t = time.monotonic()
+                    win_b = 0
+                    emit_t = win_t
+                    emit_b = done
+                    while True:
+                        if is_cancelled and is_cancelled():
+                            raise _Cancelled()
+                        chunk = resp.read(_CHUNK)
+                        if not chunk:
+                            break
+                        fh.write(chunk)
+                        done += len(chunk)
+                        win_b += len(chunk)
+                        now = time.monotonic()
+                        # Throttle UI progress updates: at most ~10/sec (or per
+                        # 1 MB). Emitting a cross-thread Qt signal for every 256 KB
+                        # chunk floods the UI thread and, via GIL contention, can
+                        # actually slow the download on a busy / low-end machine.
+                        if progress and (now - emit_t >= 0.1
+                                         or done - emit_b >= (1 << 20)):
+                            progress(done, total or 0)
+                            emit_t, emit_b = now, done
+                        if now - win_t >= _DL_WINDOW:
+                            if (win_b / (now - win_t) < _DL_MIN_SPEED
+                                    and total and done < total):
+                                break            # too slow → reconnect for a faster edge
+                            win_t, win_b = now, 0
+                    if progress:                 # final position for this round
+                        progress(done, total or 0)
+        except _Cancelled:
+            _safe_remove(part)
+            raise RuntimeError("Update cancelled.")
+        except Exception:                        # network blip → resume & retry
+            pass
+
+        new_size = os.path.getsize(part) if os.path.exists(part) else 0
+        if total and new_size >= total:
+            break
+        if new_size <= existing:                 # made no progress this round
+            stuck += 1
+            if stuck > _DL_MAX_STUCK:
+                raise RuntimeError(
+                    "The update download kept stalling on the network. Please try "
+                    "again, or download it from the Releases page.")
+            time.sleep(min(1.0 + stuck, 5.0))
+        else:
+            stuck = 0
 
     if info.sha256:
         h = hashlib.sha256()
-        with open(path, "rb") as fh:
+        with open(part, "rb") as fh:
             for block in iter(lambda: fh.read(1 << 20), b""):
                 h.update(block)
         if h.hexdigest().lower() != info.sha256.lower():
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+            _safe_remove(part)
             raise RuntimeError("The downloaded update failed its integrity check "
                                "and was discarded. Please try again later.")
+    os.replace(part, path)
     return path
 
 
