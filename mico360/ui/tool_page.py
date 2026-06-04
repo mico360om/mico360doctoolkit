@@ -18,7 +18,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -36,7 +35,8 @@ from mico360.logging_setup import get_logger
 from mico360.theme import palette
 from mico360.ui.file_collector import collect_files
 from mico360.ui.options_widget import OptionsWidget
-from mico360.ui.widgets import Card, Chip, DropArea, ResponsiveRow, section_label
+from mico360.ui.widgets import (
+    Card, Chip, DropArea, FileListWidget, ResponsiveRow, section_label)
 
 log = get_logger("mico360.ui")
 
@@ -161,10 +161,12 @@ class ToolPage(QWidget):
         formats.setWordWrap(True)
         card.add(formats)
 
-        self.file_list = QListWidget()
+        self.file_list = FileListWidget(
+            "No files added yet.\n\nDrag files onto the zone above, "
+            "or use Browse files / Browse folder.")
         self.file_list.setObjectName("FileList")
         self.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.file_list.setMinimumHeight(120)
+        self.file_list.setMinimumHeight(130)
         self.file_list.itemDoubleClicked.connect(self._open_item_output)
         tip = ("Double-click a finished file to open its output. Right-click for more.")
         # For tools where input order matters (Merge, combined Image → PDF), let
@@ -218,8 +220,10 @@ class ToolPage(QWidget):
 
         card.add(section_label("Output"))
         out_row = QHBoxLayout()
-        self.out_edit = QLineEdit(settings.output_dir)
+        self.out_edit = QLineEdit()
         self.out_edit.setReadOnly(True)
+        self.out_edit.setCursorPosition(0)
+        self._set_output_path(settings.output_dir)
         btn_out = QPushButton("Change")
         btn_out.setObjectName("Ghost")
         btn_out.setCursor(Qt.PointingHandCursor)
@@ -376,7 +380,9 @@ class ToolPage(QWidget):
             bits.append(f"{failed} failed")
         if pending:
             bits.append(f"{pending} pending")
-        self.count_lbl.setText("  ·  ".join(bits))
+        summary = "  ·  ".join(bits)
+        self.count_lbl.setText(summary)
+        self.count_lbl.setToolTip(summary)   # full text on hover (row can be tight)
         self.btn_redo.setEnabled(done > 0 or failed > 0)
 
     def _remove_selected(self) -> None:
@@ -450,11 +456,18 @@ class ToolPage(QWidget):
         if folder:
             self.add_paths([folder])
 
+    def _set_output_path(self, path: str) -> None:
+        """Show the path so the meaningful tail (the actual folder) is visible,
+        with the full path always available on hover — never silently truncated."""
+        self.out_edit.setText(path)
+        self.out_edit.setToolTip(path)
+        self.out_edit.setCursorPosition(len(path))
+
     def _choose_output(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select output folder",
                                                   self.out_edit.text())
         if folder:
-            self.out_edit.setText(folder)
+            self._set_output_path(folder)
             settings.output_dir = folder
 
     # -----------------------------------------------------------------

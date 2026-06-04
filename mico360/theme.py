@@ -200,7 +200,7 @@ QPushButton#IconButton:checked {{ background-color: {c['hover']}; color: {c['pri
 
 #PageTitle {{ font-size: 24px; font-weight: 800; color: {c['text']}; }}
 #PageSubtitle {{ font-size: 13px; color: {c['text_muted']}; }}
-#SectionLabel {{ font-size: 11px; font-weight: 700; color: {c['text_faint']}; letter-spacing: 0.6px; }}
+#SectionLabel {{ font-size: 11px; font-weight: 800; color: {c['text_muted']}; letter-spacing: 0.8px; }}
 #Hint {{ color: {c['text_muted']}; font-size: 12px; }}
 #Muted {{ color: {c['text_faint']}; font-size: 12px; }}
 #ToolIcon {{ font-size: 24px; }}

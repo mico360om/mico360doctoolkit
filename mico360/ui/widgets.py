@@ -6,17 +6,47 @@ reflows its two children from side-by-side to stacked as width changes.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QCursor, QFont, QGuiApplication
+from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter
 from PySide6.QtWidgets import (
     QBoxLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QListWidget,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
+
+
+class FileListWidget(QListWidget):
+    """A file list that paints a friendly, centred empty-state message while no
+    files have been added — instead of leaving a blank box."""
+
+    def __init__(self, placeholder: str = "", parent: QWidget | None = None):
+        super().__init__(parent)
+        self._placeholder = placeholder
+
+    def set_placeholder(self, text: str) -> None:
+        self._placeholder = text
+        self.viewport().update()
+
+    def paintEvent(self, event):  # noqa: N802
+        super().paintEvent(event)
+        if self.count() or not self._placeholder:
+            return
+        from mico360.config import settings
+        from mico360.theme import palette
+        c = palette(settings.theme)
+        painter = QPainter(self.viewport())
+        rect = self.viewport().rect().adjusted(24, 18, -24, -18)
+        f = QFont(self.font())
+        f.setPointSizeF(max(9.0, f.pointSizeF() + 1.0))
+        painter.setFont(f)
+        painter.setPen(QColor(c["text_faint"]))
+        painter.drawText(rect, int(Qt.AlignCenter | Qt.TextWordWrap), self._placeholder)
+        painter.end()
 
 
 def clamp_to_screen(widget, pref_w: int, pref_h: int, margin: int = 48) -> None:
@@ -179,7 +209,7 @@ class DropArea(QFrame):
         # never squeezed below its own content, so the Browse buttons can't be
         # clipped — if room is tight the page scrolls instead.
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
-        self.setMinimumHeight(150)
+        self.setMinimumHeight(160)
 
         lay = QVBoxLayout(self)
         lay.setAlignment(Qt.AlignCenter)
@@ -190,7 +220,7 @@ class DropArea(QFrame):
         glyph.setObjectName("DropGlyph")
         glyph.setAlignment(Qt.AlignCenter)
         f = QFont()
-        f.setPointSize(28)
+        f.setPointSize(30)
         glyph.setFont(f)
         lay.addWidget(glyph)
 
