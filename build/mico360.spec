@@ -22,6 +22,7 @@ datas = [
 ]
 binaries = []
 hiddenimports = [
+    "PySide6.QtNetwork",   # QLocalServer/QLocalSocket — single-instance guard
     "fitz", "pypdf", "pptx", "PIL", "pdf2docx", "img2pdf",
     # Word -> PDF engine chain
     "docx", "reportlab", "docx2pdf",
@@ -66,9 +67,11 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     runtime_hooks=[],
+    # NOTE: QtNetwork is kept — QLocalServer/QLocalSocket power the
+    # single-instance guard. (Updates still use stdlib urllib, not QtNetwork.)
     excludes=["tkinter", "matplotlib", "pytest",
               "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtQuickWidgets",
-              "PySide6.QtNetwork", "PySide6.QtPdf", "PySide6.QtPdfWidgets",
+              "PySide6.QtPdf", "PySide6.QtPdfWidgets",
               "PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets",
               "PySide6.QtCharts", "PySide6.QtDataVisualization"],
     cipher=block_cipher,
@@ -80,9 +83,9 @@ a = Analysis(
 # Saves ~20+ MB. The PySide6 hook ships these regardless of the excludes above.
 _QT_DROP = (
     "qt6quick", "qt6qml", "qt6qmlmodels", "qt6quickwidgets", "qt6quickcontrols2",
-    "qt6quicktemplates2", "qt6virtualkeyboard", "qt6pdf", "qt6network",
+    "qt6quicktemplates2", "qt6virtualkeyboard", "qt6pdf",
     "qt6multimedia", "qt6charts", "qt6datavisualization", "qt6spatialaudio",
-    "qtquick", "qtqml", "qtpdf", "qtnetwork", "qtmultimedia", "qtcharts",
+    "qtquick", "qtqml", "qtpdf", "qtmultimedia", "qtcharts",
 )
 
 

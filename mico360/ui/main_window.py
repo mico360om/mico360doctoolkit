@@ -1,6 +1,8 @@
 """Main application window: responsive shell (collapsible sidebar + top bar)."""
 from __future__ import annotations
 
+import sys
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QCursor, QGuiApplication, QIcon
 from PySide6.QtWidgets import (
@@ -139,6 +141,21 @@ class MainWindow(QMainWindow):
         h = min(self.height(), avail.height())
         if w != self.width() or h != self.height():
             self.resize(max(self.minimumWidth(), w), max(self.minimumHeight(), h))
+
+    def bring_to_front(self) -> None:
+        """Restore, raise and focus the window — called when the user tries to
+        launch a second copy, so the existing window comes to the foreground."""
+        self.setWindowState((self.windowState() & ~Qt.WindowMinimized)
+                            | Qt.WindowActive)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        if sys.platform.startswith("win"):
+            try:    # nudge Windows to allow the foreground change
+                import ctypes
+                ctypes.windll.user32.SetForegroundWindow(int(self.winId()))
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     def _auto_check_updates(self) -> None:

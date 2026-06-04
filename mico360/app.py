@@ -49,15 +49,55 @@ def configure_high_dpi() -> None:
                 pass
 
 
+def install_crash_guard(log) -> None:
+    """Last-resort handler: log any uncaught exception and keep the app alive
+    with a friendly message instead of crashing to the desktop."""
+    def _hook(exc_type, exc, tb):
+        if issubclass(exc_type, KeyboardInterrupt):
+            sys.__excepthook__(exc_type, exc, tb)
+            return
+        log.critical("Unhandled exception", exc_info=(exc_type, exc, tb))
+        try:
+            from PySide6.QtGui import QGuiApplication
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            if (QApplication.instance() is not None
+                    and QGuiApplication.platformName() != "offscreen"):
+                QMessageBox.warning(
+                    None, __app_name__,
+                    "Something went wrong, but the app is still running.\n\n"
+                    f"{exc_type.__name__}: {exc}\n\n"
+                    "If this keeps happening, please check Settings → Open logs "
+                    "folder and send us the log.")
+        except Exception:
+            pass
+    sys.excepthook = _hook
+
+
 def main() -> int:
     setup_logging()
     log = get_logger()
+    install_crash_guard(log)
     _set_windows_app_id()
     configure_high_dpi()
 
     app = QApplication(sys.argv)
     app.setApplicationName(__app_name__)
     app.setOrganizationName("MICO360")
+
+    # --- single instance: a second launch raises the first and exits ---
+    from mico360.single_instance import SingleInstance
+    guard = SingleInstance()
+    if guard.is_running():
+        guard.signal_running()      # bring the existing window forward
+        from PySide6.QtGui import QGuiApplication
+        from PySide6.QtWidgets import QMessageBox
+        if QGuiApplication.platformName() != "offscreen":
+            QMessageBox.information(
+                None, __app_name__,
+                f"{__app_name__} is already running.\n\n"
+                "We've brought the open window to the front for you.")
+        log.info("Second instance blocked; signalled the running one.")
+        return 0
 
     logo = resource_path("logo.png")
     if logo.exists():
@@ -70,6 +110,8 @@ def main() -> int:
 
     try:
         win = MainWindow()
+        guard.setParent(win)                       # tie its lifetime to the window
+        guard.activated.connect(win.bring_to_front)
         win.show()
     except Exception:
         log.exception("Failed to start UI")

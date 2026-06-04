@@ -227,6 +227,7 @@ python tests\v56_features_test.py        # bulk Word -> Markdown: headings, bold
 python tests\ocr_quality_test.py         # OCR paragraph reflow + de-hyphenation, DPI quality option, end-to-end searchable PDF
 python tests\consolidated_convert_test.py # PDF→… routing, Office→PDF auto-detect, Document→Markdown (Word/Excel/PPT/PDF)
 python tests\responsive_dpi_test.py      # high-DPI PassThrough, multi-resolution window fitting, no-clip layout, multi-monitor
+python tests\single_instance_test.py     # single-instance detection + activation messaging + reclaim
 ```
 
 ## Compatibility

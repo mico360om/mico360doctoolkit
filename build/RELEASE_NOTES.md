@@ -22,6 +22,17 @@ The app now adapts cleanly to any screen, scaling level, and window size:
 Built on Qt's layout engine (docking / grids / flex-style rows), so panels,
 forms, dialogs and the dashboard reflow to the available space at any size.
 
+**Lighter, steadier, single-instance.**
+
+- **Single instance** — launching the app a second time now brings the open
+  window to the front and shows *"… is already running"* instead of opening a
+  duplicate.
+- **Crash guard** — an unexpected error is logged and shown as a friendly,
+  non-fatal message instead of closing the app.
+- **Low-resource ready** — fast ~0.3 s startup, heavy engines loaded only when
+  first used, no memory growth under sustained use, and bounded CPU/threads so it
+  runs smoothly on 4 GB / dual-core machines. (See `PERFORMANCE.md`.)
+
 Everything from v5.7.x carries over: the consolidated **PDF → …**,
 **Office → PDF**, and **Document → Markdown** converters, the OCR improvements,
 and the lighter ~108 MB installer.
