@@ -83,15 +83,24 @@ def main() -> int:
     # --- checksum sidecar must match the picked installer per OS --------
     # (regression guard: a release with BOTH a .exe and a .dmg sidecar must not
     #  cross-wire the hashes, or the integrity check would block valid updates.)
+    # Mirrors the real release layout: the macOS checksum uses a .sha256.TXT
+    # extension so it can't be mistaken for the Windows installer's by an older
+    # "grab any .sha256" updater — but our updater accepts either extension.
     rel = {
         "tag_name": "v9.9.9", "html_url": "x", "body": "",
         "assets": [
-            {"name": "MICO360-DocToolkit-9.9.9.dmg", "browser_download_url": "u/dmg"},
-            {"name": "MICO360-DocToolkit-9.9.9.dmg.sha256", "browser_download_url": "u/dmgsha"},
+            {"name": "MICO360-DocToolkit-macos-9.9.9.dmg", "browser_download_url": "u/dmg"},
+            {"name": "MICO360-DocToolkit-macos-9.9.9.dmg.sha256.txt", "browser_download_url": "u/dmgsha"},
             {"name": "MICO360-DocToolkit-Setup-9.9.9.exe", "browser_download_url": "u/exe"},
             {"name": "MICO360-DocToolkit-Setup-9.9.9.exe.sha256", "browser_download_url": "u/exesha"},
         ],
     }
+    # An OLD "grab any .sha256" updater on Windows must only ever see the .exe's
+    # checksum (the dmg's is .sha256.txt) — otherwise it cross-wires the hashes.
+    only_sha256 = [a for a in rel["assets"] if a["name"].lower().endswith(".sha256")]
+    check("only the .exe ships a bare .sha256 (old Windows updaters stay correct)",
+          len(only_sha256) == 1 and only_sha256[0]["name"].endswith(".exe.sha256"),
+          [a["name"] for a in only_sha256])
     real_newer, real_get = updater.is_newer, updater._get
     updater.is_newer = lambda *a, **k: True
     updater._get = lambda url, timeout=20: (
