@@ -232,6 +232,7 @@ python tests\single_instance_test.py     # single-instance detection + activatio
 python tests\ui_polish_test.py           # empty-state file list, no-truncation tooltips, output-path tail
 python tests\download_resume_test.py     # resumable update download via HTTP Range + SHA-256 verify
 python tests\cross_platform_test.py      # per-OS installer pick (.dmg/.exe) + Finder/Explorer/xdg-open commands
+python tests\feature_audit_test.py       # every tool + every option, validating OUTPUT correctness (not just "it ran")
 ```
 
 ## Compatibility
