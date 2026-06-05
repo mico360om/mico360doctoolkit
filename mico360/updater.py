@@ -110,10 +110,13 @@ def check_for_update(json_fetcher=_get_json) -> UpdateInfo | None:
         return None
     name = installer["name"]
     sha = None
+    # Match the checksum sidecar to THIS installer only. A blanket
+    # "any .sha256" match would grab the wrong file's hash on a release that
+    # ships both a .exe and a .dmg (each with its own sidecar) — which would
+    # then fail the integrity check and block a perfectly good update.
+    want = (name.lower() + ".sha256", name.lower() + ".sha256.txt")
     sidecar = next((a for a in assets
-                    if str(a.get("name", "")).lower() in
-                    (name.lower() + ".sha256", "sha256.txt")
-                    or str(a.get("name", "")).lower().endswith(".sha256")), None)
+                    if str(a.get("name", "")).lower() in want), None)
     if sidecar:
         try:
             sha = _get(sidecar["browser_download_url"]).decode("utf-8").split()[0].strip()

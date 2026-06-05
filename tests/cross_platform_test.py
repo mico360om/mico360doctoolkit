@@ -80,6 +80,34 @@ def main() -> int:
         check("Linux uses xdg-open", pu.open_command(d)[0] == "xdg-open"
               and pu.reveal_command(f)[0] == "xdg-open")
 
+    # --- checksum sidecar must match the picked installer per OS --------
+    # (regression guard: a release with BOTH a .exe and a .dmg sidecar must not
+    #  cross-wire the hashes, or the integrity check would block valid updates.)
+    rel = {
+        "tag_name": "v9.9.9", "html_url": "x", "body": "",
+        "assets": [
+            {"name": "MICO360-DocToolkit-9.9.9.dmg", "browser_download_url": "u/dmg"},
+            {"name": "MICO360-DocToolkit-9.9.9.dmg.sha256", "browser_download_url": "u/dmgsha"},
+            {"name": "MICO360-DocToolkit-Setup-9.9.9.exe", "browser_download_url": "u/exe"},
+            {"name": "MICO360-DocToolkit-Setup-9.9.9.exe.sha256", "browser_download_url": "u/exesha"},
+        ],
+    }
+    real_newer, real_get = updater.is_newer, updater._get
+    updater.is_newer = lambda *a, **k: True
+    updater._get = lambda url, timeout=20: (
+        ("a" * 64 + "  file") if "exesha" in url else ("b" * 64 + "  file")).encode()
+    try:
+        with as_platform("win32"):
+            i = updater.check_for_update(json_fetcher=lambda url: rel)
+            check("Windows update verifies against the .exe's own sha256",
+                  i and i.asset_name.endswith(".exe") and i.sha256 == "a" * 64, i and i.sha256)
+        with as_platform("darwin"):
+            i = updater.check_for_update(json_fetcher=lambda url: rel)
+            check("macOS update verifies against the .dmg's own sha256",
+                  i and i.asset_name.endswith(".dmg") and i.sha256 == "b" * 64, i and i.sha256)
+    finally:
+        updater.is_newer, updater._get = real_newer, real_get
+
     # --- theme detection returns a valid value on this OS ---------------
     from mico360.theme import system_theme
     check("system_theme() returns light/dark", system_theme() in ("light", "dark"),
