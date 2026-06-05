@@ -38,6 +38,16 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
+      - name: Run feature + cross-platform tests on macOS
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          python tests/feature_audit_test.py
+          python tests/cross_platform_test.py
+          python tests/responsive_dpi_test.py
+          python tests/single_instance_test.py
+          python tests/download_resume_test.py
+
       - name: Build the app icon (.icns)
         run: |
           python build/make_iconset.py
