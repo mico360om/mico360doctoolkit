@@ -76,11 +76,23 @@ def _get_json(url: str, timeout: int = 20) -> dict:
     return json.loads(_get(url, timeout).decode("utf-8"))
 
 
+def _installer_ext() -> str:
+    """The installer file extension this OS can install."""
+    if sys.platform == "darwin":
+        return ".dmg"
+    return ".exe"   # Windows (and the default)
+
+
 def _pick_installer(assets: list[dict]) -> dict | None:
-    exes = [a for a in assets if str(a.get("name", "")).lower().endswith(".exe")]
-    # Prefer the Setup/installer exe over a standalone one-file exe.
-    setup = [a for a in exes if "setup" in str(a.get("name", "")).lower()]
-    return (setup or exes or [None])[0]
+    ext = _installer_ext()
+    matches = [a for a in assets
+               if str(a.get("name", "")).lower().endswith(ext)]
+    # Prefer the "setup" installer over any other matching file, and a
+    # versioned name over the stable "…-Latest" copy.
+    setup = [a for a in matches if "setup" in str(a.get("name", "")).lower()]
+    pref = setup or matches
+    versioned = [a for a in pref if "latest" not in str(a.get("name", "")).lower()]
+    return (versioned or pref or [None])[0]
 
 
 def check_for_update(json_fetcher=_get_json) -> UpdateInfo | None:
@@ -240,8 +252,16 @@ def download(info: UpdateInfo, dest_dir: str | None = None,
 
 
 def apply_and_exit(setup_path: str) -> None:
-    """Launch the installer silently (it closes & upgrades the running app), then
-    quit so the files can be replaced. The user approves the standard UAC prompt."""
+    """Start installing the downloaded update, then let the app quit.
+
+    * Windows — run the Inno Setup installer silently; it closes the running app,
+      upgrades in place, and relaunches. The user approves the standard UAC prompt.
+    * macOS — open the downloaded ``.dmg`` so the user can drag the new app into
+      Applications (the standard, signing-free update flow).
+    """
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", setup_path], close_fds=True)
+        return
     args = [setup_path, "/SILENT", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS",
             "/NOCANCEL"]
     creationflags = 0x08000000 if sys.platform.startswith("win") else 0  # no console

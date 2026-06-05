@@ -19,7 +19,18 @@ RADIUS_SM = 8
 def system_theme() -> str:
     """Return the OS appearance — 'light' or 'dark'. Used as the default theme
     on first run when the user hasn't picked one yet. Falls back to 'dark'."""
-    try:
+    import sys
+    if sys.platform == "darwin":          # macOS
+        try:
+            import subprocess
+            out = subprocess.run(
+                ["defaults", "read", "-g", "AppleInterfaceStyle"],
+                capture_output=True, text=True, timeout=3)
+            # The key exists (value "Dark") only in dark mode; absent ⇒ light.
+            return "dark" if "dark" in out.stdout.lower() else "light"
+        except Exception:
+            return "dark"
+    try:                                  # Windows
         import winreg
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,

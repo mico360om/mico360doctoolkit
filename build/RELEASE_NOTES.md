@@ -1,25 +1,26 @@
-## MICO360 Doc Toolkit v6.1.1
+## MICO360 Doc Toolkit v6.2.0
 
-**Faster, more reliable update downloads.**
+**Now on macOS. 🍎**
 
-The previous updater opened a **single connection** and rode it to the end — so
-if the download server handed it a slow edge, the whole update crawled at that
-speed with no way out. The downloader is now smarter:
+MICO360 Doc Toolkit is now cross-platform — the same app, tools and UI now run on
+**macOS** as well as Windows:
 
-- **Reconnects off a slow connection** — if throughput drops, it drops that
-  connection and grabs a fresh (often much faster) one, *resuming* via HTTP Range
-  instead of starting over. So it rides the fast moments instead of getting stuck
-  on a slow one.
-- **Resumes after stalls/drops** — a hiccup no longer fails the update or
-  restarts it from zero; it picks up exactly where it left off.
-- **Lighter on your PC while downloading** — progress updates are throttled, so
-  the download thread isn't competing with constant UI refreshes (which could
-  slow it on a busy or low-end machine).
-- The finished file is still **SHA-256 verified** before it installs.
+- **macOS `.dmg`** — download, drag the app into Applications, done. Built for
+  Intel and runs on Apple Silicon via Rosetta 2.
+- **Native behaviour** — "Open output" reveals files in **Finder**, follows the
+  macOS **light/dark** appearance, and finds **LibreOffice** in `/Applications`.
+- **Same auto-updater** — it now knows which installer to fetch per OS (`.dmg` on
+  Mac, `.exe` on Windows), still SHA-256 verified.
 
-Everything from v6.1.0 (UI/UX refresh) and v6.0.0 (multi-resolution / high-DPI,
-single-instance, crash guard) carries over.
+> **Unsigned build:** on first launch, right-click the app → **Open** (or allow it
+> in **System Settings → Privacy & Security**) to get past Gatekeeper's
+> "unidentified developer" prompt. Proper signing/notarization can come later.
+
+Everything from v6.1.1 (resumable, reconnect-on-slow update downloads), v6.1.0
+(UI/UX refresh) and v6.0.0 (multi-resolution / high-DPI, single-instance, crash
+guard) carries over on both platforms.
 
 ---
 *This release is also the update manifest: the tag is the version, this text is the
-release notes, and the attached Setup `.exe` (+ `.sha256`) is what the app installs.*
+release notes, and the attached Setup `.exe` / `.dmg` (+ `.sha256`) is what the app
+installs.*

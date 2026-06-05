@@ -6,8 +6,6 @@ panel and the options panel (side-by-side on wide windows, stacked when narrow)
 """
 from __future__ import annotations
 
-import os
-import subprocess
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -667,14 +665,8 @@ class ToolPage(QWidget):
 
     # -----------------------------------------------------------------
     def _open_in_explorer(self, sample: Path) -> None:
-        try:
-            folder = sample.parent if sample.is_file() else sample
-            if os.name == "nt":
-                subprocess.Popen(["explorer", "/select,", str(sample)])
-            else:
-                subprocess.Popen(["xdg-open", str(folder)])
-        except Exception:
-            pass
+        from mico360.core.platform_utils import reveal
+        reveal(sample)
 
     def _open_last_output(self) -> None:
         if self._last_outputs:

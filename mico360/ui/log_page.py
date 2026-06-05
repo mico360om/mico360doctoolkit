@@ -1,9 +1,6 @@
 """Global activity log page, fed by the logging bridge and tool pages."""
 from __future__ import annotations
 
-import os
-import subprocess
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -59,10 +56,5 @@ class LogPage(QWidget):
         self.view.appendPlainText(text)
 
     def _open_logs(self) -> None:
-        try:
-            if os.name == "nt":
-                os.startfile(str(logs_dir()))  # type: ignore[attr-defined]
-            else:
-                subprocess.Popen(["xdg-open", str(logs_dir())])
-        except Exception:
-            pass
+        from mico360.core.platform_utils import open_path
+        open_path(logs_dir())

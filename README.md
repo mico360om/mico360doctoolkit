@@ -1,4 +1,4 @@
-# MICO360 Doc Toolkit  ·  v6.1.1
+# MICO360 Doc Toolkit  ·  v6.2.0
 
 A modern Windows 10/11 desktop app for PDF & image management — a **Dashboard**
 home plus tools to compress, merge, split, organize, protect, watermark, sign,
@@ -10,9 +10,10 @@ activity logs.
 
 ## ⬇ Download
 
-**[Download MICO360 Doc Toolkit — Windows Installer (.exe)](https://github.com/mico360om/mico360doctoolkit/releases/latest/download/MICO360-DocToolkit-Setup-Latest.exe)**
+- **Windows:** **[Download the Installer (.exe)](https://github.com/mico360om/mico360doctoolkit/releases/latest/download/MICO360-DocToolkit-Setup-Latest.exe)**
+- **macOS:** **[Download the Disk Image (.dmg)](https://github.com/mico360om/mico360doctoolkit/releases/latest/download/MICO360-DocToolkit-Latest.dmg)** — drag the app to Applications. (Unsigned: first launch via right-click → *Open*.)
 
-That link always serves the **latest** installer directly. You can also grab a
+Those links always serve the **latest** build directly. You can also grab a
 specific version (and its `.sha256` checksum) from the
 [Releases page](https://github.com/mico360om/mico360doctoolkit/releases/latest).
 After installing, the app keeps itself up to date automatically.
@@ -230,6 +231,7 @@ python tests\responsive_dpi_test.py      # high-DPI PassThrough, multi-resolutio
 python tests\single_instance_test.py     # single-instance detection + activation messaging + reclaim
 python tests\ui_polish_test.py           # empty-state file list, no-truncation tooltips, output-path tail
 python tests\download_resume_test.py     # resumable update download via HTTP Range + SHA-256 verify
+python tests\cross_platform_test.py      # per-OS installer pick (.dmg/.exe) + Finder/Explorer/xdg-open commands
 ```
 
 ## Compatibility

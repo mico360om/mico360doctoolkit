@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -331,11 +330,5 @@ class SettingsPage(QWidget):
             "Both are bundled with the installer; manual paths override detection.")
 
     def _open_logs(self) -> None:
-        path = logs_dir()
-        try:
-            if os.name == "nt":
-                os.startfile(str(path))  # type: ignore[attr-defined]
-            else:
-                subprocess.Popen(["xdg-open", str(path)])
-        except Exception:
-            pass
+        from mico360.core.platform_utils import open_path
+        open_path(logs_dir())

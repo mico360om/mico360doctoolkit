@@ -36,7 +36,7 @@ def find_ghostscript() -> str | None:
         if found:
             return found
 
-    # Well-known install dirs
+    # Well-known install dirs (Windows)
     for base in (r"C:\Program Files\gs", r"C:\Program Files (x86)\gs"):
         p = Path(base)
         if p.exists():
@@ -44,6 +44,11 @@ def find_ghostscript() -> str | None:
                 return str(sub)
             for sub in sorted(p.glob("gs*/bin/gswin32c.exe"), reverse=True):
                 return str(sub)
+    # macOS / Linux (Homebrew, MacPorts, system)
+    for base in ("/opt/homebrew/bin/gs", "/usr/local/bin/gs", "/opt/local/bin/gs",
+                 "/usr/bin/gs"):
+        if os.path.exists(base):
+            return base
     return None
 
 
@@ -53,9 +58,12 @@ def find_libreoffice() -> str | None:
     if saved and Path(saved).exists():
         return saved
 
-    cand = vendor_path("libreoffice", "program", "soffice.exe")
-    if cand.exists():
-        return str(cand)
+    for sub in (("libreoffice", "program", "soffice.exe"),               # Windows
+                ("libreoffice", "program", "soffice"),                    # Linux
+                ("LibreOffice.app", "Contents", "MacOS", "soffice")):     # macOS
+        cand = vendor_path(*sub)
+        if cand.exists():
+            return str(cand)
 
     for name in ("soffice.exe", "soffice.com", "soffice"):
         found = shutil.which(name)
@@ -65,6 +73,9 @@ def find_libreoffice() -> str | None:
     for base in (
         r"C:\Program Files\LibreOffice\program\soffice.exe",
         r"C:\Program Files (x86)\LibreOffice\program\soffice.exe",
+        "/Applications/LibreOffice.app/Contents/MacOS/soffice",          # macOS
+        "/opt/homebrew/bin/soffice", "/usr/local/bin/soffice",           # Homebrew
+        "/usr/bin/soffice", "/snap/bin/libreoffice",                     # Linux
     ):
         if os.path.exists(base):
             return base

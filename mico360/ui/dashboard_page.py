@@ -4,8 +4,6 @@ Accepts file drops anywhere and routes them to a sensible tool.
 """
 from __future__ import annotations
 
-import os
-import subprocess
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -211,13 +209,8 @@ class DashboardPage(QWidget):
         p = item.data(Qt.UserRole)
         if not p:
             return
-        try:
-            if os.name == "nt":
-                subprocess.Popen(["explorer", "/select,", str(p)])
-            else:
-                subprocess.Popen(["xdg-open", str(Path(p).parent)])
-        except Exception:
-            pass
+        from mico360.core.platform_utils import reveal
+        reveal(p)
 
     # --- drag & drop anywhere -----------------------------------------
     def dragEnterEvent(self, event):  # noqa: N802
