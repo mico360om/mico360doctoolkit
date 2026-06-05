@@ -19,9 +19,10 @@ permissions:
 
 jobs:
   build-macos:
-    # Intel runner → x86_64 build that runs on Intel Macs natively and on
-    # Apple Silicon via Rosetta 2 (one binary covers every Mac).
-    runs-on: macos-13
+    # Apple Silicon runner (macos-latest). Builds a native arm64 .app for
+    # M1/M2/M3+ Macs — the actively-supported, readily-scheduled runner.
+    runs-on: macos-latest
+    timeout-minutes: 45
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:

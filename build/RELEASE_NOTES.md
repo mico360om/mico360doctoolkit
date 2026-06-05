@@ -6,7 +6,7 @@ MICO360 Doc Toolkit is now cross-platform — the same app, tools and UI now run
 **macOS** as well as Windows:
 
 - **macOS `.dmg`** — download, drag the app into Applications, done. Built for
-  Intel and runs on Apple Silicon via Rosetta 2.
+  **Apple Silicon** (M1 / M2 / M3 and newer).
 - **Native behaviour** — "Open output" reveals files in **Finder**, follows the
   macOS **light/dark** appearance, and finds **LibreOffice** in `/Applications`.
 - **Same auto-updater** — it now knows which installer to fetch per OS (`.dmg` on

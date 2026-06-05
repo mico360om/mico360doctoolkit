@@ -11,7 +11,7 @@ activity logs.
 ## ⬇ Download
 
 - **Windows:** **[Download the Installer (.exe)](https://github.com/mico360om/mico360doctoolkit/releases/latest/download/MICO360-DocToolkit-Setup-Latest.exe)**
-- **macOS:** **[Download the Disk Image (.dmg)](https://github.com/mico360om/mico360doctoolkit/releases/latest/download/MICO360-DocToolkit-Latest.dmg)** — drag the app to Applications. (Unsigned: first launch via right-click → *Open*.)
+- **macOS:** **[Download the Disk Image (.dmg)](https://github.com/mico360om/mico360doctoolkit/releases/latest/download/MICO360-DocToolkit-Latest.dmg)** — Apple Silicon (M1+); drag the app to Applications. Unsigned: first launch via right-click → *Open*.
 
 Those links always serve the **latest** build directly. You can also grab a
 specific version (and its `.sha256` checksum) from the
