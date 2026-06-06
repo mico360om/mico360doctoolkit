@@ -22,8 +22,16 @@ OutputDir=..\dist\installer
 OutputBaseFilename=MICO360-DocToolkit-Setup-{#AppVersion}
 SetupIconFile=..\mico360\resources\app.ico
 UninstallDisplayIcon={app}\{#AppExeName}
+; The payload is large (~1.7 GB — it bundles the LibreOffice engine). ISCC's
+; LZMA compressor is 32-bit, so a single SOLID block with a big dictionary
+; exhausts its address space and crashes (islzma.dll access violation). Compress
+; files independently with a capped 64 MB dictionary so the 32-bit compressor
+; stays well within memory. Slightly larger output, but it builds reliably.
 Compression=lzma2/max
-SolidCompression=yes
+SolidCompression=no
+LZMADictionarySize=65536
+LZMANumBlockThreads=1
+LZMAUseSeparateProcess=yes
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 WizardStyle=modern
