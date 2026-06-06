@@ -1,4 +1,4 @@
-# MICO360 Doc Toolkit  ·  v6.4.0
+# MICO360 Doc Toolkit  ·  v6.5.0
 
 A modern Windows 10/11 desktop app for PDF & image management — a **Dashboard**
 home plus tools to compress, merge, split, organize, protect, watermark, sign,
@@ -18,6 +18,12 @@ specific version (and its `.sha256` checksum) from the
 [Releases page](https://github.com/mico360om/mico360doctoolkit/releases/latest).
 After installing, the app keeps itself up to date automatically.
 
+> **v6.5** — **A real file queue.** The drag-and-drop box is now a slim band so the
+> file list gets most of the panel; an empty queue shows “0 files”, a populated one
+> shows counts + pending/done/failed. Toolbar (Add files / Remove selected / Remove
+> finished / Clear all) and a right-click menu (open source/output folder, move to
+> top/bottom, duplicate, retry, remove, delete to Recycle Bin).
+>
 > **v6.4** — **GPU-accelerated OCR.** Making scanned PDFs searchable now runs on
 > your **graphics card** when you have one — via **DirectML**, so it works on any
 > NVIDIA/AMD/Intel GPU and is detected automatically per machine (≈5–9× faster

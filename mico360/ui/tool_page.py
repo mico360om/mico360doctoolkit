@@ -3,9 +3,18 @@
 Layout: header (icon + title + status chip) → a ResponsiveRow of the input
 panel and the options panel (side-by-side on wide windows, stacked when narrow)
 → an activity log. The processing wiring is unchanged from the engine.
+
+The input panel is a proper QUEUE: a compact drop band on top and a large file
+list below, with a toolbar (Add files / Remove selected / Remove finished /
+Clear all) and a right-click menu per row. Each row is an independent QueueItem
+(by id, not path) so the same file can appear more than once (Duplicate), and
+results are mapped back by submission index — robust to duplicates and to
+reordering mid-run.
 """
 from __future__ import annotations
 
+import itertools
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -38,6 +47,41 @@ from mico360.ui.widgets import (
 
 log = get_logger("mico360.ui")
 
+_row_ids = itertools.count(1)
+
+
+@dataclass
+class QueueItem:
+    """One row in the queue. Identified by ``id`` (not path) so the same file
+    can be queued more than once with independent status."""
+    path: Path
+    id: int = field(default_factory=lambda: next(_row_ids))
+    state: str = "pending"          # pending | running | done | failed
+    msg: str = ""
+    outputs: list = field(default_factory=list)
+
+
+class _StatusProxy:
+    """A dict-like view over a QueueItem's status. Lets path-keyed callers do
+    ``st["state"]`` / ``st.update(state=...)`` against the item model."""
+    __slots__ = ("_it",)
+
+    def __init__(self, item: QueueItem):
+        self._it = item
+
+    def __getitem__(self, key):
+        return getattr(self._it, key)
+
+    def __setitem__(self, key, value):
+        setattr(self._it, key, value)
+
+    def get(self, key, default=None):
+        return getattr(self._it, key, default)
+
+    def update(self, *args, **kw):
+        for key, value in dict(*args, **kw).items():
+            setattr(self._it, key, value)
+
 
 class ToolPage(QWidget):
     activity = Signal(str)        # forwards notable lines to the global activity log
@@ -46,18 +90,13 @@ class ToolPage(QWidget):
     def __init__(self, tool: Tool, parent: QWidget | None = None):
         super().__init__(parent)
         self.tool = tool
-        self.files: list[Path] = []
+        self.items: list[QueueItem] = []
         self._run_t0 = None
         self._run_total = 0
-        # Per-file processing status: path -> {"state","msg","outputs"}.
-        # state is one of: pending | done | failed.
-        self.status: dict[Path, dict] = {}
+        self._run_items: list[QueueItem] = []   # snapshot submitted to a run
         self.controller: BatchController | None = None
         self._last_outputs: list[Path] = []
         self._build_ui()
-
-    def _st(self, p: Path) -> dict:
-        return self.status.setdefault(p, {"state": "pending", "msg": "", "outputs": []})
 
     # -----------------------------------------------------------------
     def _build_ui(self) -> None:
@@ -74,7 +113,7 @@ class ToolPage(QWidget):
                                   self._build_options_card(),
                                   threshold=820, stretch=(3, 2),
                                   secondary_width=(320, 460))
-        root.addWidget(self.body)
+        root.addWidget(self.body, 1)
 
         # Activity log (this run)
         log_card = Card()
@@ -85,11 +124,10 @@ class ToolPage(QWidget):
         self.log_view = QPlainTextEdit()
         self.log_view.setObjectName("Log")
         self.log_view.setReadOnly(True)
-        self.log_view.setMinimumHeight(96)
-        self.log_view.setMaximumHeight(150)
+        self.log_view.setMinimumHeight(80)
+        self.log_view.setMaximumHeight(132)
         log_card.add(self.log_view)
         root.addWidget(log_card)
-        root.addStretch(0)
 
     def _build_header(self) -> QHBoxLayout:
         header = QHBoxLayout()
@@ -138,43 +176,38 @@ class ToolPage(QWidget):
     def _build_files_card(self) -> Card:
         card = Card()
         head = QHBoxLayout()
-        head.addWidget(section_label("Input files"))
+        head.addWidget(section_label("Queue"))
         head.addStretch(1)
-        # Accepted formats are shown inside the drop area ("Supported: …"); no
-        # need to repeat the (sometimes long) list here — it only inflated the
-        # panel's minimum width on image tools.
+        self.count_lbl = QLabel("0 files")
+        self.count_lbl.setObjectName("Hint")
+        self.count_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        head.addWidget(self.count_lbl)
         card.add_layout(head)
 
-        self.drop = DropArea()
+        # Compact drop band — small, so the queue gets the vertical space.
+        self.drop = DropArea(compact=True)
         self.drop.pathsAdded.connect(self.add_paths)
         self.drop.browseFiles.connect(self._browse_files)
         self.drop.browseFolder.connect(self._browse_folder)
         card.add(self.drop)
 
-        # Accepted formats live *below* the drop zone (not inside it) so a long
-        # list never pushes the Browse buttons out of the drop area.
-        formats = QLabel("Supported: " + " · ".join(
-            sorted(e.lstrip(".").upper() for e in self.tool.accept)))
-        formats.setObjectName("DropFormats")
-        formats.setWordWrap(True)
-        card.add(formats)
-
+        # The queue list — the star of the panel; it takes all the spare height.
         self.file_list = FileListWidget(
-            "No files added yet.\n\nDrag files onto the zone above, "
-            "or use Browse files / Browse folder.")
+            "No files in the queue yet.\n\nDrag files onto the band above, "
+            "or use Add files.")
         self.file_list.setObjectName("FileList")
         self.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.file_list.setMinimumHeight(130)
+        self.file_list.setMinimumHeight(220)
+        self.file_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.file_list.itemDoubleClicked.connect(self._open_item_output)
-        tip = ("Double-click a finished file to open its output. Right-click for more.")
-        # For tools where input order matters (Merge, combined Image → PDF), let
-        # the user drag rows to reorder; keep self.files in sync with the view.
-        if self.tool.mode == AGGREGATE:
-            self.file_list.setDragDropMode(QAbstractItemView.InternalMove)
-            self.file_list.setDefaultDropAction(Qt.MoveAction)
-            self.file_list.model().rowsMoved.connect(self._sync_order_from_list)
-            tip = "Drag to reorder. " + tip
-        self.file_list.setToolTip(tip)
+        # Drag-to-reorder is always available now (a queue is inherently ordered);
+        # self.items is re-synced from the view after any move.
+        self.file_list.setDragDropMode(QAbstractItemView.InternalMove)
+        self.file_list.setDefaultDropAction(Qt.MoveAction)
+        self.file_list.model().rowsMoved.connect(self._sync_order_from_list)
+        self.file_list.setToolTip(
+            "Drag to reorder. Double-click a finished row to open its output. "
+            "Right-click for more.")
         self.file_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.file_list.customContextMenuRequested.connect(self._file_menu)
         from PySide6.QtGui import QKeySequence, QShortcut
@@ -182,31 +215,40 @@ class ToolPage(QWidget):
         del_sc.activated.connect(self._remove_selected)
         card.add(self.file_list)
 
-        row = QHBoxLayout()
-        self.count_lbl = QLabel("No files yet")
-        self.count_lbl.setObjectName("Hint")
-        # Let the summary text yield width to the action buttons when space is
-        # tight, so this row never forces the panel wider than it needs to be.
-        self.count_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        row.addWidget(self.count_lbl, 1)
-        self.btn_redo = QPushButton("Redo")
-        self.btn_redo.setObjectName("Subtle")
-        self.btn_redo.setCursor(Qt.PointingHandCursor)
-        self.btn_redo.setToolTip("Mark finished files as pending so they process again.")
-        self.btn_redo.clicked.connect(self._redo)
-        self.btn_remove_done = QPushButton("Remove done")
-        self.btn_remove_done.setObjectName("Subtle")
-        self.btn_remove_done.setCursor(Qt.PointingHandCursor)
-        self.btn_remove_done.setToolTip("Take finished files off the list.")
-        self.btn_remove_done.clicked.connect(self._remove_done)
-        btn_clear = QPushButton("Clear all")
-        btn_clear.setObjectName("Subtle")
-        btn_clear.setCursor(Qt.PointingHandCursor)
-        btn_clear.clicked.connect(self._clear)
-        row.addWidget(self.btn_redo)
-        row.addWidget(self.btn_remove_done)
-        row.addWidget(btn_clear)
-        card.add_layout(row)
+        # Queue toolbar.
+        bar = QHBoxLayout()
+        bar.setSpacing(8)
+        self.btn_add = QPushButton("Add files")
+        self.btn_add.setObjectName("Subtle")
+        self.btn_add.setCursor(Qt.PointingHandCursor)
+        self.btn_add.setToolTip("Add files to the queue.")
+        self.btn_add.clicked.connect(self._browse_files)
+
+        self.btn_remove_sel = QPushButton("Remove selected")
+        self.btn_remove_sel.setObjectName("Subtle")
+        self.btn_remove_sel.setCursor(Qt.PointingHandCursor)
+        self.btn_remove_sel.setToolTip("Take the selected rows off the queue (Del).")
+        self.btn_remove_sel.clicked.connect(self._remove_selected)
+
+        self.btn_remove_fin = QPushButton("Remove finished")
+        self.btn_remove_fin.setObjectName("Subtle")
+        self.btn_remove_fin.setCursor(Qt.PointingHandCursor)
+        self.btn_remove_fin.setToolTip("Take every finished row (done or failed) off the queue.")
+        self.btn_remove_fin.clicked.connect(self._remove_finished)
+
+        self.btn_clear = QPushButton("Clear all")
+        self.btn_clear.setObjectName("Subtle")
+        self.btn_clear.setCursor(Qt.PointingHandCursor)
+        self.btn_clear.setToolTip("Empty the queue.")
+        self.btn_clear.clicked.connect(self._clear)
+
+        bar.addWidget(self.btn_add)
+        bar.addStretch(1)
+        bar.addWidget(self.btn_remove_sel)
+        bar.addWidget(self.btn_remove_fin)
+        bar.addWidget(self.btn_clear)
+        card.add_layout(bar)
+        self._update_counts()
         return card
 
     def _build_options_card(self) -> Card:
@@ -264,9 +306,6 @@ class ToolPage(QWidget):
         card.add(self.status_lbl)
 
         actions = QHBoxLayout()
-        # A constant "Start" label (the tool's name is already in the page
-        # header and top bar) keeps the button — and therefore the options
-        # column's minimum width — identical across tools.
         self.btn_start = QPushButton("Start")
         self.btn_start.setObjectName("Primary")
         self.btn_start.setCursor(Qt.PointingHandCursor)
@@ -301,22 +340,77 @@ class ToolPage(QWidget):
             self.note_lbl.setText("Your original files are always kept untouched.")
 
     # -----------------------------------------------------------------
+    # Queue model helpers
+    # -----------------------------------------------------------------
+    def _selected_items(self) -> list[QueueItem]:
+        """QueueItems for the current selection, in on-screen (top→bottom) order."""
+        ids = []
+        for i in self.file_list.selectedItems():
+            ids.append(i.data(Qt.UserRole))
+        by_id = {it.id: it for it in self.items}
+        # Preserve view order.
+        ordered = []
+        for r in range(self.file_list.count()):
+            rid = self.file_list.item(r).data(Qt.UserRole)
+            if rid in ids and rid in by_id:
+                ordered.append(by_id[rid])
+        return ordered
+
+    def _item_at_row(self, row: int) -> QueueItem | None:
+        if 0 <= row < len(self.items):
+            return self.items[row]
+        return None
+
+    # --- backward-compatible, path-keyed accessors over the item model -------
+    @property
+    def files(self) -> list:
+        return [it.path for it in self.items]
+
+    @files.setter
+    def files(self, paths) -> None:
+        self.items = [QueueItem(path=Path(p)) for p in paths]
+        self._refresh_list()
+
+    @property
+    def status(self) -> dict:
+        return {it.path: _StatusProxy(it) for it in self.items}
+
+    def _st(self, p) -> _StatusProxy:
+        for it in self.items:
+            if it.path == p:
+                return _StatusProxy(it)
+        it = QueueItem(path=Path(p))
+        self.items.append(it)
+        return _StatusProxy(it)
+
+    def _redo(self) -> None:
+        """Reset every finished/failed row back to pending."""
+        self._retry([it for it in self.items if it.state in ("done", "failed")])
+
+    def _remove_done(self) -> None:
+        """Remove only successfully-done rows (failed rows stay)."""
+        before = len(self.items)
+        self.items = [it for it in self.items if it.state != "done"]
+        if len(self.items) != before:
+            self._refresh_list()
+
+    # -----------------------------------------------------------------
     # File management
     # -----------------------------------------------------------------
     def add_paths(self, paths: list) -> None:
         found = collect_files(paths, self.tool.accept)
-        existing = {p.resolve() for p in self.files}
+        existing = {p.resolve() for p in (it.path for it in self.items)}
         added = 0
         for p in found:
             if p.resolve() not in existing:
-                self.files.append(p)
+                self.items.append(QueueItem(path=p))
                 existing.add(p.resolve())
                 added += 1
         self._refresh_list()
         if added:
             self._log(f"Added {added} file(s).")
         elif found:
-            self._log("Those files are already in the list.")
+            self._log("Those files are already in the queue.")
         else:
             self._log("No supported files found in the selection.")
 
@@ -329,108 +423,104 @@ class ToolPage(QWidget):
         theme = palette(settings.theme)
         colors = {"done": QColor(theme["success"]), "failed": QColor(theme["error"]),
                   "running": QColor(theme["info"])}
+        # Preserve selection across the rebuild (by row id).
+        prev_sel = {self.file_list.item(r).data(Qt.UserRole)
+                    for r in range(self.file_list.count())
+                    if self.file_list.item(r).isSelected()}
+        self.file_list.blockSignals(True)
         self.file_list.clear()
-        for p in self.files:
+        for it in self.items:
             try:
-                size = human_size(p.stat().st_size)
+                size = human_size(it.path.stat().st_size)
             except OSError:
                 size = "?"
-            st = self._st(p)
-            icon = self._ICONS.get(st["state"], "•")
-            tail = f"    ·    {st['msg']}" if st["msg"] else ""
-            item = QListWidgetItem(f"{icon}  {p.name}    —    {size}{tail}")
-            item.setToolTip(str(p.parent) + (f"\n{st['msg']}" if st["msg"] else ""))
-            item.setData(Qt.UserRole, str(p))   # used to re-sync order after a drag
-            if st["state"] in colors:
-                item.setForeground(colors[st["state"]])
-            self.file_list.addItem(item)
+            icon = self._ICONS.get(it.state, "•")
+            tail = f"    ·    {it.msg}" if it.msg else ""
+            row = QListWidgetItem(f"{icon}  {it.path.name}    —    {size}{tail}")
+            row.setToolTip(str(it.path) + (f"\n{it.msg}" if it.msg else ""))
+            row.setData(Qt.UserRole, it.id)
+            if it.state in colors:
+                row.setForeground(colors[it.state])
+            self.file_list.addItem(row)
+            if it.id in prev_sel:
+                row.setSelected(True)
+        self.file_list.blockSignals(False)
         self._update_counts()
 
     def _sync_order_from_list(self, *args) -> None:
-        """After a drag-reorder, rebuild self.files to match the on-screen order."""
-        by_str = {str(p): p for p in self.files}
-        new = [by_str[s] for s in (self.file_list.item(r).data(Qt.UserRole)
-                                   for r in range(self.file_list.count()))
-               if s in by_str]
-        if len(new) == len(self.files):
-            self.files = new
+        """After a drag-reorder, rebuild self.items to match the on-screen order."""
+        by_id = {it.id: it for it in self.items}
+        new = [by_id[i] for i in (self.file_list.item(r).data(Qt.UserRole)
+                                  for r in range(self.file_list.count()))
+               if i in by_id]
+        if len(new) == len(self.items):
+            self.items = new
             self._update_counts()
 
+    def _counts(self) -> tuple[int, int, int, int]:
+        n = len(self.items)
+        done = sum(1 for it in self.items if it.state == "done")
+        failed = sum(1 for it in self.items if it.state == "failed")
+        pending = n - done - failed - sum(1 for it in self.items if it.state == "running")
+        return n, done, failed, max(0, pending)
+
     def _update_counts(self) -> None:
-        n = len(self.files)
+        n, done, failed, pending = self._counts()
         if n == 0:
-            self.count_lbl.setText("No files yet")
-            self.btn_redo.setEnabled(False)
-            return
-        done = sum(1 for p in self.files if self._st(p)["state"] == "done")
-        failed = sum(1 for p in self.files if self._st(p)["state"] == "failed")
-        pending = n - done - failed
-        total_bytes = 0
-        for p in self.files:
-            try:
-                total_bytes += p.stat().st_size
-            except OSError:
-                pass
-        bits = [f"{n} file(s)", human_size(total_bytes)]
-        if done:
-            bits.append(f"{done} done")
-        if failed:
-            bits.append(f"{failed} failed")
-        if pending:
-            bits.append(f"{pending} pending")
-        summary = "  ·  ".join(bits)
-        self.count_lbl.setText(summary)
-        self.count_lbl.setToolTip(summary)   # full text on hover (row can be tight)
-        self.btn_redo.setEnabled(done > 0 or failed > 0)
+            self.count_lbl.setText("0 files")
+            self.count_lbl.setToolTip("")
+        else:
+            total_bytes = 0
+            for it in self.items:
+                try:
+                    total_bytes += it.path.stat().st_size
+                except OSError:
+                    pass
+            bits = [f"{n} file{'s' if n != 1 else ''}", human_size(total_bytes)]
+            if pending:
+                bits.append(f"{pending} pending")
+            if done:
+                bits.append(f"{done} done")
+            if failed:
+                bits.append(f"{failed} failed")
+            summary = "  ·  ".join(bits)
+            self.count_lbl.setText(summary)
+            self.count_lbl.setToolTip(summary)
+        running = self.controller is not None
+        self.btn_remove_sel.setEnabled(n > 0)
+        self.btn_remove_fin.setEnabled((done + failed) > 0)
+        self.btn_clear.setEnabled(n > 0 and not running)
 
     def _remove_selected(self) -> None:
-        rows = sorted((self.file_list.row(i) for i in self.file_list.selectedItems()),
-                      reverse=True)
-        for r in rows:
-            self.status.pop(self.files[r], None)
-            del self.files[r]
+        sel = {it.id for it in self._selected_items()}
+        if not sel:
+            return
+        self.items = [it for it in self.items if it.id not in sel]
         self._refresh_list()
 
-    def _clear(self) -> None:
-        self.files.clear()
-        self.status.clear()
-        self._refresh_list()
-
-    def _redo(self) -> None:
-        """Reset finished/failed files back to pending so they run again."""
-        reset = 0
-        for p in self.files:
-            st = self._st(p)
-            if st["state"] in ("done", "failed"):
-                st.update(state="pending", msg="", outputs=[])
-                reset += 1
-        self._refresh_list()
-        if reset:
-            self._log(f"Reset {reset} file(s) to pending — Start will process them again.")
-
-    def _remove_done(self) -> None:
-        keep = [p for p in self.files if self._st(p)["state"] != "done"]
-        removed = len(self.files) - len(keep)
-        for p in self.files:
-            if self._st(p)["state"] == "done":
-                self.status.pop(p, None)
-        self.files = keep
+    def _remove_finished(self) -> None:
+        before = len(self.items)
+        self.items = [it for it in self.items if it.state not in ("done", "failed")]
+        removed = before - len(self.items)
         self._refresh_list()
         if removed:
-            self._log(f"Removed {removed} finished file(s).")
+            self._log(f"Removed {removed} finished row(s).")
+
+    def _clear(self) -> None:
+        self.items.clear()
+        self._refresh_list()
 
     def _total_saved(self) -> str:
         """For compression tools, summarise the total bytes saved this batch."""
         if self.tool.id not in ("pdf_compress", "image_compress"):
             return ""
         before = after = 0
-        for p in self.files:
-            st = self._st(p)
-            outs = st.get("outputs") or []
-            if st["state"] != "done" or not outs:
+        for it in self.items:
+            outs = it.outputs or []
+            if it.state != "done" or not outs:
                 continue
             try:
-                before += p.stat().st_size
+                before += it.path.stat().st_size
                 after += sum(o.stat().st_size for o in outs if o.exists())
             except OSError:
                 continue
@@ -455,8 +545,6 @@ class ToolPage(QWidget):
             self.add_paths([folder])
 
     def _set_output_path(self, path: str) -> None:
-        """Show the path so the meaningful tail (the actual folder) is visible,
-        with the full path always available on hover — never silently truncated."""
         self.out_edit.setText(path)
         self.out_edit.setToolTip(path)
         self.out_edit.setCursorPosition(len(path))
@@ -469,28 +557,174 @@ class ToolPage(QWidget):
             settings.output_dir = folder
 
     # -----------------------------------------------------------------
+    # Right-click context menu
+    # -----------------------------------------------------------------
+    def _file_menu(self, pos) -> None:
+        from PySide6.QtWidgets import QMenu
+
+        clicked = self.file_list.itemAt(pos)
+        if clicked is None:
+            return
+        # If the right-clicked row isn't part of the selection, select just it.
+        if not clicked.isSelected():
+            self.file_list.clearSelection()
+            clicked.setSelected(True)
+        sel = self._selected_items()
+        if not sel:
+            return
+        n = len(sel)
+        s = "s" if n != 1 else ""
+        primary = sel[0]
+        has_output = any(it.outputs for it in sel)
+        has_finished = any(it.state in ("done", "failed") for it in sel)
+
+        menu = QMenu(self)
+        act_src = menu.addAction("Open source folder")
+        act_out = menu.addAction("Open output folder")
+        act_out.setEnabled(has_output)
+        menu.addSeparator()
+        act_top = menu.addAction("Move to top")
+        act_bottom = menu.addAction("Move to bottom")
+        act_dup = menu.addAction(f"Duplicate row{s}")
+        act_retry = menu.addAction(f"Retry failed/done row{s}")
+        act_retry.setEnabled(has_finished)
+        menu.addSeparator()
+        act_remove = menu.addAction(f"Remove {n} from queue")
+        act_delete = menu.addAction(f"Delete {n} from disk…")
+
+        chosen = menu.exec(self.file_list.mapToGlobal(pos))
+        if chosen is None:
+            return
+        if chosen is act_src:
+            self._open_in_explorer(primary.path)
+        elif chosen is act_out:
+            self._open_output_for(sel)
+        elif chosen is act_top:
+            self._move_selected(to_top=True)
+        elif chosen is act_bottom:
+            self._move_selected(to_top=False)
+        elif chosen is act_dup:
+            self._duplicate(sel)
+        elif chosen is act_retry:
+            self._retry(sel)
+        elif chosen is act_remove:
+            self._remove_selected()
+        elif chosen is act_delete:
+            self._delete_from_disk(sel)
+
+    def _open_output_for(self, items: list[QueueItem]) -> None:
+        for it in items:
+            if it.outputs:
+                self._open_in_explorer(it.outputs[0])
+                return
+        self._log("No output yet for the selected row(s) — click Start first.")
+
+    def _move_selected(self, to_top: bool) -> None:
+        sel_ids = {it.id for it in self._selected_items()}
+        if not sel_ids:
+            return
+        moved = [it for it in self.items if it.id in sel_ids]
+        rest = [it for it in self.items if it.id not in sel_ids]
+        self.items = moved + rest if to_top else rest + moved
+        self._refresh_list()
+        # Keep the moved rows selected at their new home.
+        self._select_ids(sel_ids)
+
+    def _select_ids(self, ids: set) -> None:
+        for r in range(self.file_list.count()):
+            if self.file_list.item(r).data(Qt.UserRole) in ids:
+                self.file_list.item(r).setSelected(True)
+
+    def _duplicate(self, items: list[QueueItem]) -> None:
+        """Insert a fresh (pending) copy of each selected row right after it."""
+        by_id = {it.id: it for it in items}
+        new_list: list[QueueItem] = []
+        new_ids = set()
+        for it in self.items:
+            new_list.append(it)
+            if it.id in by_id:
+                copy = QueueItem(path=it.path)
+                new_list.append(copy)
+                new_ids.add(copy.id)
+        self.items = new_list
+        self._refresh_list()
+        self._select_ids(new_ids)
+        self._log(f"Duplicated {len(by_id)} row(s).")
+
+    def _retry(self, items: list[QueueItem]) -> None:
+        reset = 0
+        for it in items:
+            if it.state in ("done", "failed"):
+                it.state, it.msg, it.outputs = "pending", "", []
+                reset += 1
+        self._refresh_list()
+        if reset:
+            self._log(f"Reset {reset} row(s) to pending — Start will process them again.")
+
+    def _delete_from_disk(self, items: list[QueueItem]) -> None:
+        from PySide6.QtGui import QGuiApplication
+        from mico360.core.platform_utils import move_to_trash
+
+        # Distinct source paths (duplicates of the same file map to one delete).
+        paths = []
+        seen = set()
+        for it in items:
+            rp = it.path.resolve()
+            if rp not in seen:
+                seen.add(rp)
+                paths.append(it.path)
+        n = len(paths)
+        if n == 0:
+            return
+        if QGuiApplication.platformName() != "offscreen":
+            names = "\n".join(f"• {p.name}" for p in paths[:10])
+            more = f"\n…and {n - 10} more" if n > 10 else ""
+            res = QMessageBox.question(
+                self, "Delete from disk?",
+                f"Send {n} source file(s) to the Recycle Bin?\n\n{names}{more}\n\n"
+                "They can be restored from the Recycle Bin.",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if res != QMessageBox.Yes:
+                return
+        trashed = set()
+        failed = 0
+        for p in paths:
+            if move_to_trash(p):
+                trashed.add(p.resolve())
+            else:
+                failed += 1
+        # Drop every row whose source was trashed (covers duplicates too).
+        self.items = [it for it in self.items if it.path.resolve() not in trashed]
+        self._refresh_list()
+        self._log(f"Deleted {len(trashed)} file(s) to the Recycle Bin"
+                  + (f"; {failed} could not be deleted." if failed else "."))
+        if failed and QGuiApplication.platformName() != "offscreen":
+            QMessageBox.warning(self, "Delete from disk",
+                                f"{failed} file(s) could not be sent to the Recycle Bin.")
+
+    # -----------------------------------------------------------------
     # Run
     # -----------------------------------------------------------------
     def start(self) -> None:
-        if not self.files:
+        if not self.items:
             QMessageBox.information(self, "No files", "Add one or more files first.")
             return
 
-        # Only process files that are not already done; "done" files are skipped
-        # until the user clicks Redo (or removes & re-adds them).
-        todo = [p for p in self.files if self._st(p)["state"] != "done"]
+        # Only process rows that are not already done; "done" rows are skipped
+        # until the user retries (or removes & re-adds them).
+        todo = [it for it in self.items if it.state != "done"]
         if not todo:
             QMessageBox.information(
                 self, "Already done",
-                "Every file here is already done.\n\nClick \"Redo\" to process "
-                "them again, or add new files.")
+                "Every row here is already done.\n\nRight-click → \"Retry\" to "
+                "process them again, or add new files.")
             return
         if self.tool.mode == AGGREGATE and self.tool.id == "pdf_merge" and len(todo) < 2:
             QMessageBox.information(self, "Need more files",
                                     "Select at least two PDFs to merge.")
             return
 
-        skipped_done = len(self.files) - len(todo)
+        skipped_done = len(self.items) - len(todo)
         options = self.options_widget.values()
         self.options_widget.save()           # remember these for next time
         options["overwrite"] = self.chk_overwrite.isChecked()
@@ -500,8 +734,9 @@ class ToolPage(QWidget):
         settings.same_as_source = same_as_source
         settings.overwrite = self.chk_overwrite.isChecked()
 
-        for p in todo:                       # mark queued files as running
-            self._st(p).update(state="running", msg="")
+        for it in todo:                      # mark queued rows as running
+            it.state, it.msg = "running", ""
+        self._run_items = list(todo)         # snapshot: index aligns with engine
         self._refresh_list()
 
         self._set_running(True)
@@ -520,7 +755,7 @@ class ToolPage(QWidget):
         c.log.connect(self._on_unit_log)
         c.unit_finished.connect(self._on_unit_finished)
         c.finished.connect(self._on_finished)
-        c.start(self.tool, list(todo), out_dir, options, same_as_source)
+        c.start(self.tool, [it.path for it in todo], out_dir, options, same_as_source)
 
     def _cancel(self) -> None:
         if self.controller:
@@ -533,19 +768,16 @@ class ToolPage(QWidget):
         self.btn_cancel.setEnabled(running)
         if running:
             self.header_chip.set_state("run", "Working…")
+        self._update_counts()
 
     def _on_started(self, total: int) -> None:
         import time
         self._run_t0 = time.monotonic()
         self._run_total = total
         if total > 1:
-            # Multi-file: determinate from the start; fine_progress fills it as
-            # files (and their pages) complete.
             self.progress.setRange(0, 100)
             self.progress.setValue(0)
         else:
-            # Single unit: start as an animated busy bar; it becomes a real
-            # 0→100 bar the moment the processor reports per-page progress.
             self.progress.setRange(0, 0)
         self._update_progress_detail(0.0)
 
@@ -556,7 +788,6 @@ class ToolPage(QWidget):
         self._update_progress_detail(pct)
 
     def _on_progress(self, done: int, total: int) -> None:
-        # Per-unit counter drives the status text; the bar uses fine_progress.
         self._update_progress_detail(self.progress.value()
                                      if self.progress.maximum() else 0.0)
 
@@ -568,10 +799,10 @@ class ToolPage(QWidget):
         return f"{secs}s"
 
     def _update_progress_detail(self, pct: float) -> None:
-        total = self._run_total or len(self.files) or 1
-        done = sum(1 for p in self.files if self._st(p)["state"] in ("done", "failed"))
-        running = next((p.name for p in self.files
-                        if self._st(p)["state"] == "running"), None)
+        total = self._run_total or len(self.items) or 1
+        done = sum(1 for it in self.items if it.state in ("done", "failed"))
+        running = next((it.path.name for it in self.items
+                        if it.state == "running"), None)
         parts = [f"Processing {min(done + 1, total)} / {total} files"]
         if running:
             parts.append(f"Current: {running}")
@@ -586,9 +817,10 @@ class ToolPage(QWidget):
         self._log(f"  {label}: {message}")
 
     def _on_unit_finished(self, result: UnitResult) -> None:
-        # Map the result back to its source file(s) and record the status.
+        # Map the result back to the submitted row(s) BY INDEX (robust to
+        # duplicates and to reordering during the run).
         if result.skipped:
-            new_state, note = "pending", ""   # cancelled -> stays to-do
+            new_state, note = "pending", ""
             self._log(f"⏭  {result.label} — skipped")
         elif result.ok:
             outs = result.outputs or []
@@ -599,14 +831,29 @@ class ToolPage(QWidget):
         else:
             new_state, note = "failed", result.message
             self._log(f"✗  {result.label} — {result.message}")
-        for src in (result.sources or []):
-            st = self._st(src)
-            st.update(state=new_state, msg=note, outputs=list(result.outputs or []))
+
+        if self.tool.mode == AGGREGATE:
+            targets = list(self._run_items)
+        elif 0 <= result.index < len(self._run_items):
+            # Normal path: map by submission index (robust to duplicates).
+            targets = [self._run_items[result.index]]
+        else:
+            targets = []
+        if not targets:
+            # Fallback (direct calls / stale snapshot): map by source path,
+            # preferring rows currently marked running.
+            srcs = {Path(s) for s in (result.sources or [])}
+            targets = [it for it in self.items
+                       if it.path in srcs and it.state == "running"]
+            if not targets:
+                targets = [it for it in self.items if it.path in srcs]
+        for it in targets:
+            it.state, it.msg, it.outputs = new_state, note, list(result.outputs or [])
         self._refresh_list()
 
     def _on_finished(self, summary: dict) -> None:
+        self.controller = None
         self._set_running(False)
-        # Settle the (possibly busy/animated) bar to the real final value (0-100).
         total = max(1, summary.get("total", 1))
         processed = summary.get("ok", 0) + summary.get("failed", 0)
         self.progress.setRange(0, 100)
@@ -625,8 +872,6 @@ class ToolPage(QWidget):
         from PySide6.QtGui import QGuiApplication
         if summary["failed"]:
             self.header_chip.set_state("err", "Errors")
-            # The failures are already shown in the status line, toast and log;
-            # only pop a modal dialog on a real desktop (never headless/tests).
             if QGuiApplication.platformName() != "offscreen":
                 details = "\n".join(f"• {lbl}: {err}"
                                     for lbl, err in summary["errors"][:12])
@@ -641,7 +886,6 @@ class ToolPage(QWidget):
         self._last_outputs = list(outputs)
         self.btn_open.setEnabled(bool(outputs))
 
-        # Record recent files + activity for the dashboard, and toast the result.
         if outputs:
             try:
                 settings.add_recent_files([str(o) for o in outputs])
@@ -657,11 +901,9 @@ class ToolPage(QWidget):
             settings.add_activity(f"{self.tool.name} — {ok} file(s) done")
             self.toast.emit(f"{self.tool.name}: {ok} file(s) done", "ok")
 
-        from PySide6.QtGui import QGuiApplication
         if (outputs and settings.open_output_when_done and not summary["cancelled"]
                 and QGuiApplication.platformName() != "offscreen"):
             self._open_in_explorer(outputs[0])
-        self.controller = None
 
     # -----------------------------------------------------------------
     def _open_in_explorer(self, sample: Path) -> None:
@@ -673,50 +915,15 @@ class ToolPage(QWidget):
             self._open_in_explorer(self._last_outputs[0])
 
     def _open_item_output(self, item) -> None:
-        """Double-click a finished file to reveal its output."""
+        """Double-click a finished row to reveal its output."""
         row = self.file_list.row(item)
-        if 0 <= row < len(self.files):
-            outs = self._st(self.files[row]).get("outputs") or []
-            if outs:
-                self._open_in_explorer(outs[0])
-            else:
-                self._log("That file hasn't been processed yet — click Start.")
-
-    def _file_menu(self, pos) -> None:
-        """Right-click menu for a file: open output / source, redo, remove."""
-        from PySide6.QtWidgets import QMenu
-
-        item = self.file_list.itemAt(pos)
-        if item is None:
+        it = self._item_at_row(row)
+        if it is None:
             return
-        row = self.file_list.row(item)
-        if not (0 <= row < len(self.files)):
-            return
-        p = self.files[row]
-        st = self._st(p)
-        menu = QMenu(self)
-        act_out = menu.addAction("Open output")
-        act_out.setEnabled(bool(st.get("outputs")))
-        menu.addAction("Open source folder")
-        redo = menu.addAction("Redo this file")
-        redo.setEnabled(st["state"] in ("done", "failed"))
-        menu.addSeparator()
-        menu.addAction("Remove from list")
-        chosen = menu.exec(self.file_list.mapToGlobal(pos))
-        if chosen is None:
-            return
-        text = chosen.text()
-        if text == "Open output" and st.get("outputs"):
-            self._open_in_explorer(st["outputs"][0])
-        elif text == "Open source folder":
-            self._open_in_explorer(p)
-        elif text == "Redo this file":
-            st.update(state="pending", msg="", outputs=[])
-            self._refresh_list()
-        elif text == "Remove from list":
-            self.status.pop(p, None)
-            del self.files[row]
-            self._refresh_list()
+        if it.outputs:
+            self._open_in_explorer(it.outputs[0])
+        else:
+            self._log("That row hasn't been processed yet — click Start.")
 
     def _log(self, text: str) -> None:
         self.log_view.appendPlainText(text)

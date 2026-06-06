@@ -1,3 +1,25 @@
+## MICO360 Doc Toolkit v6.5.0
+
+**A real file queue — more room, more control.**
+
+The input panel is now a proper **queue** built for batches:
+
+- **More space for your files.** The big drag-and-drop box is now a slim band, so
+  the file list gets most of the panel — you can see far more files at once.
+- **Clear status at a glance.** An empty queue reads **“0 files”**; a populated one
+  shows the item count plus **pending / done / failed** totals and total size.
+- **Toolbar controls:** **Add files**, **Remove selected**, **Remove finished**
+  (clears done *and* failed), and **Clear all**.
+- **Right-click any row** (works on multi-selection) for: **Open source folder**,
+  **Open output folder**, **Move to top**, **Move to bottom**, **Duplicate row(s)**,
+  **Retry failed/done row(s)**, **Remove from queue**, and **Delete from disk**
+  (sent to the **Recycle Bin** after a confirmation — recoverable).
+- **Drag to reorder**, multi-select, and **Del** to remove — selection and status
+  stay consistent as you go. The same file can be queued more than once
+  (Duplicate), each row tracked independently.
+
+---
+
 ## MICO360 Doc Toolkit v6.4.0
 
 **GPU-accelerated OCR — automatically uses your graphics card.**

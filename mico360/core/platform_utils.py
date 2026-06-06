@@ -53,3 +53,73 @@ def open_path(path) -> None:
             subprocess.Popen(cmd)
     except Exception:
         pass
+
+
+# --- Recycle Bin / Trash --------------------------------------------------
+def _trash_windows(p: Path) -> bool:
+    """Send a file to the Recycle Bin via the Win32 shell (recoverable)."""
+    import ctypes
+    from ctypes import wintypes
+
+    FO_DELETE = 3
+    FOF_SILENT = 0x0004
+    FOF_NOCONFIRMATION = 0x0010
+    FOF_ALLOWUNDO = 0x0040          # the bit that routes to the Recycle Bin
+    FOF_NOERRORUI = 0x0400
+
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", wintypes.HWND),
+            ("wFunc", wintypes.UINT),
+            ("pFrom", wintypes.LPCWSTR),
+            ("pTo", wintypes.LPCWSTR),
+            ("fFlags", ctypes.c_ushort),
+            ("fAnyOperationsAborted", wintypes.BOOL),
+            ("hNameMappings", ctypes.c_void_p),
+            ("lpszProgressTitle", wintypes.LPCWSTR),
+        ]
+
+    op = SHFILEOPSTRUCTW()
+    op.wFunc = FO_DELETE
+    op.pFrom = str(p) + "\0\0"      # path list is double-null terminated
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI
+    return ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op)) == 0
+
+
+def _trash_mac(p: Path) -> bool:
+    script = ('tell application "Finder" to delete POSIX file '
+              f'"{p}"')
+    return subprocess.run(["osascript", "-e", script],
+                          capture_output=True).returncode == 0
+
+
+def _trash_linux(p: Path) -> bool:
+    for cmd in (["gio", "trash", "--", str(p)], ["trash", str(p)]):
+        try:
+            if subprocess.run(cmd, capture_output=True).returncode == 0:
+                return True
+        except FileNotFoundError:
+            continue
+    return False
+
+
+def move_to_trash(path) -> bool:
+    """Send a file to the Recycle Bin / Trash (recoverable), returning True on
+    success. Tries send2trash if present, then a per-OS fallback. Never raises."""
+    p = Path(path)
+    if not p.exists():
+        return False
+    try:
+        from send2trash import send2trash
+        send2trash(str(p))
+        return True
+    except Exception:
+        pass
+    try:
+        if IS_WINDOWS:
+            return _trash_windows(p)
+        if IS_MAC:
+            return _trash_mac(p)
+        return _trash_linux(p)
+    except Exception:
+        return False

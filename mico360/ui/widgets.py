@@ -200,11 +200,18 @@ class DropArea(QFrame):
     browseFiles = Signal()
     browseFolder = Signal()
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None, compact: bool = False):
         super().__init__(parent)
         self.setObjectName("DropArea")
         self.setAcceptDrops(True)
         self.setProperty("dragActive", False)
+        self._compact = compact
+        if compact:
+            self._build_compact()
+        else:
+            self._build_full()
+
+    def _build_full(self) -> None:
         # MinimumExpanding (vertical): the area grows to fill spare space but is
         # never squeezed below its own content, so the Browse buttons can't be
         # clipped — if room is tight the page scrolls instead.
@@ -251,6 +258,41 @@ class DropArea(QFrame):
         btns.addWidget(b_folder)
         lay.addSpacing(2)
         lay.addLayout(btns)
+
+    def _build_compact(self) -> None:
+        """A short, single-band drop zone — leaves the vertical space for the
+        queue. Glyph + prompt on the left, Browse buttons on the right."""
+        self.setProperty("compact", True)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMinimumHeight(58)
+        self.setMaximumHeight(76)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(16, 8, 12, 8)
+        lay.setSpacing(12)
+
+        glyph = QLabel("⬇")
+        glyph.setObjectName("DropGlyph")
+        gf = QFont()
+        gf.setPointSize(18)
+        glyph.setFont(gf)
+        lay.addWidget(glyph, 0, Qt.AlignVCenter)
+
+        title = QLabel("Drag & drop files or folders here")
+        title.setObjectName("DropTitle")
+        title.setWordWrap(True)
+        lay.addWidget(title, 1, Qt.AlignVCenter)
+
+        b_files = QPushButton("Browse files")
+        b_files.setObjectName("Ghost")
+        b_files.setCursor(Qt.PointingHandCursor)
+        b_files.clicked.connect(self.browseFiles.emit)
+        b_folder = QPushButton("Browse folder")
+        b_folder.setObjectName("Ghost")
+        b_folder.setCursor(Qt.PointingHandCursor)
+        b_folder.clicked.connect(self.browseFolder.emit)
+        lay.addWidget(b_files, 0, Qt.AlignVCenter)
+        lay.addWidget(b_folder, 0, Qt.AlignVCenter)
 
     # --- drag events -----------------------------------------------------
     def _set_active(self, active: bool) -> None:

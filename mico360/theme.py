@@ -313,6 +313,9 @@ QRadioButton::indicator:checked {{ background: {c['primary']}; border: 5px solid
 #DropHint {{ color: {c['text_muted']}; font-size: 12px; }}
 #DropFormats {{ color: {c['text_faint']}; font-size: 11px; }}
 #DropGlyph {{ color: {c['primary']}; }}
+/* Compact drop band (a slim row above the queue) */
+#DropArea[compact="true"] #DropTitle {{ font-size: 13px; font-weight: 600;
+    color: {c['text_muted']}; }}
 
 /* =================== Toast notifications =================== */
 #Toast {{
