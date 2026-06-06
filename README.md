@@ -18,7 +18,11 @@ specific version (and its `.sha256` checksum) from the
 [Releases page](https://github.com/mico360om/mico360doctoolkit/releases/latest).
 After installing, the app keeps itself up to date automatically.
 
-> **v6.3** — **Lossless compression with verified integrity.** Compress is now
+> **v6.3** — **Office conversion built in.** The Windows installer now **bundles the
+> LibreOffice engine**, so Word/Excel/PowerPoint → PDF, PDF → Office, and
+> Document → Markdown work on any PC with **zero setup** — including legacy
+> `.doc`/`.xls`/`.ppt` files and PCs without Microsoft Office. (The installer is larger
+> as a result.) Also: **Lossless compression with verified integrity.** Compress is now
 > **Lossless** by default: it only strips redundancy and recompresses streams, then
 > verifies the result is byte-for-byte identical in text, images, fonts, links,
 > metadata, bookmarks and rendered pixels — if anything would change, the original is

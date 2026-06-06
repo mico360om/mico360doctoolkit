@@ -41,10 +41,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
 
 [Files]
-; Main application (PyInstaller onedir output)
+; Main application (PyInstaller onedir output). This ALREADY contains the
+; bundled engines under _internal\vendor\ (the spec copies vendor\ into the
+; frozen app, which is where the app looks via _MEIPASS). We intentionally do
+; NOT also copy ..\vendor here — that would ship LibreOffice twice and roughly
+; double the installer size.
 Source: "..\dist\MICO360DocToolkit\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-; Bundled engines (optional - only included if present at build time)
-Source: "..\vendor\*"; DestDir: "{app}\vendor"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"

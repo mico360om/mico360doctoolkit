@@ -1,5 +1,25 @@
 ## MICO360 Doc Toolkit v6.3.0
 
+**Office conversion now works on any PC — LibreOffice is built in.**
+
+The Windows installer now **bundles the LibreOffice conversion engine**, so
+**Word / Excel / PowerPoint → PDF**, **PDF → Office**, and **Document → Markdown**
+work out of the box with **nothing else to install** — even on PCs without
+Microsoft Office.
+
+- **Legacy `.doc`, `.xls`, `.ppt`, `.rtf`, `.odt` now convert reliably.** Previously a
+  legacy `.doc` (or a mis-named file) could fail on every engine; the bundled engine
+  handles them all.
+- **No more conversion stalls/crashes** from a flaky Microsoft Word automation path —
+  the built-in engine is tried first and one bad file can never stop the batch.
+- **Self-healing Markdown conversion:** a corrupt or mis-named `.docx` is automatically
+  repaired through LibreOffice and retried instead of failing.
+
+> The installer is larger because the conversion engine ships inside it — that's the
+> price of "works everywhere with zero setup."
+
+---
+
 **Lossless compression with verified, zero-data-loss integrity.**
 
 Compression now guarantees your file's **content and structure stay 100 % identical** —

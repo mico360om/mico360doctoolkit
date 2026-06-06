@@ -2213,8 +2213,8 @@ def word_to_md(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path
 
     work = src
     cleanup: Path | None = None
+    soffice = find_libreoffice()
     if src.suffix.lower() != ".docx":
-        soffice = find_libreoffice()
         if not soffice:
             raise ProcessError(
                 f"'{src.name}' isn't a .docx. Converting .doc/.odt/.rtf to Markdown "
@@ -2232,7 +2232,22 @@ def word_to_md(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path
         try:
             md = _docx_to_markdown(work)
         except Exception as exc:
-            raise ProcessError(f"Couldn't convert '{src.name}' to Markdown ({exc}).")
+            # The file has a .docx name but python-docx can't open it (corrupt or
+            # mis-named — e.g. a legacy .doc or RTF saved with a .docx extension).
+            # If LibreOffice is available, let it repair/normalise the file into a
+            # clean .docx and retry, so the batch doesn't fail on a quirky file.
+            if cleanup is None and soffice is not None:
+                report("File needs repair — normalising via LibreOffice…")
+                try:
+                    work = _lo_convert_to_docx(soffice, src)
+                    cleanup = work.parent
+                    md = _docx_to_markdown(work)
+                except Exception as exc2:
+                    raise ProcessError(
+                        f"Couldn't convert '{src.name}' to Markdown ({exc2}).")
+            else:
+                raise ProcessError(
+                    f"Couldn't convert '{src.name}' to Markdown ({exc}).")
     finally:
         if cleanup is not None:
             import shutil
