@@ -49,6 +49,15 @@ for pkg in ("pdf2docx", "fontTools", "pptx", "reportlab", "docx", "docx2pdf",
 
 datas += collect_data_files("img2pdf")
 
+# Ensure onnxruntime's native libraries ship — including DirectML.dll and the
+# provider DLLs when the DirectML build is installed — so GPU OCR works in the
+# frozen app (with CPU fallback). Harmless if only the CPU build is present.
+try:
+    from PyInstaller.utils.hooks import collect_dynamic_libs
+    binaries += collect_dynamic_libs("onnxruntime")
+except Exception:
+    pass
+
 # Bundle vendored binaries into the frozen app if present (optional).
 vendor = ROOT / "vendor"
 if vendor.exists():

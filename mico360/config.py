@@ -139,6 +139,17 @@ class Settings:
         self._set("perf/max_workers", int(value))
 
     @property
+    def ocr_use_gpu(self) -> bool:
+        """Use the GPU (DirectML, any DX12 GPU) for OCR when one is available.
+        Default on; the engine silently falls back to CPU on machines without a
+        usable GPU, so this is safe to leave enabled everywhere."""
+        return self._get("perf/ocr_use_gpu", True, bool)
+
+    @ocr_use_gpu.setter
+    def ocr_use_gpu(self, value: bool) -> None:
+        self._set("perf/ocr_use_gpu", bool(value))
+
+    @property
     def auto_check_updates(self) -> bool:
         return self._get("update/auto_check", True, bool)
 

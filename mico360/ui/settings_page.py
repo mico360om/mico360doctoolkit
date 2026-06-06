@@ -248,7 +248,34 @@ class SettingsPage(QWidget):
                       "Automatic uses cores − 1.")
         hint.setObjectName("Hint")
         card.add(hint)
+
+        # --- GPU OCR ---------------------------------------------------------
+        self.chk_gpu_ocr = QCheckBox("Use the GPU for OCR when available "
+                                     "(DirectML — falls back to CPU)")
+        self.chk_gpu_ocr.setChecked(settings.ocr_use_gpu)
+        self.chk_gpu_ocr.toggled.connect(
+            lambda v: setattr(settings, "ocr_use_gpu", v))
+        card.add(self.chk_gpu_ocr)
+        gpu_hint = QLabel(self._gpu_status_text())
+        gpu_hint.setObjectName("Hint")
+        gpu_hint.setWordWrap(True)
+        card.add(gpu_hint)
         return card
+
+    @staticmethod
+    def _gpu_status_text() -> str:
+        """Describe, for THIS machine, whether GPU OCR can run — detected live,
+        never assumed. No subprocess: just asks onnxruntime what's available."""
+        try:
+            import onnxruntime as ort
+            dml = "DmlExecutionProvider" in ort.get_available_providers()
+        except Exception:
+            dml = False
+        if dml:
+            return ("GPU acceleration for OCR: available on this PC — scanned-PDF "
+                    "OCR runs much faster.")
+        return ("GPU acceleration for OCR: not available on this PC — OCR uses "
+                "the CPU. (This build accelerates GPUs on Windows via DirectML.)")
 
     def _deps_card(self) -> Card:
         card = Card()

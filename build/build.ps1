@@ -32,6 +32,14 @@ Write-Host "Installing dependencies..." -ForegroundColor Cyan
 & $Py -m pip install -r requirements.txt
 & $Py -m pip install pyinstaller
 
+# GPU OCR: swap the CPU onnxruntime that rapidocr pulled for the DirectML build,
+# so OCR can run on ANY Direct3D-12 GPU (NVIDIA/AMD/Intel) with CPU fallback.
+# DirectML is Windows-only; this whole script is Windows, so it always applies.
+Write-Host "Enabling GPU OCR (onnxruntime-directml)..." -ForegroundColor Cyan
+& $Py -m pip uninstall -y onnxruntime onnxruntime-directml 2>$null
+& $Py -m pip install "onnxruntime-directml>=1.17"
+& $Py -c "import onnxruntime as o; print('  onnxruntime providers:', o.get_available_providers())"
+
 Write-Host "Generating icon..." -ForegroundColor Cyan
 & $Py build\make_icon.py
 

@@ -1,4 +1,4 @@
-# MICO360 Doc Toolkit  ·  v6.3.0
+# MICO360 Doc Toolkit  ·  v6.4.0
 
 A modern Windows 10/11 desktop app for PDF & image management — a **Dashboard**
 home plus tools to compress, merge, split, organize, protect, watermark, sign,
@@ -18,6 +18,11 @@ specific version (and its `.sha256` checksum) from the
 [Releases page](https://github.com/mico360om/mico360doctoolkit/releases/latest).
 After installing, the app keeps itself up to date automatically.
 
+> **v6.4** — **GPU-accelerated OCR.** Making scanned PDFs searchable now runs on
+> your **graphics card** when you have one — via **DirectML**, so it works on any
+> NVIDIA/AMD/Intel GPU and is detected automatically per machine (≈5–9× faster
+> than CPU, with automatic CPU fallback and a Settings toggle).
+>
 > **v6.3** — **Office conversion built in.** The Windows installer now **bundles the
 > LibreOffice engine**, so Word/Excel/PowerPoint → PDF, PDF → Office, and
 > Document → Markdown work on any PC with **zero setup** — including legacy

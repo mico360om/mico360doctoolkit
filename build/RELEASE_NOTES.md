@@ -1,3 +1,27 @@
+## MICO360 Doc Toolkit v6.4.0
+
+**GPU-accelerated OCR — automatically uses your graphics card.**
+
+Making scanned PDFs searchable (OCR) is the heaviest number-crunching this app
+does, and it now runs on your **GPU** when you have one:
+
+- **Automatic, on any GPU.** Uses **DirectML**, so it works on **any** modern
+  graphics card — NVIDIA, AMD or Intel, laptop or desktop. The app detects the
+  GPU **on whatever PC it's installed on** and uses it; no configuration.
+- **Big speedup.** On a typical discrete GPU, OCR model inference runs **on the
+  order of 5–9× faster** than CPU. The OCR progress line now tells you whether
+  it's running on **GPU (DirectML)** or **CPU**.
+- **Never breaks anything.** On a PC without a usable GPU it silently falls back
+  to the CPU — same results, just slower. A new **Settings → Processing → "Use
+  the GPU for OCR when available"** switch (on by default) lets you force CPU.
+- **Safe under load.** GPU OCR processes pages in the correct order without the
+  multi-threading that a GPU can't share, so bulk OCR is rock-solid.
+
+> Only OCR benefits from the GPU — compression, conversion and image tools are
+> CPU/codec work and already run in parallel across your CPU cores.
+
+---
+
 ## MICO360 Doc Toolkit v6.3.0
 
 **Office conversion now works on any PC — LibreOffice is built in.**

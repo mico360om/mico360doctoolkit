@@ -15,8 +15,14 @@ python-docx>=1.1.0      # read .docx for the built-in fallback
 reportlab>=4.0.0        # render the fallback PDF
 docx2pdf>=0.1.8         # use Microsoft Word via COM when it is installed
 
-# OCR for scanned PDFs (self-contained, no external binary)
+# OCR for scanned PDFs (self-contained, no external binary).
+# rapidocr pulls in CPU onnxruntime. On Windows the build swaps it for
+# onnxruntime-directml so OCR runs on ANY Direct3D-12 GPU (NVIDIA/AMD/Intel)
+# with automatic CPU fallback — see build/build.ps1. macOS/Linux stay on CPU
+# onnxruntime (DirectML is Windows-only); the app detects this at runtime.
 rapidocr-onnxruntime>=1.2.3
+# onnxruntime-directml>=1.17  ; installed by the build on Windows (not here, to
+#                               avoid a double-install conflict with onnxruntime)
 
 # Build-time only (see build/):
 #   pyinstaller>=6.5.0

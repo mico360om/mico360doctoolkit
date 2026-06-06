@@ -848,11 +848,84 @@ _OCR_MIN_SCORE = 0.5
 # across every page and file in a batch instead of paying that cost per file.
 _ocr_engine_cache = None
 _ocr_engine_lock = threading.Lock()
+_ocr_active_provider = "CPU"   # set when the engine is built; for status reporting
+
+
+def _ocr_gpu_preference() -> bool:
+    """User setting: use the GPU for OCR when one is available (default on)."""
+    try:
+        from mico360.config import settings
+        return bool(settings.ocr_use_gpu)
+    except Exception:
+        return True
+
+
+def _dml_available() -> bool:
+    """True if onnxruntime exposes the DirectML provider (Windows GPU build).
+    This is a capability check only — whether a usable GPU exists is decided at
+    session-creation time, with CPU fallback."""
+    try:
+        import onnxruntime as ort
+        return "DmlExecutionProvider" in ort.get_available_providers()
+    except Exception:
+        return False
+
+
+def _patch_rapidocr_gpu() -> None:
+    """Make RapidOCR build its ONNX sessions on the GPU via DirectML — any
+    Direct3D-12 GPU (NVIDIA / AMD / Intel, discrete or integrated) — with an
+    automatic CPU fallback. RapidOCR 1.2.x only knows CUDA, so we intercept
+    onnxruntime session creation and prepend DmlExecutionProvider.
+
+    Fully machine-agnostic: nothing here assumes a specific GPU. On a PC where
+    DirectML can't create a session (no usable GPU / driver), each model quietly
+    falls back to CPU. Idempotent."""
+    try:
+        import onnxruntime as ort
+        from onnxruntime import ExecutionMode
+        from rapidocr_onnxruntime import utils as _ru
+    except Exception:
+        return
+    if getattr(_ru, "_mico360_gpu_patched", False):
+        return
+    _real_session = ort.InferenceSession
+
+    def _make_session(model_path, sess_options=None, providers=None, **kw):
+        global _ocr_active_provider
+        if sess_options is not None:
+            # DirectML requires a non-mem-pattern, sequential session.
+            try:
+                sess_options.enable_mem_pattern = False
+                sess_options.execution_mode = ExecutionMode.ORT_SEQUENTIAL
+            except Exception:
+                pass
+        gpu_eps = [("DmlExecutionProvider", {"device_id": 0}), "CPUExecutionProvider"]
+        try:
+            sess = _real_session(model_path, sess_options=sess_options,
+                                 providers=gpu_eps, **kw)
+        except Exception:
+            # No usable GPU on this machine — fall back to whatever RapidOCR asked
+            # for (CPU). Never let GPU selection break OCR.
+            sess = _real_session(model_path, sess_options=sess_options,
+                                 providers=providers, **kw)
+        try:
+            if "DmlExecutionProvider" in sess.get_providers():
+                _ocr_active_provider = "GPU (DirectML)"
+        except Exception:
+            pass
+        return sess
+
+    _ru.InferenceSession = _make_session
+    _ru._mico360_gpu_patched = True
 
 
 def _make_ocr_engine():
-    """Return a cached RapidOCR engine (models load once), or raise ProcessError."""
-    global _ocr_engine_cache
+    """Return a cached RapidOCR engine (models load once), or raise ProcessError.
+
+    If the machine has a usable GPU and the user hasn't disabled it, the engine's
+    ONNX models run on the GPU via DirectML (with CPU fallback); otherwise plain
+    CPU. The decision is made fresh from the running machine — never hard-coded."""
+    global _ocr_engine_cache, _ocr_active_provider
     if _ocr_engine_cache is not None:
         return _ocr_engine_cache
     with _ocr_engine_lock:
@@ -862,8 +935,17 @@ def _make_ocr_engine():
             except Exception as exc:  # pragma: no cover - optional dependency
                 raise ProcessError(
                     "OCR engine is not available in this build. " + str(exc))
+            _ocr_active_provider = "CPU"
+            if _ocr_gpu_preference() and _dml_available():
+                _patch_rapidocr_gpu()
             _ocr_engine_cache = RapidOCR()
     return _ocr_engine_cache
+
+
+def ocr_active_provider() -> str:
+    """Human-readable label of the OCR backend in use ('GPU (DirectML)' or
+    'CPU'). Only meaningful after the engine has been built at least once."""
+    return _ocr_active_provider
 
 
 def _page_has_text(page, threshold: int = 8) -> bool:
@@ -944,6 +1026,12 @@ def _ocr_pages_concurrent(src: Path, indices: list[int],
         return {}
     cpu = os.cpu_count() or 4
     workers = max(1, min(len(indices), max(2, cpu // 2), 8))
+    # On the GPU, run one page at a time: DirectML ONNX sessions are NOT safe for
+    # concurrent Run() across threads (it crashes), and the GPU is the serial
+    # resource anyway — serial GPU is still far faster than concurrent CPU.
+    # CPU keeps its multi-thread speedup.
+    if ocr_active_provider() != "CPU":
+        workers = 1
     if workers == 1:
         doc = fitz.open(str(src))
         try:
@@ -1872,6 +1960,7 @@ def pdf_ocr(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
     import fitz
 
     _make_ocr_engine()   # ensure OCR is available (raises a clear error if not)
+    report(f"OCR engine ready on {ocr_active_provider()}.")
     dpi = _ocr_dpi_from_opt(opt)
     try:
         doc = fitz.open(str(src))
