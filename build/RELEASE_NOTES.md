@@ -1,3 +1,23 @@
+## MICO360 Doc Toolkit v6.5.1
+
+**Queue polish & fixes.**
+
+- **Readable right-click menu in Light mode.** The context menu could appear
+  see-through / black on the light theme — it's now a proper opaque menu in both
+  themes, with clearly-readable (and clearly-disabled) items.
+- **No more stalls when resizing during a batch.** Status updates no longer
+  rebuild the whole list or re-read every file on each completion, so the window
+  stays responsive even if you resize it mid-run.
+- **Long file names no longer cut off awkwardly.** Each row now shows a status
+  dot, the file name (middle-trimmed so the extension stays visible), a size /
+  message line, and a status label — with the full path on hover.
+- **Clearer progress.** A taller progress bar with a percentage, an estimated
+  time remaining, and a “Current: <file>” caption that always identifies the
+  file being processed.
+- **Live queue count** showing working / pending / done / failed at a glance.
+
+---
+
 ## MICO360 Doc Toolkit v6.5.0
 
 **A real file queue — more room, more control.**
