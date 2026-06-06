@@ -43,11 +43,19 @@ from mico360.theme import palette
 from mico360.ui.file_collector import collect_files
 from mico360.ui.options_widget import OptionsWidget
 from mico360.ui.widgets import (
-    Card, Chip, DropArea, FileListWidget, ResponsiveRow, section_label)
+    ROLE_NAME, ROLE_STATE, ROLE_SUB, Card, Chip, DropArea, FileListWidget,
+    QueueRowDelegate, ResponsiveRow, section_label)
 
 log = get_logger("mico360.ui")
 
 _row_ids = itertools.count(1)
+
+
+def _safe_size(p: Path) -> int:
+    try:
+        return p.stat().st_size
+    except OSError:
+        return -1
 
 
 @dataclass
@@ -59,6 +67,7 @@ class QueueItem:
     state: str = "pending"          # pending | running | done | failed
     msg: str = ""
     outputs: list = field(default_factory=list)
+    size: int = -1                  # cached at add time — never stat() per repaint
 
 
 class _StatusProxy:
@@ -199,6 +208,15 @@ class ToolPage(QWidget):
         self.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.file_list.setMinimumHeight(220)
         self.file_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # A custom delegate gives a clean two-line "name + status" row that
+        # middle-elides long names (keeping the extension) and never stat()s
+        # during a repaint — so resizing while a batch runs stays smooth.
+        self._row_delegate = QueueRowDelegate(lambda: palette(settings.theme),
+                                              self.file_list)
+        self.file_list.setItemDelegate(self._row_delegate)
+        self.file_list.setUniformItemSizes(True)
+        self.file_list.setMouseTracking(True)
+        self.file_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.file_list.itemDoubleClicked.connect(self._open_item_output)
         # Drag-to-reorder is always available now (a queue is inherently ordered);
         # self.items is re-synced from the view after any move.
@@ -301,8 +319,17 @@ class ToolPage(QWidget):
         self.progress.setTextVisible(True)
         card.add(self.progress)
 
+        # "Current: <file>" — full name, elided to the panel width with the full
+        # name on hover, so the running file is always identifiable.
+        self.progress_caption = QLabel("")
+        self.progress_caption.setObjectName("ProgressCaption")
+        self.progress_caption.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self.progress_caption.setVisible(False)
+        card.add(self.progress_caption)
+
         self.status_lbl = QLabel("Ready when you are.")
         self.status_lbl.setObjectName("Hint")
+        self.status_lbl.setWordWrap(True)
         card.add(self.status_lbl)
 
         actions = QHBoxLayout()
@@ -403,7 +430,7 @@ class ToolPage(QWidget):
         added = 0
         for p in found:
             if p.resolve() not in existing:
-                self.items.append(QueueItem(path=p))
+                self.items.append(QueueItem(path=p, size=_safe_size(p)))
                 existing.add(p.resolve())
                 added += 1
         self._refresh_list()
@@ -414,37 +441,47 @@ class ToolPage(QWidget):
         else:
             self._log("No supported files found in the selection.")
 
-    _ICONS = {"pending": "•", "done": "✓", "failed": "✗", "running": "⏳"}
+    def _sub_text(self, it: QueueItem) -> str:
+        size = human_size(it.size) if it.size >= 0 else "?"
+        return f"{size}  ·  {it.msg}" if it.msg else size
+
+    def _apply_item_data(self, row, it: QueueItem) -> None:
+        """Write a QueueItem's display data onto a QListWidgetItem (read by the
+        delegate). Cheap — no filesystem access."""
+        row.setData(Qt.UserRole, it.id)
+        row.setData(ROLE_NAME, it.path.name)
+        row.setData(ROLE_STATE, it.state)
+        row.setData(ROLE_SUB, self._sub_text(it))
+        row.setData(Qt.DisplayRole, it.path.name)   # accessibility / fallback
+        row.setToolTip(str(it.path) + (f"\n{it.msg}" if it.msg else ""))
 
     def _refresh_list(self) -> None:
-        from PySide6.QtGui import QColor
         from PySide6.QtWidgets import QListWidgetItem
 
-        theme = palette(settings.theme)
-        colors = {"done": QColor(theme["success"]), "failed": QColor(theme["error"]),
-                  "running": QColor(theme["info"])}
-        # Preserve selection across the rebuild (by row id).
         prev_sel = {self.file_list.item(r).data(Qt.UserRole)
                     for r in range(self.file_list.count())
                     if self.file_list.item(r).isSelected()}
         self.file_list.blockSignals(True)
         self.file_list.clear()
         for it in self.items:
-            try:
-                size = human_size(it.path.stat().st_size)
-            except OSError:
-                size = "?"
-            icon = self._ICONS.get(it.state, "•")
-            tail = f"    ·    {it.msg}" if it.msg else ""
-            row = QListWidgetItem(f"{icon}  {it.path.name}    —    {size}{tail}")
-            row.setToolTip(str(it.path) + (f"\n{it.msg}" if it.msg else ""))
-            row.setData(Qt.UserRole, it.id)
-            if it.state in colors:
-                row.setForeground(colors[it.state])
+            row = QListWidgetItem()
+            self._apply_item_data(row, it)
             self.file_list.addItem(row)
             if it.id in prev_sel:
                 row.setSelected(True)
         self.file_list.blockSignals(False)
+        self._update_counts()
+
+    def _update_item_rows(self, items) -> None:
+        """Refresh just the given rows in place — no full rebuild, no stat() —
+        so updating status mid-run (and resizing at the same time) stays smooth."""
+        want = {it.id: it for it in items}
+        for r in range(self.file_list.count()):
+            row = self.file_list.item(r)
+            it = want.get(row.data(Qt.UserRole))
+            if it is not None:
+                self._apply_item_data(row, it)
+        self.file_list.viewport().update()
         self._update_counts()
 
     def _sync_order_from_list(self, *args) -> None:
@@ -466,17 +503,15 @@ class ToolPage(QWidget):
 
     def _update_counts(self) -> None:
         n, done, failed, pending = self._counts()
+        running_now = sum(1 for it in self.items if it.state == "running")
         if n == 0:
             self.count_lbl.setText("0 files")
             self.count_lbl.setToolTip("")
         else:
-            total_bytes = 0
-            for it in self.items:
-                try:
-                    total_bytes += it.path.stat().st_size
-                except OSError:
-                    pass
+            total_bytes = sum(it.size for it in self.items if it.size >= 0)
             bits = [f"{n} file{'s' if n != 1 else ''}", human_size(total_bytes)]
+            if running_now:
+                bits.append(f"{running_now} working")
             if pending:
                 bits.append(f"{pending} pending")
             if done:
@@ -737,7 +772,7 @@ class ToolPage(QWidget):
         for it in todo:                      # mark queued rows as running
             it.state, it.msg = "running", ""
         self._run_items = list(todo)         # snapshot: index aligns with engine
-        self._refresh_list()
+        self._update_item_rows(todo)
 
         self._set_running(True)
         self.progress.setMaximum(0)  # busy until 'started' sets total
@@ -803,15 +838,27 @@ class ToolPage(QWidget):
         done = sum(1 for it in self.items if it.state in ("done", "failed"))
         running = next((it.path.name for it in self.items
                         if it.state == "running"), None)
-        parts = [f"Processing {min(done + 1, total)} / {total} files"]
-        if running:
-            parts.append(f"Current: {running}")
+        parts = [f"Processing {min(done + 1, total)} of {total}"]
+        if pct and pct > 1:
+            parts.append(f"{int(round(pct))}%")
         if self._run_t0 is not None and pct and pct > 1:
             import time
             elapsed = time.monotonic() - self._run_t0
             remaining = elapsed * (100.0 - pct) / max(pct, 1.0)
-            parts.append(f"ETA {self._fmt_eta(remaining)}")
+            parts.append(f"about {self._fmt_eta(remaining)} left")
         self.status_lbl.setText("   ·   ".join(parts))
+
+        # Current-file caption: show as much of the name as fits, full on hover.
+        if running:
+            self.progress_caption.setVisible(True)
+            self.progress_caption.setToolTip(running)
+            from PySide6.QtGui import QFontMetrics
+            fm = QFontMetrics(self.progress_caption.font())
+            avail = max(120, self.progress_caption.width() - 8)
+            self.progress_caption.setText(
+                "Current: " + fm.elidedText(running, Qt.ElideMiddle, avail))
+        else:
+            self.progress_caption.setVisible(False)
 
     def _on_unit_log(self, label: str, message: str) -> None:
         self._log(f"  {label}: {message}")
@@ -849,7 +896,12 @@ class ToolPage(QWidget):
                 targets = [it for it in self.items if it.path in srcs]
         for it in targets:
             it.state, it.msg, it.outputs = new_state, note, list(result.outputs or [])
-        self._refresh_list()
+        # Update only the affected rows — not the whole list — so a long batch
+        # stays responsive (and a concurrent window resize can't stall it).
+        if targets:
+            self._update_item_rows(targets)
+        else:
+            self._update_counts()
 
     def _on_finished(self, summary: dict) -> None:
         self.controller = None
@@ -866,6 +918,7 @@ class ToolPage(QWidget):
         if saved:
             msg += f"  ·  {saved}"
         self.status_lbl.setText(msg)
+        self.progress_caption.setVisible(False)
         self._log(msg)
         self.activity.emit(f"[{self.tool.name}] {msg}")
 

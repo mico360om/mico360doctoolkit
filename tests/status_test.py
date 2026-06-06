@@ -78,8 +78,11 @@ def main() -> int:
         check("all files done after run", states == ["done", "done"], str(states))
         outs1 = [page._st(p)["outputs"][0] for p in page.files]
         check("each file recorded an output", all(o.exists() for o in outs1))
-        check("list shows done glyph", page.file_list.item(0).text().startswith("✓"),
-              repr(page.file_list.item(0).text()[:3]))
+        from mico360.ui.widgets import ROLE_NAME, ROLE_STATE
+        row0 = page.file_list.item(0)
+        check("list row shows done status + file name",
+              row0.data(ROLE_STATE) == "done" and bool(row0.data(ROLE_NAME)),
+              f"state={row0.data(ROLE_STATE)} name={row0.data(ROLE_NAME)}")
 
         # total-saved summary (compress tool) is a non-empty, sensible string
         saved = page._total_saved()

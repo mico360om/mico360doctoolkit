@@ -151,6 +151,27 @@ QToolTip {{
     padding: 6px 9px;
 }}
 
+/* Context menus — must be opaque & theme-coloured (the global transparent
+   QWidget rule above would otherwise leave the popup see-through / black). */
+QMenu {{
+    background-color: {c['surface']};
+    color: {c['text']};
+    border: 1px solid {c['border_strong']};
+    border-radius: {RADIUS_SM}px;
+    padding: 6px;
+}}
+QMenu::item {{
+    background: transparent;
+    color: {c['text']};
+    padding: 7px 22px 7px 16px;
+    border-radius: 6px;
+    margin: 1px 2px;
+}}
+QMenu::item:selected {{ background-color: {c['primary']}; color: {c['on_primary']}; }}
+QMenu::item:disabled {{ color: {c['text_faint']}; background: transparent; }}
+QMenu::separator {{ height: 1px; background-color: {c['divider']}; margin: 5px 8px; }}
+QMenu::icon {{ padding-left: 6px; }}
+
 /* =================== Sidebar =================== */
 #Sidebar {{
     background-color: {c['sidebar']};
@@ -392,11 +413,12 @@ QListWidget#FileList::item:selected {{ background-color: {c['selected']}; color:
 QProgressBar {{
     background-color: {c['surface_2']};
     border: 1px solid {c['border']};
-    border-radius: 8px;
-    height: 18px; text-align: center; color: {c['text']};
-    font-size: 11px; font-weight: 600;
+    border-radius: 9px;
+    min-height: 22px; text-align: center; color: {c['text']};
+    font-size: 12px; font-weight: 700;
 }}
-QProgressBar::chunk {{ background-color: {c['primary']}; border-radius: 7px; }}
+QProgressBar::chunk {{ background-color: {c['primary']}; border-radius: 8px; }}
+#ProgressCaption {{ color: {c['text_muted']}; font-size: 12px; }}
 
 /* =================== Log / text =================== */
 QPlainTextEdit#Log, QTextEdit {{

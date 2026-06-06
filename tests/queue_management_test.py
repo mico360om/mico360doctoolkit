@@ -137,6 +137,29 @@ def main() -> int:
           str(len(trashed_calls)))
     check("Delete from disk removes those rows from the queue", len(page.items) == 2)
 
+    # 10b. Delegate roles + long-name handling (no awkward truncation: the full
+    #      name is in the role and the full path in the tooltip).
+    from mico360.ui.widgets import ROLE_NAME, ROLE_STATE
+    page._clear()
+    longname = td / ("A-very-long-file-name-that-would-get-cut-off-"
+                     "Asad-CV-Lifting-for-Lifting-Inspector.pdf")
+    longname.write_bytes(b"%PDF-1.4\n%%EOF\n")
+    page.add_paths([str(longname)])
+    row0 = page.file_list.item(0)
+    check("row carries full file name + state for the delegate",
+          row0.data(ROLE_NAME) == longname.name and row0.data(ROLE_STATE) == "pending",
+          f"{row0.data(ROLE_NAME)} / {row0.data(ROLE_STATE)}")
+    check("row tooltip preserves the full path (long names never lost)",
+          str(longname) in row0.toolTip())
+
+    # 10c. Context menus are styled in BOTH themes (guards the unreadable
+    #      light-mode menu bug).
+    from mico360.theme import stylesheet
+    for th in ("light", "dark"):
+        ss = stylesheet(th)
+        check(f"{th} theme styles QMenu (readable context menu)",
+              "QMenu {" in ss and "QMenu::item:disabled" in ss)
+
     # 10. AGGREGATE tool: one result applies to all submitted rows
     apage = ToolPage(TOOLS_BY_ID["pdf_merge"])
     apage.add_paths([str(p) for p in pdfs[:3]])

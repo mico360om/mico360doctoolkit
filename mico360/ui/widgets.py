@@ -5,8 +5,9 @@ reflows its two children from side-by-side to stacked as width changes.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QCursor, QFont, QGuiApplication, QPainter
+from PySide6.QtCore import QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import (
+    QColor, QCursor, QFont, QFontMetrics, QGuiApplication, QPainter)
 from PySide6.QtWidgets import (
     QBoxLayout,
     QFrame,
@@ -15,9 +16,97 @@ from PySide6.QtWidgets import (
     QListWidget,
     QPushButton,
     QSizePolicy,
+    QStyle,
+    QStyledItemDelegate,
     QVBoxLayout,
     QWidget,
 )
+
+# Item-data roles for the queue rows (read by QueueRowDelegate).
+ROLE_ID = Qt.UserRole            # unique row id (also used by tool_page)
+ROLE_NAME = Qt.UserRole + 11     # file name
+ROLE_STATE = Qt.UserRole + 12    # pending | running | done | failed
+ROLE_SUB = Qt.UserRole + 13      # secondary line: "size · message"
+
+
+class QueueRowDelegate(QStyledItemDelegate):
+    """Two-line queue row: a coloured status dot, the file name (middle-elided so
+    long names keep their start AND extension), a muted size/message line, and a
+    right-aligned status label. Theme-aware via a palette getter."""
+
+    _DOT = {"pending": "text_faint", "running": "info",
+            "done": "success", "failed": "error"}
+    _LABEL = {"pending": "Queued", "running": "Working…",
+              "done": "Done", "failed": "Failed"}
+
+    def __init__(self, theme_getter, parent=None):
+        super().__init__(parent)
+        self._theme = theme_getter
+
+    def sizeHint(self, option, index):
+        return QSize(option.rect.width(), 48)
+
+    def paint(self, painter, option, index):
+        c = self._theme()
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        rect = option.rect
+
+        if option.state & QStyle.State_Selected:
+            painter.fillRect(rect, QColor(c["selected"]))
+        elif option.state & QStyle.State_MouseOver:
+            painter.fillRect(rect, QColor(c["hover"]))
+
+        state = index.data(ROLE_STATE) or "pending"
+        name = index.data(ROLE_NAME) or index.data(Qt.DisplayRole) or ""
+        sub = index.data(ROLE_SUB) or ""
+        dot = QColor(c.get(self._DOT.get(state, "text_faint"), c["text_faint"]))
+
+        # Status dot (left).
+        cy = rect.center().y()
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(dot)
+        painter.drawEllipse(rect.left() + 14, cy - 4, 9, 9)
+
+        # Status label (right), bold, in the status colour.
+        label = self._LABEL.get(state, state)
+        sf = QFont(option.font)
+        sf.setBold(True)
+        sf.setPointSizeF(max(8.0, option.font.pointSizeF() - 0.5))
+        fm_s = QFontMetrics(sf)
+        label_w = fm_s.horizontalAdvance(label)
+        painter.setFont(sf)
+        painter.setPen(dot)
+        painter.drawText(QRect(rect.right() - label_w - 14, rect.top(),
+                               label_w, rect.height()),
+                         int(Qt.AlignRight | Qt.AlignVCenter), label)
+
+        text_left = rect.left() + 34
+        text_w = max(40, rect.right() - 14 - label_w - 14 - text_left)
+
+        # File name (line 1) — middle-elided so the extension stays visible.
+        nf = QFont(option.font)
+        fm = QFontMetrics(nf)
+        elided = fm.elidedText(str(name), Qt.ElideMiddle, text_w)
+        painter.setFont(nf)
+        painter.setPen(QColor(c["text"]))
+        painter.drawText(QRect(text_left, rect.top() + 7, text_w, fm.height()),
+                         int(Qt.AlignLeft | Qt.AlignVCenter), elided)
+
+        # Secondary line (size · message) — muted.
+        if sub:
+            subf = QFont(option.font)
+            subf.setPointSizeF(max(8.0, option.font.pointSizeF() - 1.0))
+            fms = QFontMetrics(subf)
+            painter.setFont(subf)
+            painter.setPen(QColor(c["error"] if state == "failed"
+                                  else c["text_faint"]))
+            painter.drawText(
+                QRect(text_left, rect.bottom() - fms.height() - 6, text_w,
+                      fms.height()),
+                int(Qt.AlignLeft | Qt.AlignVCenter),
+                fms.elidedText(str(sub), Qt.ElideRight, text_w))
+        painter.restore()
 
 
 class FileListWidget(QListWidget):
