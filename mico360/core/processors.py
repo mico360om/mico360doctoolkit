@@ -73,15 +73,21 @@ _FALLBACK_QUALITY = {"low": 80, "medium": 60, "high": 45}
 
 
 def pdf_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
-    level = opt.get("level", "medium")
+    level = opt.get("level", "lossless")
     out = build_output_path(src, out_dir, ".pdf", name_suffix="_compressed",
                             overwrite=opt.get("overwrite", False),
                             numbered=opt.get("same_as_source", False))
     before = src.stat().st_size
 
+    # Lossless (default): reduce size with a strict content-integrity guarantee.
+    if level == "lossless":
+        _pdf_compress_lossless(src, out, before, report)
+        return [out]
+
     if level == "target":
         target_bytes = max(1, int(opt.get("target_kb", 250))) * 1024
         _pdf_compress_to_target(src, out, target_bytes, before, report)
+        _enforce_structural_integrity(src, out, report)
         return [out]
 
     gs = find_ghostscript()
@@ -129,6 +135,8 @@ def pdf_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
     report(f"{human_size(before)} → {human_size(after)} ({pct:+.0f}%)")
     if after >= before:
         report("Note: file was already well-optimized; little/no size reduction.")
+    # Lossy levels re-encode images by design; make sure nothing ELSE was lost.
+    _enforce_structural_integrity(src, out, report)
     return [out]
 
 
@@ -171,6 +179,127 @@ def _pymupdf_compress(src: Path, out: Path, level: str, opt: dict, report: Repor
                  deflate_fonts=True, clean=True)
     finally:
         doc.close()
+
+
+def _links_signature(page) -> list:
+    out = []
+    for ln in page.get_links():
+        frm = ln.get("from")
+        rect = tuple(round(v, 1) for v in frm) if frm is not None else None
+        out.append((ln.get("kind"), ln.get("uri"), ln.get("page"),
+                    ln.get("file"), rect))
+    return sorted(str(x) for x in out)
+
+
+def verify_pdf_integrity(src_path, out_path, mode: str = "strict"):
+    """Confirm a processed PDF preserved the original's content.
+
+    Returns ``(ok: bool, differences: list[str])``.
+
+    * ``mode="strict"`` (lossless compression) — EVERYTHING must match: page
+      count, text, links, bookmarks, attachments, fonts, metadata, image bytes,
+      and the rendered appearance of every page (pixel-for-pixel).
+    * ``mode="structural"`` (lossy compression) — the things that must never be
+      lost must match: page count, text, links, bookmarks, attachments. (Images
+      are intentionally re-encoded, fonts may be subset, so those aren't compared.)
+    """
+    import hashlib
+
+    import fitz
+    strict = mode == "strict"
+    diffs: list[str] = []
+    a = fitz.open(str(src_path))
+    b = fitz.open(str(out_path))
+    try:
+        if a.page_count != b.page_count:
+            return False, [f"page count changed {a.page_count} → {b.page_count}"]
+        if a.get_toc(simple=True) != b.get_toc(simple=True):
+            diffs.append("bookmarks / outline changed")
+        try:
+            if sorted(a.embfile_names()) != sorted(b.embfile_names()):
+                diffs.append("embedded files / attachments changed")
+        except Exception:
+            pass
+        if strict:
+            for k in ("title", "author", "subject", "keywords", "creator", "producer"):
+                if (a.metadata.get(k) or "") != (b.metadata.get(k) or ""):
+                    diffs.append(f"metadata '{k}' changed")
+        for i in range(a.page_count):
+            pa, pb = a[i], b[i]
+            if pa.get_text("text") != pb.get_text("text"):
+                diffs.append(f"page {i + 1}: text changed")
+            if _links_signature(pa) != _links_signature(pb):
+                diffs.append(f"page {i + 1}: links / annotations changed")
+            if strict:
+                fa = sorted(f[3] for f in pa.get_fonts(full=True))
+                fb = sorted(f[3] for f in pb.get_fonts(full=True))
+                if fa != fb:
+                    diffs.append(f"page {i + 1}: fonts changed")
+                ia, ib = pa.get_images(full=True), pb.get_images(full=True)
+                if len(ia) != len(ib):
+                    diffs.append(f"page {i + 1}: image count {len(ia)} → {len(ib)}")
+                else:
+                    ha = sorted(hashlib.sha1(a.extract_image(im[0])["image"]).hexdigest()
+                                for im in ia)
+                    hb = sorted(hashlib.sha1(b.extract_image(im[0])["image"]).hexdigest()
+                                for im in ib)
+                    if ha != hb:
+                        diffs.append(f"page {i + 1}: image data changed")
+                ra = hashlib.sha1(pa.get_pixmap(dpi=100).samples).hexdigest()
+                rb = hashlib.sha1(pb.get_pixmap(dpi=100).samples).hexdigest()
+                if ra != rb:
+                    diffs.append(f"page {i + 1}: rendered appearance changed")
+    finally:
+        a.close()
+        b.close()
+    return (len(diffs) == 0), diffs
+
+
+def _pdf_compress_lossless(src: Path, out: Path, before: int, report: Report) -> None:
+    """Reduce size with ZERO content change: garbage-collect unused objects and
+    deflate streams/fonts, but never touch image data, text, links or metadata.
+    The result is verified to be content-identical to the original; if it isn't
+    (or if it wouldn't be smaller), the original is kept verbatim."""
+    import shutil
+
+    import fitz
+    report("Lossless compression — preserving 100% of content…")
+    doc = fitz.open(str(src))
+    try:
+        doc.set_metadata(dict(doc.metadata))   # keep all metadata exactly
+        doc.save(str(out), garbage=4, deflate=True, deflate_images=False,
+                 deflate_fonts=True, clean=True)
+    finally:
+        doc.close()
+
+    ok, diffs = verify_pdf_integrity(src, out, mode="strict")
+    if not ok:
+        report("Integrity check flagged a difference — keeping the original "
+               f"unchanged ({'; '.join(diffs[:3])}).")
+        shutil.copyfile(str(src), str(out))
+        return
+    after = out.stat().st_size
+    if after >= before:
+        shutil.copyfile(str(src), str(out))     # no gain → keep original (no bloat)
+        report(f"Already optimally packed — kept the original ({human_size(before)}); "
+               "content verified identical ✓")
+        return
+    report(f"{human_size(before)} → {human_size(after)} "
+           f"({(1 - after / before) * 100:.0f}% smaller) — content verified identical ✓")
+
+
+def _enforce_structural_integrity(src: Path, out: Path, report: Report) -> None:
+    """After a *lossy* compression, make sure nothing other than image quality was
+    lost (text, links, bookmarks, attachments, page count). If something was,
+    keep the original so the user never loses content."""
+    import shutil
+    ok, diffs = verify_pdf_integrity(src, out, mode="structural")
+    if ok:
+        report("Integrity check ✓ — text, links, bookmarks & attachments preserved.")
+        return
+    report("⚠ This compression would have changed content beyond image quality ("
+           + "; ".join(diffs[:3]) + ") — kept the original to guarantee zero data loss.")
+    shutil.copyfile(str(src), str(out))
 
 
 def _pdf_compress_to_target(src: Path, out: Path, target_bytes: int,
@@ -1340,12 +1469,68 @@ def image_to_pdf(srcs: list[Path], out_dir: Path, opt: dict, report: Report) -> 
 _IMG_QUALITY = {"low": 85, "medium": 65, "high": 45}
 
 
+def verify_image_identical(src_path, out_path) -> bool:
+    """True if two images have exactly the same dimensions and pixels (used to
+    confirm a lossless image operation changed nothing visible)."""
+    from PIL import Image, ImageChops
+    try:
+        a = Image.open(str(src_path)); a.load()
+        b = Image.open(str(out_path)); b.load()
+    except Exception:
+        return False
+    if a.size != b.size:
+        return False
+    if a.mode != b.mode:
+        a = a.convert("RGBA"); b = b.convert("RGBA")
+    return ImageChops.difference(a, b).getbbox() is None
+
+
+def _image_compress_lossless(src: Path, im, out_dir: Path, opt: dict,
+                             before: int, report: Report) -> list[Path]:
+    """Re-pack an image with ZERO pixel change. Same format, lossless codec
+    settings. JPEG/BMP have no lossless gain → the original is kept verbatim.
+    The result is verified pixel-identical to the original."""
+    import shutil
+    report("Lossless image compression — preserving every pixel…")
+    ext = src.suffix.lower()
+    out = build_output_path(src, out_dir, ext, name_suffix="_compressed",
+                            overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+    saved = False
+    try:
+        if ext == ".png":
+            im.save(out, format="PNG", optimize=True)
+            saved = True
+        elif ext == ".webp":
+            im.save(out, format="WEBP", lossless=True, method=6)
+            saved = True
+        elif ext in (".tif", ".tiff"):
+            im.save(out, format="TIFF", compression="tiff_deflate")
+            saved = True
+    except Exception as exc:
+        report(f"Lossless re-pack unavailable ({exc}); keeping the original.")
+        saved = False
+    # JPEG/BMP (or any failure): copy the original — no lossless gain is possible.
+    if not saved:
+        shutil.copyfile(str(src), str(out))
+    # Verify identical pixels; if not (or no size gain), keep the original.
+    if not verify_image_identical(src, out) or out.stat().st_size >= before:
+        shutil.copyfile(str(src), str(out))
+        report(f"Already optimally packed — kept the original ({human_size(before)}); "
+               "pixels verified identical ✓")
+        return [out]
+    after = out.stat().st_size
+    report(f"{human_size(before)} → {human_size(after)} "
+           f"({(1 - after / before) * 100:.0f}% smaller) — pixels verified identical ✓")
+    return [out]
+
+
 def image_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
     from PIL import Image
 
     if src.suffix.lower() not in IMAGE_EXTS:
         raise ProcessError(f"Unsupported image type: {src.suffix}")
-    level = opt.get("level", "medium")
+    level = opt.get("level", "lossless")
     # The "quality" spinbox only applies in custom mode; for the Low/Medium/High
     # presets use the level's own quality so the choice actually takes effect.
     # (values() always reports the hidden spinbox, so we must branch on level.)
@@ -1364,6 +1549,11 @@ def image_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[
     except Exception as exc:
         raise ProcessError(f"Couldn't open '{src.name}' — it may be corrupt or not "
                            f"a supported image ({exc}).")
+
+    # Lossless (default): re-pack with zero pixel change, verified identical.
+    if level == "lossless":
+        return _image_compress_lossless(src, im, out_dir, opt, before, report)
+
     # Optional downscale
     if max_dim and max(im.size) > max_dim:
         ratio = max_dim / max(im.size)

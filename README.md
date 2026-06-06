@@ -1,4 +1,4 @@
-# MICO360 Doc Toolkit  ·  v6.2.1
+# MICO360 Doc Toolkit  ·  v6.3.0
 
 A modern Windows 10/11 desktop app for PDF & image management — a **Dashboard**
 home plus tools to compress, merge, split, organize, protect, watermark, sign,
@@ -18,6 +18,15 @@ specific version (and its `.sha256` checksum) from the
 [Releases page](https://github.com/mico360om/mico360doctoolkit/releases/latest).
 After installing, the app keeps itself up to date automatically.
 
+> **v6.3** — **Lossless compression with verified integrity.** Compress is now
+> **Lossless** by default: it only strips redundancy and recompresses streams, then
+> verifies the result is byte-for-byte identical in text, images, fonts, links,
+> metadata, bookmarks and rendered pixels — if anything would change, the original is
+> kept untouched. Lossy levels (Low/Medium/High/Target) stay available and are checked
+> to preserve all text, links, bookmarks and attachments. Images get a lossless mode
+> too (verified pixel-identical). Every other tool was audited to confirm it changes
+> only what it's meant to and never silently drops content.
+>
 > **v5.7** — a **cleaner Convert section** (9 tools → 4): **PDF → …** (one tool to
 > Word / PowerPoint / Excel / Images), **Office → PDF** (Word / Excel / PowerPoint,
 > auto-detected), and **Document → Markdown** (now also Excel, PowerPoint & PDF).

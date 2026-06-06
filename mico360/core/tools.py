@@ -48,10 +48,14 @@ PPT = {".pptx", ".ppt", ".odp"}
 OFFICE = WORD | EXCEL | PPT                 # Office → PDF (auto-detected)
 MARKDOWN_INPUTS = WORD | EXCEL | PPT | PDF  # anything → Markdown
 
+# Compression levels. "Lossless" is the default and is content-verified: it
+# reduces size with zero change to images/text/fonts/metadata. The other levels
+# re-compress images for a smaller file (text/links/etc. are still preserved).
 _QUALITY_CHOICES = [
-    ("low", "Low compression — best quality"),
-    ("medium", "Medium — balanced (recommended)"),
-    ("high", "High compression — smallest size"),
+    ("lossless", "Lossless — no quality loss, verified identical (recommended)"),
+    ("low", "Low — light image compression"),
+    ("medium", "Medium — balanced (re-compresses images)"),
+    ("high", "High — smallest (re-compresses images more)"),
     ("target", "Target file size…"),
     ("custom", "Custom…"),
 ]
@@ -66,7 +70,7 @@ TOOLS: list[Tool] = [
         tagline="Shrink PDF file size with selectable quality.",
         mode=PER_FILE, accept=PDF, runner=processors.pdf_compress, group="PDF",
         options=[
-            Option("level", "Compression", "choice", "medium", _QUALITY_CHOICES,
+            Option("level", "Compression", "choice", "lossless", _QUALITY_CHOICES,
                    hint="Higher compression = smaller file, lower fidelity."),
             Option("target_kb", "Target size", "int", 250, minimum=10, maximum=200000,
                    suffix=" KB", visible_when=("level", "target"),
@@ -289,7 +293,7 @@ TOOLS: list[Tool] = [
         tagline="Reduce image file size with quality control.",
         mode=PER_FILE, accept=IMAGES, runner=processors.image_compress, group="Images",
         options=[
-            Option("level", "Compression", "choice", "medium", _QUALITY_CHOICES,
+            Option("level", "Compression", "choice", "lossless", _QUALITY_CHOICES,
                    hint="Higher compression = smaller file, lower fidelity."),
             Option("target_kb", "Target size", "int", 250, minimum=5, maximum=200000,
                    suffix=" KB", visible_when=("level", "target"),
