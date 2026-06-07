@@ -1,3 +1,19 @@
+## MICO360 Doc Toolkit v6.5.2
+
+**More reliable update checks.**
+
+- **Fixes “Couldn’t check for update” on some PCs.** The check used only the
+  GitHub API, which is rate-limited *per network address* (so on an office network
+  where several PCs share one internet connection, some would hit the cap) and is
+  blocked by some firewalls. It now automatically **falls back to a second source
+  on github.com**, so the check succeeds even where the API is unavailable.
+
+> Note: a PC that currently shows the error needs **one manual update** to this
+> version (use “Open release page” and run the installer). After that, automatic
+> updates keep working reliably.
+
+---
+
 ## MICO360 Doc Toolkit v6.5.1
 
 **Queue polish & fixes.**

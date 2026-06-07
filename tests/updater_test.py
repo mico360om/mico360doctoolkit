@@ -77,6 +77,52 @@ def main() -> int:
     check("no installer asset returns None",
           updater.check_for_update(lambda url: noexe) is None)
 
+    # --- Atom fallback when the GitHub API is unreachable ---------------
+    # (rate-limited / firewalled api.github.com). The check must still work via
+    # the Atom feed + stable releases/latest/download URLs.
+    import urllib.error
+    atom = (
+        '<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">'
+        '<entry><id>tag:github.com,2008:Repository/1/v9.9.9</id>'
+        '<link rel="alternate" type="text/html" '
+        'href="https://github.com/mico360om/mico360doctoolkit/releases/tag/v9.9.9"/>'
+        '</entry></feed>')
+    real_get = updater._get
+
+    def fake_get(url, timeout=20):
+        if "api.github.com" in url:
+            raise urllib.error.HTTPError(url, 403, "rate limit exceeded", {}, None)
+        if url.endswith("releases.atom"):
+            return atom.encode("utf-8")
+        if url.endswith(".sha256") or url.endswith(".sha256.txt"):
+            return (b"f" * 64) + b"  MICO360-DocToolkit-Setup-Latest.exe"
+        raise urllib.error.URLError("unexpected url " + url)
+
+    updater._get = fake_get
+    try:
+        info2 = updater.check_for_update()   # default fetcher -> hits fake_get
+    finally:
+        updater._get = real_get
+    check("API failure falls back to Atom feed", isinstance(info2, UpdateInfo))
+    check("Atom fallback parses the latest tag",
+          info2 and info2.version == "9.9.9", str(info2 and info2.version))
+    check("Atom fallback uses the stable download URL",
+          info2 and info2.url == updater.DOWNLOAD_BASE + info2.asset_name,
+          str(info2 and info2.url))
+    check("Atom fallback reads the checksum sidecar",
+          info2 and info2.sha256 == "f" * 64, str(info2 and info2.sha256))
+
+    # An injected (test) fetcher that raises must NOT trigger the network fallback.
+    def boom(url):
+        raise RuntimeError("boom")
+    raised_passthrough = False
+    try:
+        updater.check_for_update(boom)
+    except RuntimeError:
+        raised_passthrough = True
+    check("injected fetcher errors propagate (no surprise network)",
+          raised_passthrough)
+
     # --- download + sha256 verify (file:// URL, no network) -------------
     payload = b"PRETEND INSTALLER BYTES" * 5000
     src = Path(tempfile.mkdtemp(prefix="mico360_src_")) / "Setup.exe"

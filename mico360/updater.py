@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -31,6 +32,11 @@ GITHUB_REPO = "mico360doctoolkit"
 
 API_LATEST = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+# Fallbacks that DON'T use api.github.com (which is rate-limited per-IP — a shared
+# office/NAT address hits the 60/hr cap — and is blocked by some firewalls that
+# still allow github.com). The Atom feed and the download host are on github.com.
+ATOM_FEED = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases.atom"
+DOWNLOAD_BASE = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest/download/"
 _HEADERS = {"User-Agent": f"MICO360-Doc-Toolkit/{__version__}",
             "Accept": "application/vnd.github+json"}
 _CHUNK = 256 * 1024
@@ -95,12 +101,62 @@ def _pick_installer(assets: list[dict]) -> dict | None:
     return (versioned or pref or [None])[0]
 
 
+def _latest_tag_via_atom(timeout: int = 20) -> str | None:
+    """Read the newest release tag from the repo's Atom feed (github.com, not the
+    rate-limited api.github.com). The first entry is the latest release."""
+    raw = _get(ATOM_FEED, timeout).decode("utf-8", "replace")
+    # Each entry links to …/releases/tag/<tag>; the first is the newest.
+    m = re.search(r"/releases/tag/([^\"'<>\s]+)", raw)
+    return m.group(1) if m else None
+
+
+def _stable_asset_names() -> tuple[str, str]:
+    """The stable (version-less) installer + checksum names for this OS — these
+    are always reachable at releases/latest/download/ without the API."""
+    if _installer_ext() == ".dmg":
+        name = "MICO360-DocToolkit-macos-Latest.dmg"
+        return name, name + ".sha256.txt"
+    name = "MICO360-DocToolkit-Setup-Latest.exe"
+    return name, name + ".sha256"
+
+
+def _check_via_atom() -> UpdateInfo | None:
+    """API-free update check: get the latest tag from the Atom feed and build the
+    install info from the stable releases/latest/download URLs. Used when the API
+    is unreachable (rate-limited / firewalled)."""
+    tag = _latest_tag_via_atom()
+    if not tag or not is_newer(tag):
+        return None
+    name, sidecar_name = _stable_asset_names()
+    sha = None
+    try:
+        sha = _get(DOWNLOAD_BASE + sidecar_name).decode("utf-8").split()[0].strip()
+    except Exception:
+        sha = None
+    return UpdateInfo(
+        version=clean_version(tag),
+        url=DOWNLOAD_BASE + name,
+        asset_name=name,
+        sha256=sha,
+        notes="",
+        page=RELEASES_PAGE,
+    )
+
+
 def check_for_update(json_fetcher=_get_json) -> UpdateInfo | None:
     """Return UpdateInfo if the latest GitHub release is newer, else None.
 
-    ``json_fetcher`` is injectable for testing. Raises on network errors so the
-    caller can show a message; returns None when simply up to date."""
-    data = json_fetcher(API_LATEST)
+    Tries the GitHub API first; if that fails (rate limit / firewall / TLS), falls
+    back to the Atom feed + stable download URLs so the check still works on PCs
+    where api.github.com is unreachable. ``json_fetcher`` is injectable for tests;
+    the Atom fallback only runs for the default (real-network) fetcher."""
+    try:
+        data = json_fetcher(API_LATEST)
+    except Exception:
+        # API unreachable — try the api-free path (real network only).
+        if json_fetcher is _get_json:
+            return _check_via_atom()
+        raise
     tag = data.get("tag_name") or data.get("name") or ""
     if not tag or not is_newer(tag):
         return None
