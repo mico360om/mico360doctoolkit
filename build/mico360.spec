@@ -35,12 +35,14 @@ hiddenimports = [
     "cryptography",
     # PDF -> Excel (tables) and Excel handling
     "pdfplumber", "pdfminer", "openpyxl", "pypdfium2",
+    # Image -> SVG vector tracing
+    "vtracer",
 ]
 
 # Bundle tricky packages completely (data files, submodules).
 for pkg in ("pdf2docx", "fontTools", "pptx", "reportlab", "docx", "docx2pdf",
             "rapidocr_onnxruntime", "onnxruntime", "cryptography",
-            "pdfplumber", "pdfminer", "openpyxl", "pypdfium2"):
+            "pdfplumber", "pdfminer", "openpyxl", "pypdfium2", "vtracer"):
     try:
         d, b, h = collect_all(pkg)
         datas += d

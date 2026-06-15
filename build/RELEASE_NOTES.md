@@ -1,3 +1,23 @@
+## MICO360 Doc Toolkit v6.7.0
+
+**SVG conversion, both ways.**
+
+**New features**
+- **SVG → Image** — rasterise `.svg` vector files to **PNG / JPEG / WEBP** at a
+  chosen width (0 = the SVG's own size). PNG/WEBP keep transparency; JPEG is
+  flattened onto a background.
+- **Image → SVG** — **Trace** an image into real vector paths (best for logos &
+  line art; full-colour or black & white), or **Embed** the image exactly inside an
+  SVG (best for photos).
+
+**Improvements**
+- The **update screen** now spells out the **current version** and the **new
+  version** clearly, and shows a **direct GitHub link** so you can always download
+  the installer manually from the repository. The repository link is also available
+  any time in **Settings → Updates**.
+
+---
+
 ## MICO360 Doc Toolkit v6.6.0
 
 **New tool, a detailed update experience, and refreshed Help & legal.**

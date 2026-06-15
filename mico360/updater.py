@@ -32,6 +32,8 @@ GITHUB_REPO = "mico360doctoolkit"
 
 API_LATEST = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+REPO_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
+REPO_SHORT = f"github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
 # Fallbacks that DON'T use api.github.com (which is rate-limited per-IP — a shared
 # office/NAT address hits the 60/hr cap — and is blocked by some firewalls that
 # still allow github.com). The Atom feed and the download host are on github.com.

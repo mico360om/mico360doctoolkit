@@ -81,6 +81,17 @@ class SettingsPage(QWidget):
         info.setTextFormat(Qt.RichText)
         card.add(info)
 
+        from mico360 import updater as _upd
+        link_c = palette(settings.theme)["info"]
+        repo = QLabel(
+            f"Repository &amp; downloads: <a href='{_upd.REPO_URL}' "
+            f"style='color:{link_c}; font-weight:600;'>{_upd.REPO_SHORT}</a>")
+        repo.setObjectName("Hint")
+        repo.setTextFormat(Qt.RichText)
+        repo.setOpenExternalLinks(True)
+        repo.setToolTip(_upd.REPO_URL)
+        card.add(repo)
+
         row = QHBoxLayout()
         self.btn_check = QPushButton("Check for updates")
         self.btn_check.setObjectName("Ghost")

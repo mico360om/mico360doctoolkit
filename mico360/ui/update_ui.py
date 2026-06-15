@@ -228,6 +228,13 @@ class UpdateDialog(QDialog):
         ver.setObjectName("UpdVersions")
         root.addWidget(ver)
 
+        vmeta = QHBoxLayout()
+        vmeta.setSpacing(18)
+        vmeta.addWidget(_meta_label("Current version:", f"v{__version__}"))
+        vmeta.addWidget(_meta_label("New version:", f"v{info.version}"))
+        vmeta.addStretch(1)
+        root.addLayout(vmeta)
+
         meta = QHBoxLayout()
         meta.setSpacing(18)
         size_txt = human_size(info.size) if info.size else "—"
@@ -236,6 +243,21 @@ class UpdateDialog(QDialog):
         meta.addWidget(_meta_label("Released:", date_txt))
         meta.addStretch(1)
         root.addLayout(meta)
+
+        # Direct GitHub repo link — so the user can always download manually.
+        from mico360.config import settings as _settings
+        from mico360.theme import palette as _palette
+        _link = _palette(_settings.theme)["info"]
+        gh = QLabel(
+            f"Prefer to download manually? Get it directly from GitHub: "
+            f"<a href='{updater.REPO_URL}/releases/latest' "
+            f"style='color:{_link}; font-weight:600;'>{updater.REPO_SHORT}</a>")
+        gh.setObjectName("UpdRepoLink")
+        gh.setTextFormat(Qt.RichText)
+        gh.setOpenExternalLinks(True)
+        gh.setWordWrap(True)
+        gh.setToolTip(updater.REPO_URL)
+        root.addWidget(gh)
 
         line = Divider()
         root.addWidget(line)
@@ -301,9 +323,10 @@ class UpdateDialog(QDialog):
 
         # --- buttons ---------------------------------------------------
         btns = QHBoxLayout()
-        self.btn_page = QPushButton("Release page")
+        self.btn_page = QPushButton("Open on GitHub")
         self.btn_page.setObjectName("Ghost")
         self.btn_page.setCursor(Qt.PointingHandCursor)
+        self.btn_page.setToolTip(f"Open {updater.REPO_SHORT} to download manually")
         self.btn_page.clicked.connect(self._open_page)
         self.btn_later = QPushButton("Later")
         self.btn_later.setObjectName("Ghost")

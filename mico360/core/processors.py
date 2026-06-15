@@ -1500,6 +1500,149 @@ def pdf_to_image(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
 # =========================================================================
 # Image → PDF  (aggregate; one-per-image OR combined)
 # =========================================================================
+# =========================================================================
+# SVG ⇄ image
+# =========================================================================
+_SVG_IMG_FMT = {"png": "PNG", "jpg": "JPEG", "jpeg": "JPEG", "webp": "WEBP"}
+
+
+def svg_to_image(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    """Rasterise an SVG to a PNG / JPEG / WEBP image at a chosen width.
+
+    Rendered with PyMuPDF (thread-safe, no GUI needed). Width 0 keeps the SVG's
+    own size; a transparent background is kept for PNG/WEBP, and JPEG (which has
+    no transparency) is flattened onto the chosen background colour."""
+    import fitz
+    from PIL import Image
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fmt = str(opt.get("format", "png")).lower()
+    pil_fmt = _SVG_IMG_FMT.get(fmt, "PNG")
+    ext = ".jpg" if pil_fmt == "JPEG" else f".{fmt}"
+    width = _clampi(opt.get("width", 1024), 0, 20000, 1024)
+    bg = str(opt.get("background", "transparent")).lower()
+
+    try:
+        doc = fitz.open(str(src))
+    except Exception as exc:
+        raise ProcessError(f"Couldn't read the SVG '{src.name}' ({exc}).")
+    try:
+        if doc.page_count == 0:
+            raise ProcessError(f"'{src.name}' has no drawable content.")
+        page = doc[0]
+        native_w = page.rect.width or 1.0
+        scale = (width / native_w) if width else 1.0
+        scale = max(0.01, scale)
+        report(f"Rendering SVG at {int(native_w * scale)}px wide…")
+        pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=True)
+        mode = "RGBA" if pix.alpha else "RGB"
+        img = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
+    finally:
+        doc.close()
+
+    if pil_fmt == "JPEG" or bg == "white":
+        canvas = Image.new("RGB", img.size, (255, 255, 255))
+        if img.mode == "RGBA":
+            canvas.paste(img, mask=img.split()[3])
+        else:
+            canvas.paste(img)
+        img = canvas
+    elif img.mode == "RGBA" and pil_fmt not in ("PNG", "WEBP"):
+        img = img.convert("RGB")
+
+    out = build_output_path(src, out_dir, ext, overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+    save_kw = {"optimize": True} if pil_fmt == "PNG" else (
+        {"quality": 92} if pil_fmt in ("JPEG", "WEBP") else {})
+    img.save(str(out), pil_fmt, **save_kw)
+    report(f"SVG → {pil_fmt} ({img.width}×{img.height}) → {out.name}")
+    return [out]
+
+
+def _image_to_svg_embed(src: Path, out: Path) -> None:
+    """Wrap the raster image, unchanged, inside an SVG (exact, lossless)."""
+    import base64
+
+    from PIL import Image
+    with Image.open(str(src)) as im:
+        w, h = im.size
+    mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".webp": "image/webp", ".gif": "image/gif",
+            ".bmp": "image/bmp"}.get(src.suffix.lower())
+    if mime:
+        data = src.read_bytes()
+    else:  # normalise odd formats (e.g. TIFF) to PNG so browsers can show them
+        import io
+        buf = io.BytesIO()
+        with Image.open(str(src)) as im:
+            im.save(buf, "PNG")
+        data, mime = buf.getvalue(), "image/png"
+    b64 = base64.b64encode(data).decode("ascii")
+    out.write_text(
+        f'<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
+        f'viewBox="0 0 {w} {h}">\n'
+        f'  <image width="{w}" height="{h}" '
+        f'xlink:href="data:{mime};base64,{b64}" '
+        f'xmlns:xlink="http://www.w3.org/1999/xlink"/>\n'
+        f'</svg>\n', encoding="utf-8")
+
+
+def image_to_svg(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    """Convert a raster image to SVG.
+
+    * ``trace`` (default) vectorises the image into real SVG paths (best for
+      logos / line art / flat graphics) using vtracer.
+    * ``embed`` wraps the original image, unchanged, inside an SVG (exact —
+      good for photos, where tracing looks poor)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    mode = str(opt.get("mode", "trace")).lower()
+    out = build_output_path(src, out_dir, ".svg", overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+
+    if mode == "embed":
+        report("Embedding the image inside an SVG (exact)…")
+        _image_to_svg_embed(src, out)
+        report(f"Image → SVG (embedded) → {out.name}")
+        return [out]
+
+    # Trace to vector paths.
+    try:
+        import vtracer
+    except Exception:
+        report("Vector tracer unavailable — embedding the image inside the SVG instead.")
+        _image_to_svg_embed(src, out)
+        report(f"Image → SVG (embedded) → {out.name}")
+        return [out]
+
+    import tempfile
+
+    from PIL import Image
+    bw = str(opt.get("colors", "color")).lower() == "bw"
+    report("Tracing the image to vector paths" + (" (black & white)…" if bw else "…"))
+    # vtracer reads from a file. We always hand it a fresh PNG: for B&W we
+    # threshold to two tones FIRST (vtracer's own colour options can't be passed
+    # safely on this Python build), and otherwise normalise to RGBA PNG.
+    work = Path(tempfile.mkdtemp()) / (src.stem + ".png")
+    try:
+        with Image.open(str(src)) as im:
+            if bw:
+                im.convert("L").point(lambda p: 0 if p < 128 else 255).convert(
+                    "RGB").save(str(work), "PNG")
+            else:
+                im.convert("RGBA").save(str(work), "PNG")
+        # IMPORTANT: pass NO keyword args — on this build the kwarg path crashes
+        # the native tracer. The defaults are full-colour smooth (spline) tracing.
+        vtracer.convert_image_to_svg_py(str(work), str(out))
+    except Exception as exc:
+        report(f"Tracing failed ({exc}) — embedding the image instead.")
+        _image_to_svg_embed(src, out)
+        report(f"Image → SVG (embedded) → {out.name}")
+        return [out]
+    report(f"Image → SVG (vector trace{', B&W' if bw else ''}) → {out.name}")
+    return [out]
+
+
 def image_to_pdf(srcs: list[Path], out_dir: Path, opt: dict, report: Report) -> list[Path]:
     from PIL import Image
     # Saving a PDF from Pillow uses the JPEG encoder internally; make sure all

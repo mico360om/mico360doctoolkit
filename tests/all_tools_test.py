@@ -100,6 +100,13 @@ def make_pptx(p):
     prs = Presentation(); prs.slides.add_slide(prs.slide_layouts[6]); prs.save(str(p)); return p
 
 
+def make_svg(p):
+    p.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80">'
+                 '<rect width="120" height="80" fill="#A0201F"/>'
+                 '<circle cx="60" cy="40" r="25" fill="white"/></svg>')
+    return p
+
+
 def samples_for(tool, tmp, png):
     """Return a list of sample input paths appropriate for the tool.
 
@@ -110,6 +117,8 @@ def samples_for(tool, tmp, png):
     a = tool.accept
 
     def make_one(i):
+        if ".svg" in a:
+            return str(make_svg(tmp / f"{tool.id}_{i}.svg"))
         if a & IMAGES:
             return str(make_png(tmp / f"{tool.id}_{i}.png"))
         if a & PDF:

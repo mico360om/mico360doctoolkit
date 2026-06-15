@@ -9,6 +9,7 @@ img2pdf>=0.5.1
 cryptography>=3.1        # AES-256 password protection for PDFs (pypdf)
 pdfplumber>=0.11.0      # PDF -> Excel table extraction
 openpyxl>=3.1.0         # write .xlsx workbooks
+vtracer>=0.6.11         # Image -> SVG vector tracing (SVG rendering uses PyMuPDF)
 
 # Word → PDF engine chain
 python-docx>=1.1.0      # read .docx for the built-in fallback

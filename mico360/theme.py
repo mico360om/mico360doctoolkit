@@ -428,6 +428,7 @@ QProgressBar::chunk {{ background-color: {c['primary']}; border-radius: 8px; }}
     margin-top: 4px; }}
 #UpdBullet {{ color: {c['text_muted']}; font-size: 12px; }}
 #UpdError {{ color: {c['error']}; font-size: 12px; font-weight: 600; }}
+#UpdRepoLink {{ color: {c['text_faint']}; font-size: 12px; }}
 
 /* =================== Log / text =================== */
 QPlainTextEdit#Log, QTextEdit {{

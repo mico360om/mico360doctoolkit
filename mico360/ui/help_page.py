@@ -93,6 +93,12 @@ tool automatically.</p>
       per sheet for Excel; a section per slide for PowerPoint; page text (and tables) for PDF.
       <i>.docx/.xlsx/.pptx/.pdf/.csv</i> work directly; other Office formats need LibreOffice.</li>
   <li><b>Image → PDF</b> — combine images into one PDF, or make one PDF per image.</li>
+  <li><b>SVG → Image</b> — rasterise SVG vector files to <b>PNG</b>, <b>JPEG</b> or
+      <b>WEBP</b> at a chosen width (0 keeps the SVG's own size); PNG/WEBP keep
+      transparency, JPEG is flattened onto a background.</li>
+  <li><b>Image → SVG</b> — <i>Trace</i> an image into real vector paths (best for
+      logos / line art; full-colour or black &amp; white), or <i>Embed</i> the image
+      exactly inside an SVG (best for photos).</li>
   <li><b>Resize Image</b> — batch-resize by width/height or percentage.</li>
   <li><b>Convert Image</b> — change format between PNG / JPG / WEBP / TIFF / BMP.</li>
   <li><b>Watermark Image</b> — stamp text or a logo onto images.</li>

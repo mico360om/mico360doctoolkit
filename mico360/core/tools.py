@@ -42,6 +42,7 @@ class Tool:
 
 PDF = {".pdf"}
 IMAGES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+SVG = {".svg"}
 WORD = {".doc", ".docx", ".odt", ".rtf"}
 EXCEL = {".xlsx", ".xls", ".ods", ".csv"}
 PPT = {".pptx", ".ppt", ".odp"}
@@ -362,6 +363,34 @@ TOOLS: list[Tool] = [
             ], visible_when=("wm_type", "text")),
             Option("opacity", "Opacity", "int", 25, minimum=1, maximum=100, suffix=" %"),
             Option("rotation", "Angle", "int", 30, minimum=-180, maximum=180, suffix="°"),
+        ],
+    ),
+    Tool(
+        id="svg_to_image", name="SVG → Image", icon="🖼️",
+        tagline="Rasterise SVG vector files to PNG, JPEG or WEBP.",
+        mode=PER_FILE, accept=SVG, runner=processors.svg_to_image, group="Convert",
+        options=[
+            Option("format", "Output format", "choice", "png", [
+                ("png", "PNG (transparent)"), ("jpg", "JPEG"), ("webp", "WEBP")]),
+            Option("width", "Width (0 = SVG's own size)", "int", 1024,
+                   minimum=0, maximum=20000, suffix=" px",
+                   hint="Height scales to keep the aspect ratio."),
+            Option("background", "Background", "choice", "transparent", [
+                ("transparent", "Transparent (PNG/WEBP)"), ("white", "White")],
+                   hint="JPEG has no transparency and always uses a background."),
+        ],
+    ),
+    Tool(
+        id="image_to_svg", name="Image → SVG", icon="✒️",
+        tagline="Convert images to SVG — trace to vectors, or embed exactly.",
+        mode=PER_FILE, accept=IMAGES, runner=processors.image_to_svg, group="Convert",
+        options=[
+            Option("mode", "Conversion", "choice", "trace", [
+                ("trace", "Trace to vector paths (best for logos / line art)"),
+                ("embed", "Embed image exactly (best for photos)")]),
+            Option("colors", "Colours", "choice", "color", [
+                ("color", "Full colour"), ("bw", "Black & white")],
+                   visible_when=("mode", "trace")),
         ],
     ),
     Tool(
