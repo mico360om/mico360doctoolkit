@@ -420,6 +420,15 @@ QProgressBar {{
 QProgressBar::chunk {{ background-color: {c['primary']}; border-radius: 8px; }}
 #ProgressCaption {{ color: {c['text_muted']}; font-size: 12px; }}
 
+/* =================== Update dialog =================== */
+#UpdVersions {{ font-size: 17px; font-weight: 800; color: {c['text']}; }}
+#UpdMetaCap {{ color: {c['text_faint']}; font-size: 12px; }}
+#UpdMetaVal {{ color: {c['text']}; font-size: 12px; font-weight: 700; }}
+#UpdSectionHead {{ color: {c['text']}; font-size: 13px; font-weight: 700;
+    margin-top: 4px; }}
+#UpdBullet {{ color: {c['text_muted']}; font-size: 12px; }}
+#UpdError {{ color: {c['error']}; font-size: 12px; font-weight: 600; }}
+
 /* =================== Log / text =================== */
 QPlainTextEdit#Log, QTextEdit {{
     background-color: {c['input']};

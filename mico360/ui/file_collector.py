@@ -13,11 +13,13 @@ def collect_files(paths: list[str | Path], accept: set[str]) -> list[Path]:
     seen: set[Path] = set()
     result: list[Path] = []
 
+    any_file = "*" in accept
+
     def add(p: Path) -> None:
         rp = p.resolve()
         if rp in seen:
             return
-        if p.suffix.lower() in accept:
+        if any_file or p.suffix.lower() in accept:
             seen.add(rp)
             result.append(p)
 

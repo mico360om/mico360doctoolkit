@@ -17,7 +17,7 @@ tool automatically.</p>
 
 <h3>Getting started</h3>
 <ol>
-  <li><b>Pick a tool</b> from the sidebar on the left (grouped into PDF, Convert and Images).
+  <li><b>Pick a tool</b> from the sidebar on the left (grouped into PDF, Convert, Images and System).
       <b>Search</b> for a tool with the box at the top of the sidebar, and click a
       <b>category heading</b> to collapse or expand it.</li>
   <li><b>Add your files</b> — drag &amp; drop files or whole folders onto the drop zone, or
@@ -31,24 +31,34 @@ tool automatically.</p>
       bar and the Activity log; click a finished file to open its output.</li>
 </ol>
 
-<h3>The file list &amp; status</h3>
+<h3>The queue &amp; status</h3>
 <ul>
-  <li>Each file shows a status: <b>•</b> pending, <b>⏳</b> running, <b>✓</b> done (with the output
-      name), <b>✗</b> failed (with the reason).</li>
-  <li><b>Start</b> only processes files that aren't done yet — finished files are skipped.</li>
-  <li><b>Redo</b> re-arms finished files so they run again. <b>Remove done</b> clears them.</li>
-  <li><b>Double-click</b> a finished file to reveal its output; <b>right-click</b> for more
-      actions (open output / open source folder / redo this one / remove). Press <b>Delete</b>
-      to remove the selected files.</li>
+  <li>Files you add form a <b>queue</b>. Each row shows a coloured status dot and label —
+      <b>Queued</b>, <b>Working…</b>, <b>Done</b> or <b>Failed</b> — plus the file size and,
+      when finished, the output name or the failure reason. The header shows a <b>live count</b>
+      (working / pending / done / failed).</li>
+  <li><b>Drag rows to reorder</b> the queue; long file names are trimmed in the middle so the
+      extension stays visible, with the full path on hover.</li>
+  <li>Toolbar: <b>Add files</b>, <b>Remove selected</b>, <b>Remove finished</b> (clears done
+      <i>and</i> failed) and <b>Clear all</b>. Press <b>Delete</b> to remove the selected rows.</li>
+  <li><b>Right-click</b> a row (works on a multi-selection) for: <b>Open source folder</b>,
+      <b>Open output folder</b>, <b>Move to top</b> / <b>Move to bottom</b>, <b>Duplicate row(s)</b>,
+      <b>Retry failed/done row(s)</b>, <b>Remove from queue</b>, and <b>Delete from disk</b>
+      (sent to the Recycle Bin after a confirmation). <b>Double-click</b> a finished row to open
+      its output.</li>
+  <li><b>Start</b> only processes rows that aren't done yet — finished rows are skipped until
+      you retry them. The same file can be queued more than once (Duplicate), each tracked
+      separately.</li>
   <li><b>Cancel</b> stops the batch; long jobs (OCR, many pages) stop within a moment.</li>
 </ul>
 
 <h3>The tools, in detail</h3>
 <ul>
-  <li><b>Compress PDF</b> — choose <i>Low / Medium / High</i>, a <i>Target file size</i>
-      (e.g. 250&nbsp;KB — the app auto-picks settings to land at or just under it), or
-      <i>Custom</i> DPI + JPEG quality. Uses Ghostscript when available, otherwise a built-in
-      compressor.</li>
+  <li><b>Compress PDF</b> — <i>Lossless</i> (the default) reduces size with <b>zero change</b> to
+      images, text, fonts or layout and is verified content-identical; or pick <i>Low / Medium /
+      High</i>, a <i>Target file size</i> (e.g. 250&nbsp;KB — the app auto-picks settings to land
+      at or just under it), or <i>Custom</i> DPI + JPEG quality. Uses Ghostscript when available,
+      otherwise a built-in compressor.</li>
   <li><b>Merge PDF</b> — combines two or more PDFs into one. <b>Drag files in the list to
       reorder</b> them before merging (also works for combined Image → PDF).</li>
   <li><b>Split PDF</b> — split <i>every page</i>, into <i>fixed page counts</i>, or by
@@ -75,8 +85,9 @@ tool automatically.</p>
       (pulls out tables, or page text when none are found), or <b>Images</b> (one per page,
       JPG / PNG / WEBP / BMP / TIFF at a chosen DPI). Pick the target from <i>Convert to</i>.</li>
   <li><b>Office → PDF</b> — convert <b>Word, Excel or PowerPoint</b> to PDF; the type is
-      detected from the file automatically. Uses LibreOffice or Microsoft Office, with a
-      built-in fallback for Word so it always works.</li>
+      detected from the file automatically. The conversion engine (<b>LibreOffice</b>) is
+      <b>built in</b>, so it works on any PC with no setup — including legacy <i>.doc/.xls/.ppt</i>
+      and machines without Microsoft Office.</li>
   <li><b>Document → Markdown</b> — convert <b>Word, Excel, PowerPoint or PDF</b> to clean
       Markdown (.md): headings, <b>bold</b>/<i>italic</i>, lists and tables for Word; a table
       per sheet for Excel; a section per slide for PowerPoint; page text (and tables) for PDF.
@@ -87,6 +98,11 @@ tool automatically.</p>
   <li><b>Watermark Image</b> — stamp text or a logo onto images.</li>
   <li><b>Compress Image</b> — presets, a <i>Target file size</i>, or custom quality; optional
       resize and format change (JPEG / PNG / WEBP).</li>
+  <li><b>Edit File Properties</b> (System) — bulk-set Windows file properties on <b>any</b>
+      files: <b>Date Created</b>, <b>Date Modified</b> and <b>Owner</b>. Type a date like
+      <i>2026-06-07 14:30</i> (or <i>now</i>); leave a field blank to keep it. Your originals
+      are never changed — a copy with the new properties is written to the output folder.
+      Setting the Owner needs administrator rights and a valid Windows account.</li>
 </ul>
 
 <h3>OCR — turning scanned pages into editable text</h3>
@@ -100,6 +116,9 @@ and recovers the text.</p>
   <li>Recognised text is laid out in reading order — words on the same line are kept
       together, and clear vertical gaps become paragraph breaks.</li>
   <li>It runs <b>entirely on your computer</b> — nothing is uploaded — and works offline.</li>
+  <li><b>GPU acceleration:</b> if your PC has a graphics card, OCR automatically runs on it
+      (via DirectML — any NVIDIA / AMD / Intel GPU) for a large speed-up, falling back to the
+      CPU when no GPU is available. Toggle this in <b>Settings → Processing</b>.</li>
   <li><b>For the best accuracy:</b> start from a clean, straight, high-resolution scan
       (300&nbsp;dpi or more). Faint, skewed or low-contrast scans recognise less reliably.</li>
   <li>OCR is heavier than a normal conversion, so large documents take longer; the
@@ -115,8 +134,14 @@ and recovers the text.</p>
       when one is available — toggle this in <b>Settings → Updates</b>.</li>
   <li>Click <b>Settings → Updates → Check for updates</b> any time to check on demand and
       read what’s new.</li>
+  <li>The update panel shows full details — the <b>new version</b>, <b>download size</b>,
+      <b>release date</b>, and what changed split into <b>New features</b>, <b>Bugs fixed</b>
+      and <b>Security improvements</b>, with a live <b>status</b> (Available / Downloading /
+      Installing / Completed / Failed), a <b>progress bar with percentage and time remaining</b>,
+      and a <b>Retry</b> option if anything fails.</li>
   <li>When you choose to update, the new version is <b>downloaded, verified (SHA-256) and
-      installed</b> for you; the app closes briefly to finish and your settings are kept.</li>
+      installed</b> for you; the app closes briefly to finish and your settings are kept. After
+      it reopens you'll see a <b>confirmation</b> with the installed version and time.</li>
   <li>Everything is optional — you can turn auto-checking off and update whenever you like.</li>
 </ul>
 
@@ -133,15 +158,18 @@ and recovers the text.</p>
 
 <h3>Settings</h3>
 <ul>
-  <li><b>Appearance</b> — choose <b>System</b> (follow Windows), <b>Light</b> or <b>Dark</b>
-      (the ☀/🌙 button in the top bar pins Light/Dark). Defaults to System on first run.</li>
+  <li><b>Appearance</b> — choose <b>System</b> (follow your Windows/macOS theme), <b>Light</b>
+      or <b>Dark</b> (the ☀/🌙 button in the top bar pins Light/Dark). Defaults to System on
+      first run.</li>
   <li><b>Output</b> — default output folder, “open the folder when a batch finishes”, and
       overwrite behaviour.</li>
-  <li><b>Performance</b> — number of parallel workers (0 = automatic, uses CPU cores − 1).</li>
+  <li><b>Processing</b> — number of parallel workers (0 = automatic, uses CPU cores − 1), and
+      <b>Use the GPU for OCR</b> when a graphics card is available (with automatic CPU fallback).</li>
   <li><b>Updates</b> — see your current version, check for updates on demand, and turn the
       automatic startup check on or off.</li>
-  <li><b>External tools</b> — set or auto-detect Ghostscript (best PDF compression) and
-      LibreOffice (Office → PDF). Both are optional; the app works without them.</li>
+  <li><b>External tools</b> — LibreOffice (Office → PDF) is <b>built in</b>; you can point the
+      app at a different LibreOffice or at Ghostscript (for the smallest lossy PDF compression)
+      here. Both are optional.</li>
   <li><b>About &amp; Legal</b> — About Us, Terms &amp; Conditions, Privacy Policy, and contact info.</li>
 </ul>
 
@@ -152,8 +180,9 @@ and recovers the text.</p>
       <b>Settings → Performance</b>.</li>
   <li>If a file fails, hover it for the reason, or open <b>Activity</b> /
       <b>Settings → Open logs folder</b> for details.</li>
-  <li>Office → PDF gives the most exact result with LibreOffice or Microsoft Office installed.</li>
-  <li>For the best PDF compression, install or bundle Ghostscript (Settings → External tools).</li>
+  <li>Office → PDF works out of the box (LibreOffice is built in) — no Microsoft Office needed.</li>
+  <li>Compress PDF is <b>Lossless</b> by default (no quality loss); for the smallest <i>lossy</i>
+      result on image-heavy PDFs, Ghostscript can be set in Settings → External tools.</li>
 </ul>
 
 <h3>Need help?</h3>
@@ -193,8 +222,14 @@ class HelpPage(QWidget):
 
         about = Card()
         about.add(section_label("About"))
-        about.add(QLabel(
+        about_lbl = QLabel(
             f"<b>MICO360 Doc Toolkit</b> v{__version__}<br>"
-            "PDF &amp; image management for Windows 10 / 11 (64-bit).<br>"
-            "© MICO360. Bundles Ghostscript (AGPL) and LibreOffice (MPL)."))
+            "PDF &amp; image management for Windows 10 / 11 (64-bit) and macOS.<br>"
+            "Contact: <a href='mailto:info@mico360.com'>info@mico360.com</a><br>"
+            "© MICO360. Bundles LibreOffice (MPL) and RapidOCR; "
+            "uses Ghostscript (AGPL) when available.")
+        about_lbl.setTextFormat(Qt.RichText)
+        about_lbl.setOpenExternalLinks(True)
+        about_lbl.setWordWrap(True)
+        about.add(about_lbl)
         root.addWidget(about)

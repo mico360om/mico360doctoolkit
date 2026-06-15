@@ -27,6 +27,8 @@ hiddenimports = [
     # Word -> PDF engine chain
     "docx", "reportlab", "docx2pdf",
     "win32com", "win32com.client", "pythoncom", "pywintypes",
+    # File-properties tool (Date Created / Owner) via the Win32 API
+    "win32file", "win32con", "win32security", "ntsecuritycon",
     # OCR
     "rapidocr_onnxruntime", "onnxruntime", "cv2", "numpy", "shapely", "pyclipper",
     # AES-256 PDF password protection (pypdf -> cryptography)

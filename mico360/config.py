@@ -158,6 +158,17 @@ class Settings:
         self._set("update/auto_check", bool(value))
 
     @property
+    def pending_update(self) -> dict:
+        """Set just before an update installer is launched: {version, started}.
+        Read on next startup to show the 'updated successfully' confirmation."""
+        v = self._get_json("update/pending", {})
+        return v if isinstance(v, dict) else {}
+
+    @pending_update.setter
+    def pending_update(self, value) -> None:
+        self._set_json("update/pending", dict(value or {}))
+
+    @property
     def open_output_when_done(self) -> bool:
         return self._get("ui/open_output_when_done", True, bool)
 

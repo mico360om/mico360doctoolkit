@@ -1,3 +1,28 @@
+## MICO360 Doc Toolkit v6.6.0
+
+**New tool, a detailed update experience, and refreshed Help & legal.**
+
+**New features**
+- **Edit File Properties** (new tool, under *System*): bulk-set **Date Created**,
+  **Date Modified** and **Owner** on any files. Type a date (or *now*); blank keeps
+  the current value. Your originals are never changed — a copy with the new
+  properties is written to your output folder.
+- **A complete, detailed update screen.** When an update is available you now see the
+  app name, your current version → the new version, a clear **status** (Available /
+  Downloading / Installing / Completed / Failed), the **download size**, **release
+  date**, and what changed split into **New features / Bugs fixed / Security
+  improvements** — with a live **progress bar showing percentage and time remaining**,
+  a restart notice, and a **Retry** button if anything fails. After updating, a
+  **confirmation** shows the installed version and time. No more vague "Updating…".
+
+**Improvements**
+- Refreshed **Help**, **About Us**, **Terms & Conditions** and **Privacy Policy** to
+  match the latest features (file queue, GPU OCR, built-in LibreOffice, Windows +
+  macOS), with consistent contact details (info@mico360.com). The Privacy Policy now
+  clearly states the only network activity is the optional update check.
+
+---
+
 ## MICO360 Doc Toolkit v6.5.2
 
 **More reliable update checks.**

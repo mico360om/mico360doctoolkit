@@ -1947,6 +1947,127 @@ def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
     return [out]
 
 
+# =========================================================================
+# Bulk file-property editor (filesystem: Date Created / Modified / Owner)
+# =========================================================================
+_DT_FORMATS = (
+    "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d",
+    "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y",
+    "%d/%m/%Y %H:%M", "%d/%m/%Y", "%d-%m-%Y",
+)
+
+
+def _parse_dt(value):
+    """Parse a user-typed date/time. Empty → None (leave unchanged). 'now'/'today'
+    → the current time. Raises ProcessError on an unrecognised format."""
+    import datetime
+    s = (value or "").strip()
+    if not s:
+        return None
+    if s.lower() in ("now", "today"):
+        return datetime.datetime.now()
+    for fmt in _DT_FORMATS:
+        try:
+            return datetime.datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    raise ProcessError(
+        f"Couldn't understand the date '{s}'. Use e.g. 2026-06-07 or "
+        "2026-06-07 14:30.")
+
+
+def _set_creation_time(path: Path, dt) -> bool:
+    """Set a file's creation time (Windows only). Returns False off-Windows."""
+    import sys
+    if sys.platform != "win32":
+        return False
+    import pywintypes
+    import win32con
+    import win32file
+    handle = win32file.CreateFile(
+        str(path), win32con.GENERIC_WRITE,
+        win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE
+        | win32con.FILE_SHARE_DELETE,
+        None, win32con.OPEN_EXISTING, win32con.FILE_ATTRIBUTE_NORMAL, None)
+    try:
+        win32file.SetFileTime(handle, pywintypes.Time(dt), None, None)  # creation only
+    finally:
+        handle.Close()
+    return True
+
+
+def _set_owner(path: Path, account: str) -> tuple[bool, str]:
+    """Set the NTFS owner to ``account`` (Windows; needs admin/SeRestore).
+    Returns (ok, error_message)."""
+    import sys
+    if sys.platform != "win32":
+        return False, "owner can only be set on Windows"
+    try:
+        import win32security
+        sid, _domain, _type = win32security.LookupAccountName(None, account)
+        sd = win32security.GetFileSecurity(
+            str(path), win32security.OWNER_SECURITY_INFORMATION)
+        sd.SetSecurityDescriptorOwner(sid, False)
+        win32security.SetFileSecurity(
+            str(path), win32security.OWNER_SECURITY_INFORMATION, sd)
+        return True, ""
+    except Exception as exc:  # noqa: BLE001
+        return False, str(exc)
+
+
+def set_file_properties(src: Path, out_dir: Path, opt: dict,
+                        report: Report) -> list[Path]:
+    """Bulk-apply Windows file properties (Date Created, Date Modified, Owner) to
+    a copy of each selected file — the original is never changed, and the copy's
+    *content* is byte-identical (only the file properties differ)."""
+    import os
+    import shutil
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = build_output_path(src, out_dir, src.suffix or "",
+                            overwrite=opt.get("overwrite", False),
+                            numbered=opt.get("same_as_source", False))
+    shutil.copy2(src, out)   # exact bytes + original times as the starting point
+
+    created = _parse_dt(opt.get("date_created"))
+    modified = _parse_dt(opt.get("date_modified"))
+    owner = (opt.get("owner") or "").strip()
+    changed: list[str] = []
+
+    # Date Modified first (os.utime sets access+modify; keep access as-is).
+    if modified is not None:
+        st = out.stat()
+        os.utime(out, (st.st_atime, modified.timestamp()))
+        changed.append("Date Modified")
+
+    # Date Created (Windows only) — set after, so it can't clobber the above.
+    if created is not None:
+        try:
+            if _set_creation_time(out, created):
+                changed.append("Date Created")
+            else:
+                report("Note: Date Created can only be set on Windows — skipped.")
+        except Exception as exc:  # noqa: BLE001
+            report(f"Note: couldn't set Date Created ({exc}).")
+
+    # Owner (Windows; needs admin).
+    if owner:
+        ok, err = _set_owner(out, owner)
+        if ok:
+            changed.append(f"Owner={owner}")
+        else:
+            report(f"Note: couldn't set Owner ({err}). "
+                   "Run as administrator and use a valid Windows account.")
+
+    if changed:
+        report("Set " + ", ".join(changed) + f"  →  {out.name}")
+    elif created is not None or modified is not None or owner:
+        report(f"Saved a copy → {out.name} (see notes above for what couldn't be set).")
+    else:
+        report(f"No properties entered — copied unchanged → {out.name}")
+    return [out]
+
+
 # OCR recognition DPI by quality preset (higher = sharper on small text, slower).
 _OCR_QUALITY_DPI = {"fast": 200, "balanced": _OCR_DPI, "high": 400}
 

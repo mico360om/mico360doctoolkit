@@ -11,19 +11,25 @@ WEBSITE_URL = "https://www.mico360.com"
 def about_us() -> str:
     return f"""
 <h2>About {__app_name__}</h2>
-<p><b>{__app_name__}</b> is a fast, private, all-in-one Windows toolkit for working
-with PDFs and images — compress, merge, split, and convert between PDF, Word,
-PowerPoint and image formats, with optional OCR for scanned documents.</p>
+<p><b>{__app_name__}</b> is a fast, private, all-in-one desktop toolkit for
+<b>Windows and macOS</b> for working with PDFs and images — compress, merge, split,
+organise, protect, watermark, and convert between PDF, Word, Excel, PowerPoint,
+Markdown and image formats, with OCR for scanned documents.</p>
 
 <p>Everything runs <b>locally on your computer</b>. Your files are never uploaded
 to any server, and your originals are always preserved.</p>
 
 <h3>Highlights</h3>
 <ul>
-  <li>Compress PDFs &amp; images, including to a specific target file size.</li>
-  <li>Convert PDF ⇄ Word / PowerPoint / images, and Word → PDF.</li>
-  <li>OCR turns scanned, image-only PDFs into editable text.</li>
-  <li>Batch processing across all CPU cores, with light &amp; dark themes.</li>
+  <li><b>Lossless compression</b> for PDFs &amp; images — verified content-identical —
+      plus a target-file-size mode.</li>
+  <li>Convert PDF ⇄ Word / PowerPoint / Excel / images, Office → PDF, and
+      Document → Markdown — the conversion engine is <b>built in</b> (no Office needed).</li>
+  <li><b>OCR</b> turns scanned, image-only PDFs into searchable text, and uses your
+      <b>GPU</b> automatically when one is available.</li>
+  <li>A real <b>file queue</b> with batch processing across all CPU cores, and
+      bulk <b>file-property</b> editing (dates &amp; owner).</li>
+  <li>Clean light &amp; dark themes, and built-in automatic updates.</li>
 </ul>
 
 <h3>Contact</h3>
@@ -88,29 +94,37 @@ def privacy_policy() -> str:
 not — do with your data.</p>
 
 <h3>1. Your files stay on your device</h3>
-<p>All processing (compression, conversion, OCR, etc.) happens <b>locally on your
-computer</b>. {__app_name__} does <b>not</b> upload, transmit, or share your
-documents or images with {__publisher__} or any third party.</p>
+<p>All processing — compression, conversion, OCR (including GPU-accelerated OCR),
+and everything else — happens <b>locally on your computer</b>. {__app_name__} does
+<b>not</b> upload, transmit, or share your documents or images with {__publisher__}
+or any third party.</p>
 
 <h3>2. No accounts, no tracking</h3>
 <p>The Software does not require an account, does not include advertising or
 analytics, and does not track your activity.</p>
 
-<h3>3. What is stored locally</h3>
+<h3>3. The only network activity: updates</h3>
+<p>The single time {__app_name__} contacts the internet is to <b>check for and
+download application updates</b> from our public releases page on GitHub. This sends
+<b>no files and no personal data</b> — only a request for the latest version
+information and, if you choose to update, the installer itself. You can turn the
+automatic update check off in <b>Settings → Updates</b>.</p>
+
+<h3>4. What is stored locally</h3>
 <p>Only your app preferences (theme, output folder, last-used options) are saved
 on your own computer so the app remembers your settings. A local activity log is
 kept on your device to help with troubleshooting. You can clear it any time from
 the Activity page, and it never leaves your machine.</p>
 
-<h3>4. Outputs</h3>
+<h3>5. Outputs</h3>
 <p>Converted/compressed files are written only to the output folder you choose (or
 next to your originals). Your original files are never modified.</p>
 
-<h3>5. Optional contact</h3>
+<h3>6. Optional contact</h3>
 <p>If you choose to email us at <a href="mailto:{EMAIL}">{EMAIL}</a>, we use your
 message only to respond to you.</p>
 
-<h3>6. Contact</h3>
+<h3>7. Contact</h3>
 <p>Questions about privacy? Email <a href="mailto:{EMAIL}">{EMAIL}</a> or visit
 <a href="{WEBSITE_URL}">{WEBSITE}</a>.</p>
 """

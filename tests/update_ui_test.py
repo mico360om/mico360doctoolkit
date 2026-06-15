@@ -40,6 +40,7 @@ def main() -> int:
     main_tid = threading.get_ident()
 
     import mico360.updater as U
+    from mico360 import __version__
     from mico360.updater import UpdateInfo
     from mico360.ui.update_ui import UpdateDialog, start_check
 
@@ -109,6 +110,40 @@ def main() -> int:
           failed.get("tid") == main_tid, f"main={main_tid} cb={failed.get('tid')}")
     check("failed callback received the error text",
           "network down" in (failed.get("msg") or ""), repr(failed.get("msg")))
+
+    # --- rich dialog: status badge, version line, meta, failure state ----
+    rich = UpdateInfo(
+        "9.9.9", "http://x/Setup-Latest.exe", "Setup-Latest.exe", None,
+        "**New features**\n- Shiny thing\n**Bugs fixed**\n- Fixed a hang",
+        "http://x", size=10 * 1024 * 1024, published_at="2026-06-07T12:00:00Z")
+    dlg = UpdateDialog(rich, None)
+    check("dialog opens in 'Available' state", dlg.badge.text() == "Available",
+          dlg.badge.text())
+    from PySide6.QtWidgets import QLabel
+    ver_lbls = [w.text() for w in dlg.findChildren(QLabel)
+                if w.objectName() == "UpdVersions"]
+    check("dialog shows current → new version",
+          ver_lbls and __version__ in ver_lbls[0] and "9.9.9" in ver_lbls[0],
+          str(ver_lbls))
+    dlg._on_failed("disk full")
+    check("failure flips badge to 'Failed'", dlg.badge.text() == "Failed")
+    check("failure shows Retry and hides Install",
+          (not dlg.btn_retry.isHidden()) and dlg.btn_install.isHidden())
+    check("failure shows the error text",
+          "disk full" in dlg.error.text(), dlg.error.text())
+    dlg.deleteLater()
+
+    # --- post-install confirmation marker logic --------------------------
+    from mico360.config import settings
+    from mico360.ui.update_ui import maybe_show_update_completed
+    # A marker for a version we are NOT yet running -> cleared, no dialog shown.
+    settings.pending_update = {"version": "999.0.0", "started": 1.0}
+    maybe_show_update_completed(None)
+    check("pending-update marker is cleared after the startup check",
+          settings.pending_update == {}, str(settings.pending_update))
+    # No marker -> no-op, no crash.
+    maybe_show_update_completed(None)
+    check("no marker -> safe no-op", settings.pending_update == {})
 
     print()
     if failures:

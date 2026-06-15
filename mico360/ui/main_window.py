@@ -92,6 +92,8 @@ class MainWindow(QMainWindow):
 
         log.info("%s v%s started", __app_name__, __version__)
 
+        # If we just installed an update, confirm it (installed version + time).
+        QTimer.singleShot(800, self._confirm_update_if_just_installed)
         # Background update check (deferred so it never blocks startup).
         if settings.auto_check_updates:
             QTimer.singleShot(2500, self._auto_check_updates)
@@ -156,6 +158,14 @@ class MainWindow(QMainWindow):
                 ctypes.windll.user32.SetForegroundWindow(int(self.winId()))
             except Exception:
                 pass
+
+    # ------------------------------------------------------------------
+    def _confirm_update_if_just_installed(self) -> None:
+        try:
+            from mico360.ui.update_ui import maybe_show_update_completed
+            maybe_show_update_completed(self)
+        except Exception:
+            log.exception("update-completed check failed")
 
     # ------------------------------------------------------------------
     def _auto_check_updates(self) -> None:

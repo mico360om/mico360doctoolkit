@@ -77,6 +77,32 @@ def main() -> int:
     check("no installer asset returns None",
           updater.check_for_update(lambda url: noexe) is None)
 
+    # --- size + release date + note categorisation ----------------------
+    rich = {
+        "tag_name": "v9.9.9", "name": "v9.9.9",
+        "published_at": "2026-06-07T12:00:00Z", "html_url": "https://x",
+        "body": ("**New features**\n- Cool new thing\n- Another feature\n"
+                 "**Bugs fixed**\n- Fixed the resize crash\n"
+                 "**Security improvements**\n- Signed the installer"),
+        "assets": [{"name": "MICO360-DocToolkit-Setup-9.9.9.exe",
+                    "browser_download_url": "http://x/s.exe", "size": 12345678}],
+    }
+    info3 = updater.check_for_update(lambda url: rich)
+    check("UpdateInfo carries the asset size", info3 and info3.size == 12345678,
+          str(info3 and info3.size))
+    check("UpdateInfo carries the release date",
+          info3 and info3.published_at.startswith("2026-06-07"))
+    check("format_release_date is friendly",
+          updater.format_release_date("2026-06-07T12:00:00Z") == "June 07, 2026",
+          updater.format_release_date("2026-06-07T12:00:00Z"))
+    cats = updater.categorize_notes(rich["body"])
+    check("categorize: 2 new features", cats["features"] == ["Cool new thing", "Another feature"],
+          str(cats["features"]))
+    check("categorize: bug fix", cats["fixes"] == ["Fixed the resize crash"],
+          str(cats["fixes"]))
+    check("categorize: security", cats["security"] == ["Signed the installer"],
+          str(cats["security"]))
+
     # --- Atom fallback when the GitHub API is unreachable ---------------
     # (rate-limited / firewalled api.github.com). The check must still work via
     # the Atom feed + stable releases/latest/download URLs.

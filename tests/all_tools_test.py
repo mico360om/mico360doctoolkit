@@ -120,6 +120,8 @@ def samples_for(tool, tmp, png):
             return str(make_xlsx(tmp / f"{tool.id}_{i}.xlsx"))
         if a & PPT:
             return str(make_pptx(tmp / f"{tool.id}_{i}.pptx"))
+        if "*" in a:                       # accepts ANY file (e.g. file_properties)
+            return str(make_pdf(tmp / f"{tool.id}_{i}.pdf"))
         return None
 
     return [s for s in (make_one(i) for i in range(n)) if s]

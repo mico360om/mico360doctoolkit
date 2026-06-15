@@ -568,9 +568,12 @@ class ToolPage(QWidget):
         return "already optimized (no reduction)"
 
     def _browse_files(self) -> None:
-        exts = " ".join(f"*{e}" for e in sorted(self.tool.accept))
-        files, _ = QFileDialog.getOpenFileNames(
-            self, "Select files", "", f"Supported files ({exts});;All files (*.*)")
+        if "*" in self.tool.accept:
+            file_filter = "All files (*.*)"
+        else:
+            exts = " ".join(f"*{e}" for e in sorted(self.tool.accept))
+            file_filter = f"Supported files ({exts});;All files (*.*)"
+        files, _ = QFileDialog.getOpenFileNames(self, "Select files", "", file_filter)
         if files:
             self.add_paths(files)
 

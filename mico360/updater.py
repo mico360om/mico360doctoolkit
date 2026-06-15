@@ -50,6 +50,72 @@ class UpdateInfo:
     sha256: str | None    # expected hash (None if no sidecar)
     notes: str            # release notes (markdown)
     page: str             # human release page
+    size: int = 0         # installer size in bytes (0 = unknown)
+    published_at: str = ""  # ISO release date (may be "" via the Atom fallback)
+
+
+def format_release_date(iso: str) -> str:
+    """ISO timestamp -> friendly date, e.g. 'June 07, 2026' (empty stays empty)."""
+    if not iso:
+        return ""
+    try:
+        import datetime
+        dt = datetime.datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        return dt.strftime("%B %d, %Y")
+    except Exception:
+        return iso[:10]
+
+
+# Section headers we recognise in release notes, mapped to a bucket.
+_NOTE_HEADER_KEYWORDS = (
+    ("security", "security"),
+    ("fix", "fixes"), ("bug", "fixes"),
+    ("feature", "features"), ("new", "features"), ("added", "features"),
+    ("improvement", "features"), ("enhancement", "features"), ("change", "features"),
+)
+
+
+def categorize_notes(notes: str) -> dict:
+    """Split release-notes markdown into {'features','fixes','security','other'}
+    lists of plain-text bullet lines. Uses section headers when present, else
+    classifies each bullet by keywords — so the UI can show 'New features',
+    'Bugs fixed' and 'Security improvements' separately."""
+    buckets = {"features": [], "fixes": [], "security": [], "other": []}
+    current = None
+    for raw in (notes or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        is_header = (raw.lstrip().startswith("#")
+                     or (line.startswith("**") and line.rstrip(":").endswith("**")))
+        if is_header:
+            low = line.lower()
+            current = None
+            for kw, bucket in _NOTE_HEADER_KEYWORDS:
+                if kw in low:
+                    current = bucket
+                    break
+            continue
+        m = re.match(r"^\s*[-*•]\s+(.*)$", raw)
+        if not m:
+            continue
+        text = re.sub(r"\*\*(.+?)\*\*", r"\1", m.group(1))
+        text = re.sub(r"[*_`]", "", text).strip()
+        if not text:
+            continue
+        bucket = current
+        if bucket is None:
+            tl = text.lower()
+            if any(k in tl for k in ("security", "vulnerab", "cve", "encrypt",
+                                     "signed", "sign ")):
+                bucket = "security"
+            elif any(k in tl for k in ("fix", "bug", "no longer", "stall", "crash",
+                                       "resolved", "couldn't", "wasn't", "hang")):
+                bucket = "fixes"
+            else:
+                bucket = "features"
+        buckets[bucket].append(text)
+    return buckets
 
 
 # --- version helpers -----------------------------------------------------
@@ -133,6 +199,16 @@ def _check_via_atom() -> UpdateInfo | None:
         sha = _get(DOWNLOAD_BASE + sidecar_name).decode("utf-8").split()[0].strip()
     except Exception:
         sha = None
+    # The API gave us nothing, so size/notes are unknown here — fetch the size
+    # cheaply with a HEAD request so the UI can still show it.
+    size = 0
+    try:
+        req = urllib.request.Request(DOWNLOAD_BASE + name, headers=_HEADERS,
+                                     method="HEAD")
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
+            size = int(resp.headers.get("Content-Length") or 0)
+    except Exception:
+        size = 0
     return UpdateInfo(
         version=clean_version(tag),
         url=DOWNLOAD_BASE + name,
@@ -140,6 +216,8 @@ def _check_via_atom() -> UpdateInfo | None:
         sha256=sha,
         notes="",
         page=RELEASES_PAGE,
+        size=size,
+        published_at="",
     )
 
 
@@ -185,6 +263,8 @@ def check_for_update(json_fetcher=_get_json) -> UpdateInfo | None:
         sha256=sha,
         notes=str(data.get("body", "") or ""),
         page=data.get("html_url") or RELEASES_PAGE,
+        size=int(installer.get("size") or 0),
+        published_at=str(data.get("published_at") or ""),
     )
 
 

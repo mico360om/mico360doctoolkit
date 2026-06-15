@@ -364,6 +364,21 @@ TOOLS: list[Tool] = [
             Option("rotation", "Angle", "int", 30, minimum=-180, maximum=180, suffix="°"),
         ],
     ),
+    Tool(
+        id="file_properties", name="Edit File Properties", icon="🗂️",
+        tagline="Bulk-set Date Created, Date Modified and Owner on any files.",
+        mode=PER_FILE, accept={"*"}, runner=processors.set_file_properties,
+        group="System",
+        options=[
+            Option("date_created", "Date Created", "text", "",
+                   hint="e.g. 2026-06-07 or 2026-06-07 14:30 — leave blank to keep. "
+                        "(Windows)"),
+            Option("date_modified", "Date Modified", "text", "",
+                   hint="e.g. 2026-06-07 14:30, or 'now' — leave blank to keep."),
+            Option("owner", "Owner", "text", "",
+                   hint=r"Windows account, e.g. PC\\Name — needs admin; blank to keep."),
+        ],
+    ),
 ]
 
 TOOLS_BY_ID = {t.id: t for t in TOOLS}

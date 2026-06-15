@@ -4,20 +4,25 @@ Kept apart from updater.py so the core logic stays Qt-free and unit-testable.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, QThread, Signal
+import time
+
+from PySide6.QtCore import Qt, QObject, QThread, Signal
 from PySide6.QtWidgets import (
     QDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QProgressBar,
     QPushButton,
-    QTextBrowser,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from mico360 import __app_name__, __version__
 from mico360 import updater
+from mico360.core.util import human_size
 from mico360.updater import UpdateInfo
 
 
@@ -136,118 +141,294 @@ def start_check(parent, on_found, on_up_to_date=None, on_failed=None) -> "_Check
 
 
 # --- dialog --------------------------------------------------------------
+# Status → (badge text, Chip state). Chip states: ready/run/ok/err.
+_STATES = {
+    "available":   ("Available", "run"),
+    "downloading": ("Downloading", "run"),
+    "installing":  ("Installing", "run"),
+    "completed":   ("Completed", "ok"),
+    "failed":      ("Failed", "err"),
+}
+
+
+def _meta_label(caption: str, value: str) -> QWidget:
+    """A small 'CAPTION: value' pair for the details row."""
+    w = QWidget()
+    row = QHBoxLayout(w)
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(6)
+    cap = QLabel(caption)
+    cap.setObjectName("UpdMetaCap")
+    val = QLabel(value or "—")
+    val.setObjectName("UpdMetaVal")
+    row.addWidget(cap)
+    row.addWidget(val)
+    return w
+
+
+def _notes_section(title: str, items: list, icon: str) -> QWidget | None:
+    """A labelled bullet list for one category (or None when empty)."""
+    if not items:
+        return None
+    box = QWidget()
+    v = QVBoxLayout(box)
+    v.setContentsMargins(0, 4, 0, 4)
+    v.setSpacing(3)
+    head = QLabel(f"{icon}  {title}")
+    head.setObjectName("UpdSectionHead")
+    v.addWidget(head)
+    for it in items[:20]:
+        b = QLabel(f"•  {it}")
+        b.setObjectName("UpdBullet")
+        b.setWordWrap(True)
+        v.addWidget(b)
+    return box
+
+
 class UpdateDialog(QDialog):
-    """Shows release notes and drives download + install."""
+    """A complete, professional update panel: app + versions, status badge, size,
+    release date, categorised release notes (new features / fixes / security),
+    live download progress with %/size/ETA, restart notice, and error + retry."""
 
     def __init__(self, info: UpdateInfo, parent: QWidget | None = None):
         super().__init__(parent)
         self._info = info
         self._thread: QThread | None = None
         self._worker: DownloadWorker | None = None
-        self.setWindowTitle(f"Update available — {__app_name__}")
-        from mico360.ui.widgets import clamp_to_screen
-        clamp_to_screen(self, 560, 480)
+        self._t0 = 0.0
+        self.setWindowTitle(f"Software Update — {__app_name__}")
+        from mico360.ui.widgets import Chip, Divider, clamp_to_screen
+        clamp_to_screen(self, 600, 560)
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(20, 18, 20, 18)
-        lay.setSpacing(12)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(22, 20, 22, 18)
+        root.setSpacing(12)
 
-        title = QLabel(f"Version {info.version} is available")
-        title.setObjectName("PageTitle")
-        lay.addWidget(title)
-        sub = QLabel(f"You have v{__version__}. Review what's new, then update.")
-        sub.setObjectName("PageSubtitle")
-        lay.addWidget(sub)
+        # --- header: app name + status badge ---------------------------
+        header = QHBoxLayout()
+        header.setSpacing(10)
+        glyph = QLabel("🗂️")
+        glyph.setObjectName("ToolIcon")
+        header.addWidget(glyph, 0, Qt.AlignVCenter)
+        titles = QVBoxLayout()
+        titles.setSpacing(1)
+        app = QLabel(__app_name__)
+        app.setObjectName("PageTitle")
+        head_sub = QLabel("A software update is available")
+        head_sub.setObjectName("PageSubtitle")
+        titles.addWidget(app)
+        titles.addWidget(head_sub)
+        header.addLayout(titles, 1)
+        self.badge = Chip(_STATES["available"][0], _STATES["available"][1])
+        header.addWidget(self.badge, 0, Qt.AlignTop)
+        root.addLayout(header)
 
-        notes = QTextBrowser()
-        notes.setOpenExternalLinks(True)
-        notes.setMarkdown(info.notes or "_No release notes provided._")
-        lay.addWidget(notes, 1)
+        # --- versions + meta -------------------------------------------
+        ver = QLabel(f"v{__version__}    →    v{info.version}")
+        ver.setObjectName("UpdVersions")
+        root.addWidget(ver)
 
+        meta = QHBoxLayout()
+        meta.setSpacing(18)
+        size_txt = human_size(info.size) if info.size else "—"
+        date_txt = updater.format_release_date(info.published_at) or "—"
+        meta.addWidget(_meta_label("Download size:", size_txt))
+        meta.addWidget(_meta_label("Released:", date_txt))
+        meta.addStretch(1)
+        root.addLayout(meta)
+
+        line = Divider()
+        root.addWidget(line)
+
+        # --- categorised release notes (scrollable) --------------------
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        body = QWidget()
+        bv = QVBoxLayout(body)
+        bv.setContentsMargins(2, 0, 2, 0)
+        bv.setSpacing(6)
+        whats_new = QLabel(f"What's new in v{info.version}")
+        whats_new.setObjectName("SectionLabel")
+        bv.addWidget(whats_new)
+
+        cats = updater.categorize_notes(info.notes)
+        added_any = False
+        for key, title, icon in (
+                ("features", "New features", "✨"),
+                ("fixes", "Bugs fixed", "🐛"),
+                ("security", "Security improvements", "🔒"),
+                ("other", "Other changes", "•")):
+            sec = _notes_section(title, cats.get(key, []), icon)
+            if sec is not None:
+                bv.addWidget(sec)
+                added_any = True
+        if not added_any:
+            fallback = QLabel(
+                info.notes.strip() if info.notes.strip()
+                else "Release notes aren't available here — open the Release page "
+                     "for full details.")
+            fallback.setObjectName("UpdBullet")
+            fallback.setWordWrap(True)
+            bv.addWidget(fallback)
+        bv.addStretch(1)
+        scroll.setWidget(body)
+        root.addWidget(scroll, 1)
+
+        # --- progress + status -----------------------------------------
         self.bar = QProgressBar()
         self.bar.setRange(0, 100)
         self.bar.setValue(0)
         self.bar.setVisible(False)
-        lay.addWidget(self.bar)
+        root.addWidget(self.bar)
+
+        self.progress_caption = QLabel("")
+        self.progress_caption.setObjectName("ProgressCaption")
+        self.progress_caption.setVisible(False)
+        root.addWidget(self.progress_caption)
 
         self.status = QLabel("")
         self.status.setObjectName("Hint")
         self.status.setWordWrap(True)
-        lay.addWidget(self.status)
+        self.status.setVisible(False)
+        root.addWidget(self.status)
 
+        self.error = QLabel("")
+        self.error.setObjectName("UpdError")
+        self.error.setWordWrap(True)
+        self.error.setVisible(False)
+        root.addWidget(self.error)
+
+        # --- buttons ---------------------------------------------------
         btns = QHBoxLayout()
         self.btn_page = QPushButton("Release page")
         self.btn_page.setObjectName("Ghost")
+        self.btn_page.setCursor(Qt.PointingHandCursor)
         self.btn_page.clicked.connect(self._open_page)
         self.btn_later = QPushButton("Later")
         self.btn_later.setObjectName("Ghost")
+        self.btn_later.setCursor(Qt.PointingHandCursor)
         self.btn_later.clicked.connect(self.reject)
+        self.btn_retry = QPushButton("Retry")
+        self.btn_retry.setObjectName("Ghost")
+        self.btn_retry.setCursor(Qt.PointingHandCursor)
+        self.btn_retry.setVisible(False)
+        self.btn_retry.clicked.connect(self._start_download)
         self.btn_install = QPushButton("Download && Install")
         self.btn_install.setObjectName("Primary")
+        self.btn_install.setCursor(Qt.PointingHandCursor)
         self.btn_install.setDefault(True)
         self.btn_install.clicked.connect(self._start_download)
         btns.addWidget(self.btn_page)
         btns.addStretch(1)
+        btns.addWidget(self.btn_retry)
         btns.addWidget(self.btn_later)
         btns.addWidget(self.btn_install)
-        lay.addLayout(btns)
+        root.addLayout(btns)
+
+    # --- state ---------------------------------------------------------
+    def _set_state(self, key: str) -> None:
+        text, chip = _STATES[key]
+        self.badge.set_state(chip, text)
 
     def _open_page(self) -> None:
-        from PySide6.QtGui import QDesktopServices
         from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
         QDesktopServices.openUrl(QUrl(self._info.page))
 
     def _start_download(self) -> None:
+        self._set_state("downloading")
         self.btn_install.setEnabled(False)
-        self.btn_page.setEnabled(False)
+        self.btn_install.setVisible(False)
+        self.btn_retry.setVisible(False)
+        self.btn_page.setEnabled(True)
+        self.error.setVisible(False)
         self.btn_later.setText("Cancel")
+        try:
+            self.btn_later.clicked.disconnect()
+        except RuntimeError:
+            pass
+        self.btn_later.clicked.connect(self._cancel_download)
+
         self.bar.setVisible(True)
-        self.bar.setRange(0, 0)  # busy until first progress
-        self.status.setText("Downloading update…")
+        self.bar.setRange(0, 0)            # busy until first byte
+        self.progress_caption.setVisible(True)
+        self.progress_caption.setText("Starting download…")
+        self.status.setVisible(False)
+        self._t0 = time.monotonic()
 
         self._worker = DownloadWorker(self._info)
         self._worker.progress.connect(self._on_progress)
         self._worker.done.connect(self._on_done)
         self._worker.failed.connect(self._on_failed)
         self._thread = _run_in_thread(self, self._worker)
-        # Repurpose "Cancel" to abort the download.
-        self.btn_later.clicked.disconnect()
-        self.btn_later.clicked.connect(self._cancel_download)
 
     def _cancel_download(self) -> None:
         if self._worker:
             self._worker.cancel()
-        self.status.setText("Cancelling…")
+        self.progress_caption.setText("Cancelling…")
+
+    @staticmethod
+    def _eta(elapsed: float, done: int, total: int) -> str:
+        if done <= 0 or total <= 0 or elapsed <= 0:
+            return ""
+        rate = done / elapsed
+        if rate <= 0:
+            return ""
+        remaining = (total - done) / rate
+        remaining = int(max(0, remaining))
+        if remaining >= 60:
+            return f"about {remaining // 60}m {remaining % 60:02d}s left"
+        return f"about {remaining}s left"
 
     def _on_progress(self, done: int, total: int) -> None:
         if total > 0:
+            pct = int(done * 100 / total)
             self.bar.setRange(0, 100)
-            self.bar.setValue(int(done * 100 / total))
-            mb = lambda n: f"{n / (1024*1024):.1f} MB"
-            self.status.setText(f"Downloading… {mb(done)} / {mb(total)}")
+            self.bar.setValue(pct)
+            eta = self._eta(time.monotonic() - self._t0, done, total)
+            parts = [f"{human_size(done)} / {human_size(total)}", f"{pct}%"]
+            if eta:
+                parts.append(eta)
+            self.progress_caption.setText("Downloading update   ·   "
+                                          + "   ·   ".join(parts))
 
     def _on_done(self, path: str) -> None:
         if self._thread:
             self._thread.quit()
         self.bar.setRange(0, 100)
         self.bar.setValue(100)
-        self.status.setText("Download complete. Launching the installer — "
-                            "the app will close to finish updating.")
+        self._set_state("installing")
+        self.progress_caption.setText("Download complete   ·   100%")
+        self.status.setVisible(True)
+        self.status.setText("↻  Installing the update — the app will close and "
+                            "reopen automatically to finish. Please approve the "
+                            "Windows prompt if it appears.")
+        # Record what we're installing so the next launch can confirm success.
+        try:
+            from mico360.config import settings
+            settings.pending_update = {"version": self._info.version,
+                                       "started": time.time()}
+        except Exception:
+            pass
         try:
             updater.apply_and_exit(path)
         except Exception as exc:
-            self.status.setText(f"Could not start the installer: {exc}")
+            self._on_failed(f"Could not start the installer: {exc}")
             return
-        # Quit the app so files can be replaced.
         from PySide6.QtWidgets import QApplication
         QApplication.quit()
 
     def _on_failed(self, msg: str) -> None:
         if self._thread:
             self._thread.quit()
+        self._set_state("failed")
         self.bar.setVisible(False)
-        self.status.setText(f"Update failed: {msg}")
-        self.btn_install.setEnabled(True)
+        self.progress_caption.setVisible(False)
+        self.error.setVisible(True)
+        self.error.setText(f"⚠  Update failed: {msg}")
+        self.btn_install.setVisible(False)
+        self.btn_retry.setVisible(True)
         self.btn_page.setEnabled(True)
         self.btn_later.setText("Close")
         try:
@@ -255,3 +436,64 @@ class UpdateDialog(QDialog):
         except RuntimeError:
             pass
         self.btn_later.clicked.connect(self.reject)
+
+
+# --- post-install confirmation ------------------------------------------
+class UpdateCompletedDialog(QDialog):
+    """Shown on first launch after a successful update: installed version + time."""
+
+    def __init__(self, version: str, when_text: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle(f"Update complete — {__app_name__}")
+        from mico360.ui.widgets import clamp_to_screen
+        clamp_to_screen(self, 440, 240)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 22, 24, 18)
+        lay.setSpacing(10)
+        icon = QLabel("✅")
+        icon.setObjectName("ToolIcon")
+        icon.setAlignment(Qt.AlignCenter)
+        lay.addWidget(icon)
+        title = QLabel("Update completed successfully")
+        title.setObjectName("PageTitle")
+        title.setAlignment(Qt.AlignCenter)
+        lay.addWidget(title)
+        msg = QLabel(f"{__app_name__} is now on <b>v{version}</b>.<br>"
+                     f"Updated on {when_text}.")
+        msg.setObjectName("PageSubtitle")
+        msg.setAlignment(Qt.AlignCenter)
+        msg.setWordWrap(True)
+        lay.addWidget(msg)
+        lay.addStretch(1)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        ok = QPushButton("Great")
+        ok.setObjectName("Primary")
+        ok.setCursor(Qt.PointingHandCursor)
+        ok.setDefault(True)
+        ok.clicked.connect(self.accept)
+        row.addWidget(ok)
+        lay.addLayout(row)
+
+
+def maybe_show_update_completed(parent) -> None:
+    """If we just updated (a pending marker exists and the running version now
+    matches/exceeds it), show the completion confirmation and clear the marker."""
+    try:
+        from mico360.config import settings
+        pend = settings.pending_update
+    except Exception:
+        return
+    if not pend:
+        return
+    target = str(pend.get("version", ""))
+    settings.pending_update = {}        # one-shot, whatever the outcome
+    if not target:
+        return
+    if updater.parse_version(__version__) >= updater.parse_version(target):
+        import datetime
+        when = datetime.datetime.now().strftime("%B %d, %Y at %I:%M %p")
+        try:
+            UpdateCompletedDialog(target, when, parent).exec()
+        except Exception:
+            pass
