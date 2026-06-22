@@ -41,7 +41,8 @@ class Tool:
 
 
 PDF = {".pdf"}
-IMAGES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+IMAGES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff",
+          ".heic", ".heif"}   # HEIC/HEIF (Apple photos) via pillow-heif
 SVG = {".svg"}
 WORD = {".doc", ".docx", ".odt", ".rtf"}
 EXCEL = {".xlsx", ".xls", ".ods", ".csv"}
@@ -329,12 +330,12 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         id="image_convert", name="Convert Image", icon="🔁",
-        tagline="Change image format (PNG ⇄ JPG ⇄ WEBP ⇄ TIFF).",
+        tagline="Change image format (incl. HEIC → PNG / JPG / WEBP).",
         mode=PER_FILE, accept=IMAGES, runner=processors.image_convert, group="Images",
         options=[
             Option("format", "Convert to", "choice", "png", [
                 ("png", "PNG"), ("jpg", "JPEG"), ("webp", "WEBP"),
-                ("tiff", "TIFF"), ("bmp", "BMP"),
+                ("tiff", "TIFF"), ("bmp", "BMP"), ("heic", "HEIC"),
             ]),
             Option("quality", "Quality", "int", 90, minimum=5, maximum=100,
                    suffix=" %", hint="Applies to JPEG / WEBP."),

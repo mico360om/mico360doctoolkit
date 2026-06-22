@@ -32,6 +32,10 @@ Thumbs.db
 # QA render previews
 _*.png
 
-# Build scratch logs
+# Build scratch logs + scratch utilities
 build/_*.txt
 build/_*.log
+build/_*.py
+
+# Screenshot previews (regenerate with build/_screens.py)
+screenshots/

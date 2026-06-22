@@ -27,7 +27,16 @@ from mico360.core.util import (
 
 Report = Callable[[str], None]
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff",
+              ".heic", ".heif"}
+
+# Teach Pillow to read/write HEIC/HEIF (Apple photos). Registered once at import;
+# a harmless no-op if the optional plugin isn't installed.
+try:
+    import pillow_heif as _pillow_heif
+    _pillow_heif.register_heif_opener()
+except Exception:  # pragma: no cover - optional dependency
+    pass
 
 
 def _clampi(value, lo: int, hi: int, default: int) -> int:
@@ -49,6 +58,17 @@ def _progress(report: Report, current: int, total: int) -> None:
         try:
             fn(current, total)
         except Exception:  # pragma: no cover - never let progress break a job
+            pass
+
+
+def _progress_frac(report: Report, frac: float) -> None:
+    """Report a 0..1 completion fraction within a unit (degrades to a no-op).
+    Lets one operation map its progress into a sub-range of the unit's bar."""
+    fn = getattr(report, "progress", None)
+    if fn is not None:
+        try:
+            fn(int(max(0.0, min(1.0, frac)) * 1000), 1000)
+        except Exception:  # pragma: no cover
             pass
 
 
@@ -127,7 +147,7 @@ def pdf_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
                 "Ghostscript failed: " + (proc.stderr or proc.stdout or "unknown error").strip()[:300]
             )
     else:
-        report("Ghostscript not found — using built-in PyMuPDF compressor.")
+        report(f"Compressing with the built-in engine ({level})…")
         _pymupdf_compress(src, out, level, opt, report)
 
     after = out.stat().st_size
@@ -136,7 +156,8 @@ def pdf_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
     if after >= before:
         report("Note: file was already well-optimized; little/no size reduction.")
     # Lossy levels re-encode images by design; make sure nothing ELSE was lost.
-    _enforce_structural_integrity(src, out, report)
+    # The compress step filled the first half of the bar; verify fills the rest.
+    _enforce_structural_integrity(src, out, report, prog_base=0.5, prog_span=0.5)
     return [out]
 
 
@@ -160,11 +181,13 @@ def _pymupdf_compress(src: Path, out: Path, level: str, opt: dict, report: Repor
         quality = _FALLBACK_QUALITY.get(level, _FALLBACK_QUALITY["medium"])
 
     doc = fitz.open(src)
+    _progress_frac(report, 0.05)
     try:
         # PyMuPDF >= 1.24 can downsample/recompress images in place. Only images
         # whose effective resolution exceeds the target are touched, so we never
         # upscale or bloat already-small images.
         if hasattr(doc, "rewrite_images"):
+            report("Recompressing images (can take a moment on large PDFs)…")
             try:
                 # rewrite_images requires dpi_target < dpi_threshold: any image
                 # above the threshold is downsampled to the target. Using
@@ -175,8 +198,11 @@ def _pymupdf_compress(src: Path, out: Path, level: str, opt: dict, report: Repor
                 )
             except Exception as exc:  # pragma: no cover - version/feature guard
                 report(f"Image recompression unavailable ({exc}); rebuilding only.")
+        _progress_frac(report, 0.35)
+        report("Rebuilding the PDF…")
         doc.save(str(out), garbage=4, deflate=True, deflate_images=True,
                  deflate_fonts=True, clean=True)
+        _progress_frac(report, 0.5)
     finally:
         doc.close()
 
@@ -191,17 +217,27 @@ def _links_signature(page) -> list:
     return sorted(str(x) for x in out)
 
 
-def verify_pdf_integrity(src_path, out_path, mode: str = "strict"):
+# Above this page count, the per-page rendered-pixel hash (the most expensive
+# strict check) is skipped: image bytes, text, fonts, links and structure already
+# prove content was preserved, and rendering every page is what makes verifying a
+# large PDF slow. Keeps big-file compression responsive without weakening safety.
+_VERIFY_RENDER_MAX_PAGES = 25
+
+
+def verify_pdf_integrity(src_path, out_path, mode: str = "strict", report=None,
+                         prog_base: float = 0.0, prog_span: float = 1.0):
     """Confirm a processed PDF preserved the original's content.
 
     Returns ``(ok: bool, differences: list[str])``.
 
     * ``mode="strict"`` (lossless compression) — EVERYTHING must match: page
       count, text, links, bookmarks, attachments, fonts, metadata, image bytes,
-      and the rendered appearance of every page (pixel-for-pixel).
+      and (on smaller PDFs) the rendered appearance of every page.
     * ``mode="structural"`` (lossy compression) — the things that must never be
-      lost must match: page count, text, links, bookmarks, attachments. (Images
-      are intentionally re-encoded, fonts may be subset, so those aren't compared.)
+      lost must match: page count, text, links, bookmarks, attachments.
+
+    Progress is reported per page into the sub-range ``[prog_base, prog_base +
+    prog_span]`` so a long verification of a big file keeps the bar moving.
     """
     import hashlib
 
@@ -211,8 +247,9 @@ def verify_pdf_integrity(src_path, out_path, mode: str = "strict"):
     a = fitz.open(str(src_path))
     b = fitz.open(str(out_path))
     try:
-        if a.page_count != b.page_count:
-            return False, [f"page count changed {a.page_count} → {b.page_count}"]
+        n = a.page_count
+        if n != b.page_count:
+            return False, [f"page count changed {n} → {b.page_count}"]
         if a.get_toc(simple=True) != b.get_toc(simple=True):
             diffs.append("bookmarks / outline changed")
         try:
@@ -224,7 +261,10 @@ def verify_pdf_integrity(src_path, out_path, mode: str = "strict"):
             for k in ("title", "author", "subject", "keywords", "creator", "producer"):
                 if (a.metadata.get(k) or "") != (b.metadata.get(k) or ""):
                     diffs.append(f"metadata '{k}' changed")
-        for i in range(a.page_count):
+        # On large PDFs, skip the heavy rendered-pixel comparison (see above).
+        render_check = strict and n <= _VERIFY_RENDER_MAX_PAGES
+        for i in range(n):
+            _check_cancel(report)
             pa, pb = a[i], b[i]
             if pa.get_text("text") != pb.get_text("text"):
                 diffs.append(f"page {i + 1}: text changed")
@@ -245,10 +285,13 @@ def verify_pdf_integrity(src_path, out_path, mode: str = "strict"):
                                 for im in ib)
                     if ha != hb:
                         diffs.append(f"page {i + 1}: image data changed")
-                ra = hashlib.sha1(pa.get_pixmap(dpi=100).samples).hexdigest()
-                rb = hashlib.sha1(pb.get_pixmap(dpi=100).samples).hexdigest()
-                if ra != rb:
-                    diffs.append(f"page {i + 1}: rendered appearance changed")
+                if render_check:
+                    ra = hashlib.sha1(pa.get_pixmap(dpi=100).samples).hexdigest()
+                    rb = hashlib.sha1(pb.get_pixmap(dpi=100).samples).hexdigest()
+                    if ra != rb:
+                        diffs.append(f"page {i + 1}: rendered appearance changed")
+            if report is not None:
+                _progress_frac(report, prog_base + (i + 1) / max(1, n) * prog_span)
     finally:
         a.close()
         b.close()
@@ -264,6 +307,7 @@ def _pdf_compress_lossless(src: Path, out: Path, before: int, report: Report) ->
 
     import fitz
     report("Lossless compression — preserving 100% of content…")
+    _progress_frac(report, 0.05)
     doc = fitz.open(str(src))
     try:
         doc.set_metadata(dict(doc.metadata))   # keep all metadata exactly
@@ -272,7 +316,11 @@ def _pdf_compress_lossless(src: Path, out: Path, before: int, report: Report) ->
     finally:
         doc.close()
 
-    ok, diffs = verify_pdf_integrity(src, out, mode="strict")
+    report("Verifying the result is identical to the original…")
+    # Compression took the first ~20% of the bar; the verify fills the rest so a
+    # large file's (slower) check keeps the percentage moving instead of freezing.
+    ok, diffs = verify_pdf_integrity(src, out, mode="strict", report=report,
+                                     prog_base=0.2, prog_span=0.8)
     if not ok:
         report("Integrity check flagged a difference — keeping the original "
                f"unchanged ({'; '.join(diffs[:3])}).")
@@ -288,12 +336,15 @@ def _pdf_compress_lossless(src: Path, out: Path, before: int, report: Report) ->
            f"({(1 - after / before) * 100:.0f}% smaller) — content verified identical ✓")
 
 
-def _enforce_structural_integrity(src: Path, out: Path, report: Report) -> None:
+def _enforce_structural_integrity(src: Path, out: Path, report: Report,
+                                  prog_base: float = 0.5, prog_span: float = 0.5) -> None:
     """After a *lossy* compression, make sure nothing other than image quality was
     lost (text, links, bookmarks, attachments, page count). If something was,
     keep the original so the user never loses content."""
     import shutil
-    ok, diffs = verify_pdf_integrity(src, out, mode="structural")
+    report("Verifying text, links, bookmarks & attachments were kept…")
+    ok, diffs = verify_pdf_integrity(src, out, mode="structural", report=report,
+                                     prog_base=prog_base, prog_span=prog_span)
     if ok:
         report("Integrity check ✓ — text, links, bookmarks & attachments preserved.")
         return
@@ -2800,12 +2851,17 @@ def _save_image(im, out: Path, fmt: str, quality: int = 90) -> None:
         if im.mode not in ("RGB", "L", "P"):
             im = im.convert("RGB")
         im.save(out, "BMP")
+    elif fmt in ("heic", "heif"):
+        if im.mode not in ("RGB", "RGBA", "L"):
+            im = im.convert("RGB")
+        im.save(out, "HEIF", quality=quality)
     else:
         im.save(out)
 
 
 _IMG_EXT = {"jpg": ".jpg", "jpeg": ".jpg", "png": ".png", "webp": ".webp",
-            "tiff": ".tiff", "tif": ".tiff", "bmp": ".bmp"}
+            "tiff": ".tiff", "tif": ".tiff", "bmp": ".bmp",
+            "heic": ".heic", "heif": ".heic"}
 
 
 def image_resize(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:

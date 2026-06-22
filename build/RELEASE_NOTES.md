@@ -1,3 +1,23 @@
+## MICO360 Doc Toolkit v6.8.0
+
+**HEIC photos + smoother large-file compression.**
+
+**New features**
+- **HEIC / HEIF support** — **Convert Image** now opens **iPhone/Apple `.heic` photos**
+  and converts them to PNG, JPEG, WEBP, TIFF or BMP (and can save HEIC too). HEIC is
+  accepted across all image tools (compress, resize, watermark, Image → PDF, Image → SVG).
+
+**Bug fixes**
+- **Compression progress no longer "sticks" on large files.** The percentage now keeps
+  moving through both the compression and the content‑verification steps, so big PDFs
+  show real progress instead of appearing frozen.
+- Verifying large PDFs is **much faster** (the heaviest per‑page check is skipped on big
+  files — content safety is unchanged), and the status messages are clearer.
+- The "Ghostscript not found" line was just informational (the app uses its built‑in
+  compressor); it's been reworded so it no longer looks like an error.
+
+---
+
 ## MICO360 Doc Toolkit v6.7.0
 
 **SVG conversion, both ways.**

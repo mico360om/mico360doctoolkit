@@ -88,6 +88,26 @@ def main() -> int:
           r[0].stat().st_size <= src.stat().st_size,
           f"{src.stat().st_size} -> {r[0].stat().st_size}")
 
+    # 1b. Progress is reported and strictly ascending (so the bar never "sticks"
+    #     on a large file mid‑compression).
+    class _ProgRep:
+        def __init__(self):
+            self.ticks = []
+
+        def __call__(self, *a):
+            pass
+
+        def progress(self, c, t):
+            self.ticks.append(c / t if t else 0)
+
+        cancelled = staticmethod(lambda: False)
+
+    pr = _ProgRep()
+    P.pdf_compress(src, out, o({"level": "lossless"}), pr)
+    check("LOSSLESS compress reports ascending progress (bar moves)",
+          len(pr.ticks) >= 3 and pr.ticks == sorted(pr.ticks) and pr.ticks[-1] >= 0.99,
+          f"{len(pr.ticks)} ticks {pr.ticks[:1]}..{pr.ticks[-1:]}")
+
     # 2. Lossy compression — text/links/bookmarks/attachments still preserved
     r = P.pdf_compress(src, out, o({"level": "high"}), REP)
     ok, diffs = P.verify_pdf_integrity(src, r[0], mode="structural")

@@ -100,7 +100,8 @@ tool automatically.</p>
       logos / line art; full-colour or black &amp; white), or <i>Embed</i> the image
       exactly inside an SVG (best for photos).</li>
   <li><b>Resize Image</b> — batch-resize by width/height or percentage.</li>
-  <li><b>Convert Image</b> — change format between PNG / JPG / WEBP / TIFF / BMP.</li>
+  <li><b>Convert Image</b> — change format between PNG / JPG / WEBP / TIFF / BMP, and
+      convert <b>HEIC/HEIF</b> (iPhone photos) to any of them (or save as HEIC).</li>
   <li><b>Watermark Image</b> — stamp text or a logo onto images.</li>
   <li><b>Compress Image</b> — presets, a <i>Target file size</i>, or custom quality; optional
       resize and format change (JPEG / PNG / WEBP).</li>

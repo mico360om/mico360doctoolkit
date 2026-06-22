@@ -23,7 +23,7 @@ datas = [
 binaries = []
 hiddenimports = [
     "PySide6.QtNetwork",   # QLocalServer/QLocalSocket — single-instance guard
-    "fitz", "pypdf", "pptx", "PIL", "pdf2docx", "img2pdf",
+    "fitz", "pypdf", "pptx", "PIL", "pdf2docx", "img2pdf", "pillow_heif",
     # Word -> PDF engine chain
     "docx", "reportlab", "docx2pdf",
     "win32com", "win32com.client", "pythoncom", "pywintypes",
@@ -42,7 +42,8 @@ hiddenimports = [
 # Bundle tricky packages completely (data files, submodules).
 for pkg in ("pdf2docx", "fontTools", "pptx", "reportlab", "docx", "docx2pdf",
             "rapidocr_onnxruntime", "onnxruntime", "cryptography",
-            "pdfplumber", "pdfminer", "openpyxl", "pypdfium2", "vtracer"):
+            "pdfplumber", "pdfminer", "openpyxl", "pypdfium2", "vtracer",
+            "pillow_heif"):
     try:
         d, b, h = collect_all(pkg)
         datas += d
