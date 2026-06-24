@@ -1,4 +1,4 @@
-# MICO360 Doc Toolkit  ·  v6.8.0
+# MICO360 Doc Toolkit  ·  v6.9.0
 
 A modern Windows 10/11 desktop app for PDF & image management — a **Dashboard**
 home plus tools to compress, merge, split, organize, protect, watermark, sign,
@@ -18,6 +18,15 @@ specific version (and its `.sha256` checksum) from the
 [Releases page](https://github.com/mico360om/mico360doctoolkit/releases/latest).
 After installing, the app keeps itself up to date automatically.
 
+> **v6.9** — **Smaller installer + Arabic OCR.** The installer drops from ~480 MB to
+> **~135 MB** (less than a third) — the LibreOffice engine is **downloaded once on first use** (and survives
+> updates), so auto-updates are ~4× smaller. OCR now has a **Language** selector:
+> English/Latin is built in and **Arabic** downloads a small model (~8 MB) on first use,
+> with right-to-left text put back in reading order. Plus **thumbnail previews** in the
+> queue, tools **grouped by job** (Convert / Optimize / Edit / Organize / Secure /
+> Recognize / Files), a crisper layout at 1100–1200 px, and **opt-in, on-device crash
+> reporting** (saved locally; nothing sent unless you choose to).
+>
 > **v6.5** — **A real file queue.** The drag-and-drop box is now a slim band so the
 > file list gets most of the panel; an empty queue shows “0 files”, a populated one
 > shows counts + pending/done/failed. Toolbar (Add files / Remove selected / Remove

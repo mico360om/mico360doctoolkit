@@ -150,6 +150,17 @@ class Settings:
         self._set("perf/ocr_use_gpu", bool(value))
 
     @property
+    def auto_download_engine(self) -> bool:
+        """Automatically download the LibreOffice conversion engine on first use
+        when it isn't already present (Windows). Default on; turn off to be asked
+        / to install it manually instead."""
+        return self._get("deps/auto_download_engine", True, bool)
+
+    @auto_download_engine.setter
+    def auto_download_engine(self, value: bool) -> None:
+        self._set("deps/auto_download_engine", bool(value))
+
+    @property
     def auto_check_updates(self) -> bool:
         return self._get("update/auto_check", True, bool)
 
@@ -167,6 +178,17 @@ class Settings:
     @pending_update.setter
     def pending_update(self, value) -> None:
         self._set_json("update/pending", dict(value or {}))
+
+    @property
+    def crash_reports_enabled(self) -> bool:
+        """Show a report dialog when an unexpected error occurs, so you can
+        choose to send the details. Reports are saved locally; nothing is ever
+        sent automatically."""
+        return self._get("privacy/crash_reports", True, bool)
+
+    @crash_reports_enabled.setter
+    def crash_reports_enabled(self, value: bool) -> None:
+        self._set("privacy/crash_reports", bool(value))
 
     @property
     def open_output_when_done(self) -> bool:

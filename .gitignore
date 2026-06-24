@@ -36,6 +36,7 @@ _*.png
 build/_*.txt
 build/_*.log
 build/_*.py
+build/_ocr_ar/
 
 # Screenshot previews (regenerate with build/_screens.py)
 screenshots/

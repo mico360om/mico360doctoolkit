@@ -58,6 +58,15 @@ def find_libreoffice() -> str | None:
     if saved and Path(saved).exists():
         return saved
 
+    # On-demand engine downloaded to the user's data dir (survives app updates).
+    from mico360.paths import user_data_dir
+    engine = user_data_dir() / "engines" / "libreoffice"
+    for sub in (("program", "soffice.exe"), ("program", "soffice"),
+                ("Contents", "MacOS", "soffice")):
+        cand = engine.joinpath(*sub)
+        if cand.exists():
+            return str(cand)
+
     for sub in (("libreoffice", "program", "soffice.exe"),               # Windows
                 ("libreoffice", "program", "soffice"),                    # Linux
                 ("LibreOffice.app", "Contents", "MacOS", "soffice")):     # macOS

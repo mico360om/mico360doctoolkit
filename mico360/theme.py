@@ -408,6 +408,8 @@ QListWidget#FileList {{
 QListWidget#FileList::item {{ padding: 8px 10px; border-radius: 6px; color: {c['text']}; }}
 QListWidget#FileList::item:hover {{ background-color: {c['hover']}; }}
 QListWidget#FileList::item:selected {{ background-color: {c['selected']}; color: {c['text']}; }}
+#ThumbPreview {{ background-color: {c['surface_2']}; border: 1px solid {c['border']};
+    border-radius: 8px; color: {c['text_faint']}; font-size: 12px; }}
 
 /* =================== Progress =================== */
 QProgressBar {{

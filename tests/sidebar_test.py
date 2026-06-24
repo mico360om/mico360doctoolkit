@@ -74,21 +74,22 @@ def main() -> int:
           all(g["header"].isVisible() for g in sb._groups))
 
     # --- collapsible categories -----------------------------------------
-    pdf_grp = next(g for g in sb._groups if g["name"] == "PDF")
+    # Tools are grouped by job; "Organize" holds Merge/Split/Organize PDF.
+    pdf_grp = next(g for g in sb._groups if g["name"] == "Organize")
     n_pdf = len(pdf_grp["items"])
     sb._toggle_group(pdf_grp)
     app.processEvents()
-    check("collapsing 'PDF' hides its items",
+    check("collapsing 'Organize' hides its items",
           all(not it.isVisible() for it in pdf_grp["items"]), str(n_pdf))
     check("collapse chevron shown (▸)", "▸" in pdf_grp["header"].text())
-    check("collapse persisted to settings", "PDF" in settings.collapsed_groups)
+    check("collapse persisted to settings", "Organize" in settings.collapsed_groups)
 
     sb._toggle_group(pdf_grp)
     app.processEvents()
-    check("expanding 'PDF' shows its items again",
+    check("expanding 'Organize' shows its items again",
           all(it.isVisible() for it in pdf_grp["items"]))
     check("expand removes from persisted collapse",
-          "PDF" not in settings.collapsed_groups)
+          "Organize" not in settings.collapsed_groups)
 
     # --- select() expands a collapsed group -----------------------------
     sb._toggle_group(pdf_grp)         # collapse again

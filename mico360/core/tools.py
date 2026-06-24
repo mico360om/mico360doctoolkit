@@ -8,9 +8,14 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from mico360.core import processors
+from mico360.core import ocr_models
 
 PER_FILE = "per_file"
 AGGREGATE = "aggregate"
+
+# Languages the OCR can recognise. Latin (English & Western scripts) is built in;
+# others are small models downloaded once on first use.
+OCR_LANG_CHOICES = ocr_models.language_choices()
 
 
 @dataclass
@@ -70,7 +75,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="pdf_compress", name="Compress PDF", icon="🗜️",
         tagline="Shrink PDF file size with selectable quality.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_compress, group="PDF",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_compress, group="Optimize",
         options=[
             Option("level", "Compression", "choice", "lossless", _QUALITY_CHOICES,
                    hint="Higher compression = smaller file, lower fidelity."),
@@ -86,7 +91,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="pdf_merge", name="Merge PDF", icon="🔗",
         tagline="Combine several PDFs into a single document.",
-        mode=AGGREGATE, accept=PDF, runner=processors.pdf_merge, group="PDF",
+        mode=AGGREGATE, accept=PDF, runner=processors.pdf_merge, group="Organize",
         options=[
             Option("output_name", "Output file name", "text", "merged",
                    hint="Saved as <name>.pdf in the output folder."),
@@ -95,7 +100,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="pdf_split", name="Split PDF", icon="✂️",
         tagline="Break a PDF into multiple files by page, count or range.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_split, group="PDF",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_split, group="Organize",
         options=[
             Option("mode", "Split by", "choice", "each", [
                 ("each", "Every page → separate file"),
@@ -111,7 +116,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="pdf_organize", name="Organize PDF", icon="🧩",
         tagline="Rotate, delete, extract or reorder pages.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_organize, group="PDF",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_organize, group="Organize",
         options=[
             Option("operation", "Action", "choice", "rotate", [
                 ("rotate", "Rotate pages"),
@@ -137,7 +142,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="pdf_protect", name="Protect PDF", icon="🔒",
         tagline="Add or remove a password on a PDF.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_protect, group="PDF",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_protect, group="Secure",
         options=[
             Option("operation", "Action", "choice", "protect", [
                 ("protect", "Add a password (encrypt)"),
@@ -152,7 +157,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="pdf_watermark", name="Watermark PDF", icon="💧",
         tagline="Stamp text — or a logo/image — across every page.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_watermark, group="PDF",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_watermark, group="Edit",
         options=[
             Option("wm_type", "Watermark", "choice", "text", [
                 ("text", "Text"), ("image", "Logo / image"),
@@ -177,7 +182,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="pdf_page_numbers", name="Add Page Numbers", icon="#️⃣",
         tagline="Stamp page numbers onto every page.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_page_numbers, group="PDF",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_page_numbers, group="Edit",
         options=[
             Option("position", "Position", "choice", "bottom-center", [
                 ("bottom-center", "Bottom centre"), ("bottom-right", "Bottom right"),
@@ -195,7 +200,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="pdf_sign", name="Sign PDF", icon="✍️",
         tagline="Stamp a signature image onto the PDF.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_sign, group="PDF",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_sign, group="Edit",
         options=[
             Option("image_path", "Signature image", "file", "",
                    hint="A PNG with transparency works best."),
@@ -214,7 +219,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="pdf_metadata", name="Edit Metadata", icon="🏷️",
         tagline="Edit title, author, subject and keywords.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_metadata, group="PDF",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_metadata, group="Edit",
         options=[
             Option("title", "Title", "text", "", hint="Leave blank to keep existing."),
             Option("author", "Author", "text", ""),
@@ -225,8 +230,11 @@ TOOLS: list[Tool] = [
     Tool(
         id="pdf_ocr", name="Searchable PDF (OCR)", icon="🔍",
         tagline="Make scanned PDFs selectable & searchable.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_ocr, group="PDF",
+        mode=PER_FILE, accept=PDF, runner=processors.pdf_ocr, group="Recognize",
         options=[
+            Option("ocr_lang", "Language", "choice", "latin", OCR_LANG_CHOICES,
+                   hint="Pick the document's main script. Non-Latin languages "
+                        "download a small model once on first use."),
             Option("quality", "Recognition quality", "choice", "balanced", [
                 ("fast", "Fast — 200 dpi"),
                 ("balanced", "Balanced — 300 dpi (recommended)"),
@@ -248,6 +256,9 @@ TOOLS: list[Tool] = [
             # Word target
             Option("word_ocr", "OCR scanned pages (recognise text from images)",
                    "bool", False, hint="Turn on for scanned PDFs with no selectable text.",
+                   visible_when=("target", "word")),
+            Option("ocr_lang", "OCR language", "choice", "latin", OCR_LANG_CHOICES,
+                   hint="Pick the document's main script.",
                    visible_when=("target", "word")),
             # PowerPoint target
             Option("mode", "Slides", "choice", "auto", [
@@ -293,7 +304,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="image_compress", name="Compress Image", icon="🏞️",
         tagline="Reduce image file size with quality control.",
-        mode=PER_FILE, accept=IMAGES, runner=processors.image_compress, group="Images",
+        mode=PER_FILE, accept=IMAGES, runner=processors.image_compress, group="Optimize",
         options=[
             Option("level", "Compression", "choice", "lossless", _QUALITY_CHOICES,
                    hint="Higher compression = smaller file, lower fidelity."),
@@ -313,7 +324,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="image_resize", name="Resize Image", icon="📐",
         tagline="Batch-resize images by dimensions or percentage.",
-        mode=PER_FILE, accept=IMAGES, runner=processors.image_resize, group="Images",
+        mode=PER_FILE, accept=IMAGES, runner=processors.image_resize, group="Edit",
         options=[
             Option("mode", "Resize by", "choice", "dimensions", [
                 ("dimensions", "Width / height (px)"), ("percent", "Percentage"),
@@ -331,7 +342,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="image_convert", name="Convert Image", icon="🔁",
         tagline="Change image format (incl. HEIC → PNG / JPG / WEBP).",
-        mode=PER_FILE, accept=IMAGES, runner=processors.image_convert, group="Images",
+        mode=PER_FILE, accept=IMAGES, runner=processors.image_convert, group="Convert",
         options=[
             Option("format", "Convert to", "choice", "png", [
                 ("png", "PNG"), ("jpg", "JPEG"), ("webp", "WEBP"),
@@ -344,7 +355,7 @@ TOOLS: list[Tool] = [
     Tool(
         id="image_watermark", name="Watermark Image", icon="💧",
         tagline="Stamp text or a logo onto images.",
-        mode=PER_FILE, accept=IMAGES, runner=processors.image_watermark, group="Images",
+        mode=PER_FILE, accept=IMAGES, runner=processors.image_watermark, group="Edit",
         options=[
             Option("wm_type", "Watermark", "choice", "text", [
                 ("text", "Text"), ("image", "Logo / image"),
@@ -398,7 +409,7 @@ TOOLS: list[Tool] = [
         id="file_properties", name="Edit File Properties", icon="🗂️",
         tagline="Bulk-set Date Created, Date Modified and Owner on any files.",
         mode=PER_FILE, accept={"*"}, runner=processors.set_file_properties,
-        group="System",
+        group="Files",
         options=[
             Option("date_created", "Date Created", "text", "",
                    hint="e.g. 2026-06-07 or 2026-06-07 14:30 — leave blank to keep. "
@@ -412,6 +423,11 @@ TOOLS: list[Tool] = [
 ]
 
 TOOLS_BY_ID = {t.id: t for t in TOOLS}
+
+# Sidebar order for the job-based tool groups (tools are grouped by what you're
+# doing, not by file type). Any group not listed falls to the end, alphabetically.
+GROUP_ORDER = ["Convert", "Optimize", "Edit", "Organize", "Secure",
+               "Recognize", "Files"]
 
 
 def all_accept_exts() -> set:

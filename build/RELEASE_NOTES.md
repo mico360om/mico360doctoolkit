@@ -1,3 +1,40 @@
+## MICO360 Doc Toolkit v6.9.0
+
+**A much smaller installer, Arabic OCR, queue thumbnails — and tools grouped the way you work.**
+
+**Smaller installer & faster updates**
+- **The installer is now ~135 MB instead of ~480 MB — less than a third the size.** The
+  LibreOffice conversion engine is no longer bundled — it's **downloaded once,
+  automatically**, the first time you convert an Office file (Office → PDF / Document →
+  Markdown), into a folder that **survives app updates**. So you download the engine a
+  single time, ever — and every future **auto-update is much smaller and faster**, with
+  much less to install.
+- **You're in control:** a new **Settings → External tools → Conversion engine** section
+  shows the engine status, lets you **download it ahead of time**, and lets you turn the
+  automatic download off (then it'll ask / you can install LibreOffice yourself).
+
+> Note: if you already have LibreOffice installed, the app uses it and downloads nothing.
+
+**New features**
+- **Multi-language OCR — now reads Arabic.** The **Searchable PDF (OCR)** tool (and
+  scanned-PDF → Word) has a new **Language** selector. English/Latin is built in; **Arabic**
+  downloads a small model (~8 MB) once on first use, into a folder that survives updates.
+  Right-to-left text is reconstructed in natural reading order. You can also pre-download
+  languages in **Settings → Performance → OCR languages**.
+- **Thumbnail preview in the queue** — selecting a file in the queue now shows a quick
+  **preview** of it (PDF, image incl. HEIC, or SVG) so you can confirm you've got the right one.
+
+**Improvements**
+- **Tools are now grouped by what you're doing** — *Convert, Optimize, Edit, Organize,
+  Secure, Recognize, Files* — instead of by file type, so the right tool is easier to find.
+- **Crisper layout** — fixed a slight horizontal scrollbar that could appear at ~1100–1200 px
+  window widths; pages now reflow cleanly at every size.
+- **Privacy-respecting error reporting (opt-in).** If something ever goes wrong, the app
+  saves a report **on your computer** and offers to copy or email it to us — **nothing is
+  ever sent automatically**. Turn it off in **Settings → Updates**.
+
+---
+
 ## MICO360 Doc Toolkit v6.8.0
 
 **HEIC photos + smoother large-file compression.**

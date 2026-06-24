@@ -276,7 +276,14 @@ class ResponsiveRow(QWidget):
 
     def resizeEvent(self, event):  # noqa: N802
         super().resizeEvent(event)
-        self._apply(horizontal=self.width() >= self._threshold)
+        # Go side-by-side only when BOTH children actually fit at their minimum
+        # widths — otherwise stack. This adapts per page (a tool with a wide
+        # options column needs a wider window) so the content never has to
+        # horizontally scroll. The configured threshold is a lower bound.
+        need = (self._primary.minimumSizeHint().width()
+                + self._secondary.minimumSizeHint().width()
+                + self._lay.spacing() + 4)
+        self._apply(horizontal=self.width() >= max(self._threshold, need))
 
 
 # --------------------------------------------------------------------------
@@ -370,15 +377,20 @@ class DropArea(QFrame):
         title = QLabel("Drag & drop files or folders here")
         title.setObjectName("DropTitle")
         title.setWordWrap(True)
+        # Let the prompt shrink so the band never forces the panel wide.
+        title.setMinimumWidth(0)
+        title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         lay.addWidget(title, 1, Qt.AlignVCenter)
 
-        b_files = QPushButton("Browse files")
+        b_files = QPushButton("Browse")
         b_files.setObjectName("Ghost")
         b_files.setCursor(Qt.PointingHandCursor)
+        b_files.setToolTip("Browse for files")
         b_files.clicked.connect(self.browseFiles.emit)
-        b_folder = QPushButton("Browse folder")
+        b_folder = QPushButton("Folder")
         b_folder.setObjectName("Ghost")
         b_folder.setCursor(Qt.PointingHandCursor)
+        b_folder.setToolTip("Browse for a folder (scanned for supported files)")
         b_folder.clicked.connect(self.browseFolder.emit)
         lay.addWidget(b_files, 0, Qt.AlignVCenter)
         lay.addWidget(b_folder, 0, Qt.AlignVCenter)

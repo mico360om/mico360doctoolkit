@@ -76,21 +76,27 @@ def main() -> int:
     check("opens within the available screen area",
           win.width() <= avail.width() and win.height() <= avail.height())
 
-    # 5) Stable width: at a fixed comfortable size, every tool lays out to the
-    #    same content width (no per-selection jump).
+    # 5) No horizontal scroll at a comfortable size: every tool's content fits
+    #    inside the window (the responsiveness fix lowered the shared minimum so
+    #    pages reflow/stack instead of forcing a horizontal scrollbar at
+    #    ~1100-1200 px). Per-tool natural widths may differ; none may overflow.
     win.resize(1180, 760)
     for _ in range(4):
         app.processEvents()
-    widths = set()
+    overflow = {}
     for tid in ("pdf_merge", "pdf_watermark", "to_markdown", "pdf_convert",
-                "image_compress"):
+                "image_compress", "pdf_ocr"):
         idx = win._tool_index.get(tid)
         win.sidebar.select(idx)
         for _ in range(4):
             app.processEvents()
-        page = win._widgets[idx].widget()
-        widths.add(page.minimumSizeHint().width())
-    check("all tools share one layout width (no width jump)", len(widths) == 1, str(widths))
+        wrap = win._widgets[idx]
+        page = wrap.widget()
+        vw = wrap.viewport().width()
+        if page.minimumSizeHint().width() > vw:
+            overflow[tid] = (page.minimumSizeHint().width(), vw)
+    check("no tool needs horizontal scroll at 1180 px (no clipping)",
+          not overflow, str(overflow))
 
     # 6) No clipping at a narrow / heavily-scaled window: content scrolls
     #    horizontally instead of being cut off (as-needed H scrollbar).

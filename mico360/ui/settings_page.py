@@ -111,6 +111,16 @@ class SettingsPage(QWidget):
             lambda: setattr(settings, "auto_check_updates",
                             self.chk_auto_update.isChecked()))
         card.add(self.chk_auto_update)
+
+        self.chk_crash = QCheckBox(
+            "Offer to report errors when something goes wrong")
+        self.chk_crash.setChecked(settings.crash_reports_enabled)
+        self.chk_crash.setToolTip(
+            "Crash reports are saved on your computer. Nothing is ever sent "
+            "automatically — you choose whether to copy or email a report.")
+        self.chk_crash.toggled.connect(
+            lambda v: setattr(settings, "crash_reports_enabled", v))
+        card.add(self.chk_crash)
         return card
 
     def _check_updates(self) -> None:
@@ -271,7 +281,110 @@ class SettingsPage(QWidget):
         gpu_hint.setObjectName("Hint")
         gpu_hint.setWordWrap(True)
         card.add(gpu_hint)
+
+        # --- OCR languages (on-demand language packs) ------------------------
+        card.add(section_label("OCR languages"))
+        self.ocr_lang_status = QLabel()
+        self.ocr_lang_status.setObjectName("Hint")
+        self.ocr_lang_status.setWordWrap(True)
+        card.add(self.ocr_lang_status)
+        lrow = QHBoxLayout()
+        self.ocr_lang_combo = QComboBox()
+        from mico360.core import ocr_models
+        for lid, label in ocr_models.language_choices():
+            if not ocr_models.language(lid).builtin:   # only downloadable packs
+                self.ocr_lang_combo.addItem(label, lid)
+        self.btn_ocr_lang = QPushButton("Download language")
+        self.btn_ocr_lang.setObjectName("Ghost")
+        self.btn_ocr_lang.setCursor(Qt.PointingHandCursor)
+        self.btn_ocr_lang.clicked.connect(self._download_ocr_language)
+        lrow.addWidget(self.ocr_lang_combo, 1)
+        lrow.addWidget(self.btn_ocr_lang)
+        lw = QWidget(); lw.setLayout(lrow); card.add(lw)
+        self._refresh_ocr_lang_status()
         return card
+
+    def _refresh_ocr_lang_status(self) -> None:
+        from mico360.core import ocr_models
+        ready, pending = [], []
+        for lid, label in ocr_models.language_choices():
+            if ocr_models.language(lid).builtin:
+                ready.append(f"{label} (built in)")
+            elif ocr_models.is_language_ready(lid):
+                ready.append(f"{label} ✓")
+            else:
+                pending.append(label)
+        msg = "Installed: " + ", ".join(ready) + "."
+        if pending:
+            msg += (" Other languages download a small model (~8 MB) once, "
+                    "automatically the first time you OCR in that language — "
+                    "or fetch one now below.")
+        self.ocr_lang_status.setText(msg)
+
+    def _download_ocr_language(self) -> None:
+        from PySide6.QtCore import QObject, QThread, Signal
+        from PySide6.QtWidgets import QMessageBox, QProgressDialog
+
+        lid = self.ocr_lang_combo.currentData()
+        label = self.ocr_lang_combo.currentText()
+        if not lid:
+            return
+        dlg = QProgressDialog("Starting…", "Cancel", 0, 100, self)
+        dlg.setWindowTitle("OCR language")
+        dlg.setMinimumWidth(460)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.setValue(0)
+        state = {"cancel": False}
+        dlg.canceled.connect(lambda: state.__setitem__("cancel", True))
+
+        class _Worker(QObject):
+            prog = Signal(int)
+            text = Signal(str)
+            finished = Signal(bool, str)
+
+            def run(self) -> None:
+                outer = self
+
+                class _Rep:
+                    def __call__(self, m):
+                        outer.text.emit(str(m))
+
+                    def progress(self, c, t):
+                        outer.prog.emit(int(c * 100 / t) if t else 0)
+
+                try:
+                    from mico360.core import ocr_models
+                    ocr_models.ensure_language(lid, _Rep(), lambda: state["cancel"])
+                    outer.finished.emit(True, "")
+                except Exception as exc:  # noqa: BLE001
+                    outer.finished.emit(False, str(exc))
+
+        thread = QThread(self)
+        worker = _Worker()
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.prog.connect(dlg.setValue)
+        worker.text.connect(dlg.setLabelText)
+
+        def _fin(ok, info):
+            thread.quit()
+            thread.wait(3000)
+            dlg.close()
+            if ok:
+                QMessageBox.information(self, "OCR language",
+                                        f"{label} OCR is ready.")
+            elif not state["cancel"]:
+                QMessageBox.warning(self, "OCR language",
+                                    f"Couldn't download {label}:\n{info}")
+            self._refresh_ocr_lang_status()
+
+        worker.finished.connect(_fin)
+        self._ocr_lang_thread = (thread, worker)   # keep refs alive
+        self.btn_ocr_lang.setEnabled(False)
+        thread.start()
+        dlg.exec()
+        self.btn_ocr_lang.setEnabled(True)
 
     @staticmethod
     def _gpu_status_text() -> str:
@@ -299,6 +412,29 @@ class SettingsPage(QWidget):
                                "gswin64c.exe", "ghostscript"))
         card.add(self._dep_row("LibreOffice (Word → PDF)", self.lo_edit,
                                "soffice.exe", "libreoffice"))
+
+        # --- Conversion engine (on-demand LibreOffice) ----------------------
+        from mico360.core import engines
+        card.add(section_label("Conversion engine"))
+        self.engine_status = QLabel()
+        self.engine_status.setObjectName("Hint")
+        self.engine_status.setWordWrap(True)
+        card.add(self.engine_status)
+        erow = QHBoxLayout()
+        self.btn_engine = QPushButton("Download engine now")
+        self.btn_engine.setObjectName("Ghost")
+        self.btn_engine.setCursor(Qt.PointingHandCursor)
+        self.btn_engine.clicked.connect(self._download_engine)
+        erow.addWidget(self.btn_engine); erow.addStretch(1)
+        ew = QWidget(); ew.setLayout(erow); card.add(ew)
+        self.chk_auto_engine = QCheckBox(
+            "Download it automatically the first time it's needed")
+        self.chk_auto_engine.setChecked(settings.auto_download_engine)
+        self.chk_auto_engine.toggled.connect(
+            lambda v: setattr(settings, "auto_download_engine", v))
+        card.add(self.chk_auto_engine)
+        self._engines = engines
+        self._refresh_engine_status()
 
         btns = QHBoxLayout()
         detect = QPushButton("Auto-detect"); detect.setObjectName("Ghost")
@@ -365,7 +501,93 @@ class SettingsPage(QWidget):
             return "✓ found" if found else "✗ not found"
         self.status.setText(
             f"Ghostscript: {mark(gs)}   ·   LibreOffice: {mark(lo)}\n"
-            "Both are bundled with the installer; manual paths override detection.")
+            "Manual paths override detection. The LibreOffice engine is downloaded "
+            "on demand (see above); Ghostscript is optional.")
+
+    def _refresh_engine_status(self) -> None:
+        import sys
+
+        from mico360.core.deps import find_libreoffice as _find_lo
+        lo = _find_lo()
+        if lo:
+            self.engine_status.setText(
+                "Conversion engine: ready ✓  — used for Office → PDF and "
+                "Document → Markdown.")
+            self.btn_engine.setText("Re-download engine")
+            self.btn_engine.setEnabled(True)
+        elif sys.platform.startswith("win"):
+            self.engine_status.setText(
+                "Conversion engine: not installed. It downloads automatically "
+                "(~340 MB, one time) the first time you convert an Office file — "
+                "or download it now.")
+            self.btn_engine.setText("Download engine now")
+            self.btn_engine.setEnabled(True)
+        else:
+            self.engine_status.setText(
+                "Conversion engine: install LibreOffice from libreoffice.org and "
+                "set its path above (auto-download is Windows-only).")
+            self.btn_engine.setEnabled(False)
+
+    def _download_engine(self) -> None:
+        from PySide6.QtCore import QObject, QThread, Signal
+        from PySide6.QtWidgets import QMessageBox, QProgressDialog
+
+        dlg = QProgressDialog("Starting…", "Cancel", 0, 100, self)
+        dlg.setWindowTitle("Conversion engine")
+        dlg.setMinimumWidth(460)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.setValue(0)
+        state = {"cancel": False}
+        dlg.canceled.connect(lambda: state.__setitem__("cancel", True))
+
+        class _Worker(QObject):
+            prog = Signal(int)
+            text = Signal(str)
+            finished = Signal(bool, str)
+
+            def run(self) -> None:
+                outer = self
+
+                class _Rep:
+                    def __call__(self, m):
+                        outer.text.emit(str(m))
+
+                    def progress(self, c, t):
+                        outer.prog.emit(int(c * 100 / t) if t else 0)
+
+                try:
+                    from mico360.core import engines
+                    path = engines.download_engine(_Rep(), lambda: state["cancel"])
+                    outer.finished.emit(True, path)
+                except Exception as exc:  # noqa: BLE001
+                    outer.finished.emit(False, str(exc))
+
+        thread = QThread(self)
+        worker = _Worker()
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.prog.connect(dlg.setValue)
+        worker.text.connect(dlg.setLabelText)
+
+        def _fin(ok, info):
+            thread.quit()
+            thread.wait(3000)
+            dlg.close()
+            if ok:
+                QMessageBox.information(self, "Conversion engine",
+                                        "The conversion engine is ready.")
+            elif not state["cancel"]:
+                QMessageBox.warning(self, "Conversion engine",
+                                    f"Couldn't download the engine:\n{info}")
+            self._refresh_engine_status()
+
+        worker.finished.connect(_fin)
+        self._engine_thread = (thread, worker)   # keep refs alive
+        self.btn_engine.setEnabled(False)
+        thread.start()
+        dlg.exec()
+        self.btn_engine.setEnabled(True)
 
     def _open_logs(self) -> None:
         from mico360.core.platform_utils import open_path

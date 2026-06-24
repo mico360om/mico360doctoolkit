@@ -105,6 +105,7 @@ class ToolPage(QWidget):
         self._run_items: list[QueueItem] = []   # snapshot submitted to a run
         self.controller: BatchController | None = None
         self._last_outputs: list[Path] = []
+        self._thumb_cache: dict = {}            # (path, mtime) -> QPixmap | None
         self._build_ui()
 
     # -----------------------------------------------------------------
@@ -231,30 +232,39 @@ class ToolPage(QWidget):
         from PySide6.QtGui import QKeySequence, QShortcut
         del_sc = QShortcut(QKeySequence(Qt.Key_Delete), self.file_list)
         del_sc.activated.connect(self._remove_selected)
+        self.file_list.itemSelectionChanged.connect(self._update_preview)
         card.add(self.file_list)
+
+        # Thumbnail preview of the selected row.
+        self.preview = QLabel("Select a file to preview")
+        self.preview.setObjectName("ThumbPreview")
+        self.preview.setAlignment(Qt.AlignCenter)
+        self.preview.setFixedHeight(134)
+        self.preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        card.add(self.preview)
 
         # Queue toolbar.
         bar = QHBoxLayout()
         bar.setSpacing(8)
-        self.btn_add = QPushButton("Add files")
+        self.btn_add = QPushButton("Add")
         self.btn_add.setObjectName("Subtle")
         self.btn_add.setCursor(Qt.PointingHandCursor)
         self.btn_add.setToolTip("Add files to the queue.")
         self.btn_add.clicked.connect(self._browse_files)
 
-        self.btn_remove_sel = QPushButton("Remove selected")
+        self.btn_remove_sel = QPushButton("Remove")
         self.btn_remove_sel.setObjectName("Subtle")
         self.btn_remove_sel.setCursor(Qt.PointingHandCursor)
-        self.btn_remove_sel.setToolTip("Take the selected rows off the queue (Del).")
+        self.btn_remove_sel.setToolTip("Remove the selected rows from the queue (Del).")
         self.btn_remove_sel.clicked.connect(self._remove_selected)
 
-        self.btn_remove_fin = QPushButton("Remove finished")
+        self.btn_remove_fin = QPushButton("Remove done")
         self.btn_remove_fin.setObjectName("Subtle")
         self.btn_remove_fin.setCursor(Qt.PointingHandCursor)
-        self.btn_remove_fin.setToolTip("Take every finished row (done or failed) off the queue.")
+        self.btn_remove_fin.setToolTip("Remove every finished row (done or failed) from the queue.")
         self.btn_remove_fin.clicked.connect(self._remove_finished)
 
-        self.btn_clear = QPushButton("Clear all")
+        self.btn_clear = QPushButton("Clear")
         self.btn_clear.setObjectName("Subtle")
         self.btn_clear.setCursor(Qt.PointingHandCursor)
         self.btn_clear.setToolTip("Empty the queue.")
@@ -387,6 +397,76 @@ class ToolPage(QWidget):
         if 0 <= row < len(self.items):
             return self.items[row]
         return None
+
+    # -----------------------------------------------------------------
+    # Thumbnail preview
+    # -----------------------------------------------------------------
+    def _update_preview(self) -> None:
+        from PySide6.QtGui import QPixmap
+        sel = self._selected_items()
+        if not sel:
+            self.preview.setPixmap(QPixmap())
+            self.preview.setText("Select a file to preview")
+            self.preview.setToolTip("")
+            return
+        it = sel[0]
+        pix = self._thumbnail(it.path)
+        if pix is not None and not pix.isNull():
+            tgt = self.preview.size()
+            self.preview.setPixmap(pix.scaled(
+                max(40, tgt.width() - 10), max(40, tgt.height() - 10),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            more = f"  (+{len(sel) - 1} more)" if len(sel) > 1 else ""
+            self.preview.setToolTip(it.path.name + more)
+        else:
+            self.preview.setPixmap(QPixmap())
+            self.preview.setText("No preview for this file type")
+            self.preview.setToolTip(it.path.name)
+
+    def _thumbnail(self, path: Path):
+        """Render a small preview of a file (cached). PDF/SVG via PyMuPDF, raster
+        images (incl. HEIC) via Pillow. Returns a QPixmap or None."""
+        from PySide6.QtGui import QImage, QPixmap
+        try:
+            key = (str(path), path.stat().st_mtime_ns)
+        except OSError:
+            return None
+        if key in self._thumb_cache:
+            return self._thumb_cache[key]
+        if len(self._thumb_cache) > 64:
+            self._thumb_cache.clear()
+        box = (360, 240)
+        pix = None
+        ext = path.suffix.lower()
+        try:
+            if ext in (".pdf", ".svg"):
+                import fitz
+                doc = fitz.open(str(path))
+                try:
+                    if doc.page_count:
+                        page = doc[0]
+                        r = page.rect
+                        scale = min(box[0] / max(1.0, r.width),
+                                    box[1] / max(1.0, r.height))
+                        scale = max(0.05, min(scale, 4.0))
+                        pm = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                        img = QImage(bytes(pm.samples), pm.width, pm.height,
+                                     pm.stride, QImage.Format_RGB888)
+                        pix = QPixmap.fromImage(img.copy())
+                finally:
+                    doc.close()
+            else:
+                from PIL import Image
+                with Image.open(str(path)) as im:
+                    im = im.convert("RGBA")
+                    im.thumbnail(box)
+                    data = im.tobytes("raw", "RGBA")
+                    img = QImage(data, im.width, im.height, QImage.Format_RGBA8888)
+                    pix = QPixmap.fromImage(img.copy())
+        except Exception:
+            pix = None
+        self._thumb_cache[key] = pix
+        return pix
 
     # --- backward-compatible, path-keyed accessors over the item model -------
     @property

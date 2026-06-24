@@ -43,7 +43,9 @@ PREF_W, PREF_H = 1180, 760
 MIN_W, MIN_H = 480, 420
 
 # Friendly section glyphs (fallback when a tool has none).
-_SECTION_GLYPH = {"PDF": "📄", "Convert": "🔁", "Image": "🖼️", "System": "⚙"}
+_SECTION_GLYPH = {"Home": "🏠", "Convert": "🔁", "Optimize": "🗜️", "Edit": "✏️",
+                  "Organize": "🧩", "Secure": "🔒", "Recognize": "🔍",
+                  "Files": "🗂️", "System": "⚙"}
 
 
 def fit_window_size(pref_w: int, pref_h: int, min_w: int, min_h: int,
@@ -192,9 +194,14 @@ class MainWindow(QMainWindow):
         """Register the nav items and a *factory* per page. Pages are built
         lazily on first visit, so startup never blocks on building 12 pages or
         scanning the disk for external tools."""
+        from mico360.core.tools import GROUP_ORDER
         groups: dict[str, list] = {}
         for tool in TOOLS:
             groups.setdefault(tool.group, []).append(tool)
+        # Order groups by job (GROUP_ORDER); anything new falls to the end A→Z.
+        order = {g: i for i, g in enumerate(GROUP_ORDER)}
+        groups = dict(sorted(groups.items(),
+                             key=lambda kv: (order.get(kv[0], len(order)), kv[0])))
 
         self._tool_index: dict[str, int] = {}   # tool_id -> page index
 

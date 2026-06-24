@@ -17,7 +17,8 @@ tool automatically.</p>
 
 <h3>Getting started</h3>
 <ol>
-  <li><b>Pick a tool</b> from the sidebar on the left (grouped into PDF, Convert, Images and System).
+  <li><b>Pick a tool</b> from the sidebar on the left — tools are grouped by <b>what you
+      want to do</b> (Convert, Optimize, Edit, Organize, Secure, Recognize, Files).
       <b>Search</b> for a tool with the box at the top of the sidebar, and click a
       <b>category heading</b> to collapse or expand it.</li>
   <li><b>Add your files</b> — drag &amp; drop files or whole folders onto the drop zone, or
@@ -86,8 +87,9 @@ tool automatically.</p>
       JPG / PNG / WEBP / BMP / TIFF at a chosen DPI). Pick the target from <i>Convert to</i>.</li>
   <li><b>Office → PDF</b> — convert <b>Word, Excel or PowerPoint</b> to PDF; the type is
       detected from the file automatically. The conversion engine (<b>LibreOffice</b>) is
-      <b>built in</b>, so it works on any PC with no setup — including legacy <i>.doc/.xls/.ppt</i>
-      and machines without Microsoft Office.</li>
+      <b>downloaded automatically the first time you use it</b> (one‑time, ~340&nbsp;MB) — then
+      it works on any PC with no further setup, including legacy <i>.doc/.xls/.ppt</i> and
+      machines without Microsoft Office.</li>
   <li><b>Document → Markdown</b> — convert <b>Word, Excel, PowerPoint or PDF</b> to clean
       Markdown (.md): headings, <b>bold</b>/<i>italic</i>, lists and tables for Word; a table
       per sheet for Excel; a section per slide for PowerPoint; page text (and tables) for PDF.
@@ -131,8 +133,12 @@ and recovers the text.</p>
   <li>OCR is heavier than a normal conversion, so large documents take longer; the
       progress bar and Activity log show page-by-page progress, and <b>Cancel</b> stops
       it within a moment.</li>
-  <li>Recognition is tuned for Latin-script text and digits (English and similar
-      languages).</li>
+  <li><b>Languages:</b> English / Latin script is built in. Pick a different
+      <b>Language</b> in the <b>Searchable PDF (OCR)</b> tool (or the scanned-PDF → Word
+      option) to read other scripts — <b>Arabic</b> is supported, and downloads a small
+      model (~8&nbsp;MB) once on first use; right-to-left text is put back in natural
+      reading order. You can pre-download languages in <b>Settings → Performance →
+      OCR&nbsp;languages</b>.</li>
 </ul>
 
 <h3>Staying up to date</h3>
@@ -174,9 +180,10 @@ and recovers the text.</p>
       <b>Use the GPU for OCR</b> when a graphics card is available (with automatic CPU fallback).</li>
   <li><b>Updates</b> — see your current version, check for updates on demand, and turn the
       automatic startup check on or off.</li>
-  <li><b>External tools</b> — LibreOffice (Office → PDF) is <b>built in</b>; you can point the
-      app at a different LibreOffice or at Ghostscript (for the smallest lossy PDF compression)
-      here. Both are optional.</li>
+  <li><b>External tools</b> — manage the <b>Conversion engine</b> (LibreOffice): see its
+      status, download it ahead of time, or turn off the automatic first‑use download. You can
+      also point the app at an existing LibreOffice, or at Ghostscript (for the smallest lossy
+      PDF compression). All optional.</li>
   <li><b>About &amp; Legal</b> — About Us, Terms &amp; Conditions, Privacy Policy, and contact info.</li>
 </ul>
 
@@ -187,7 +194,8 @@ and recovers the text.</p>
       <b>Settings → Performance</b>.</li>
   <li>If a file fails, hover it for the reason, or open <b>Activity</b> /
       <b>Settings → Open logs folder</b> for details.</li>
-  <li>Office → PDF works out of the box (LibreOffice is built in) — no Microsoft Office needed.</li>
+  <li>Office → PDF downloads its engine (LibreOffice) once on first use — no Microsoft Office
+      needed. Already have LibreOffice installed? It's used directly, no download.</li>
   <li>Compress PDF is <b>Lossless</b> by default (no quality loss); for the smallest <i>lossy</i>
       result on image-heavy PDFs, Ghostscript can be set in Settings → External tools.</li>
 </ul>
@@ -233,8 +241,9 @@ class HelpPage(QWidget):
             f"<b>MICO360 Doc Toolkit</b> v{__version__}<br>"
             "PDF &amp; image management for Windows 10 / 11 (64-bit) and macOS.<br>"
             "Contact: <a href='mailto:info@mico360.com'>info@mico360.com</a><br>"
-            "© MICO360. Bundles LibreOffice (MPL) and RapidOCR; "
-            "uses Ghostscript (AGPL) when available.")
+            "© MICO360. Uses RapidOCR with PaddleOCR / PaddlePaddle models "
+            "(Apache-2.0) for text recognition, LibreOffice (MPL, downloaded on "
+            "demand) for Office conversion, and Ghostscript (AGPL) when available.")
         about_lbl.setTextFormat(Qt.RichText)
         about_lbl.setOpenExternalLinks(True)
         about_lbl.setWordWrap(True)

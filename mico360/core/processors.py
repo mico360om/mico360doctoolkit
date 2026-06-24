@@ -15,7 +15,8 @@ import threading
 from pathlib import Path
 from typing import Callable
 
-from mico360.core.deps import find_ghostscript, find_libreoffice
+from mico360.core.deps import find_ghostscript
+from mico360.core.engines import ensure_libreoffice
 from mico360.core.util import (
     ProcessError,
     build_output_path,
@@ -838,7 +839,7 @@ def pdf_to_word(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
         finally:
             doc.close()
         if not has_any_text:
-            _ocr_pdf_to_docx(src, out, report)
+            _ocr_pdf_to_docx(src, out, report, str(opt.get("ocr_lang", "latin")))
             return [out]
 
     try:
@@ -856,12 +857,14 @@ def pdf_to_word(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
     return [out]
 
 
-def _ocr_pdf_to_docx(src: Path, out: Path, report: Report) -> None:
+def _ocr_pdf_to_docx(src: Path, out: Path, report: Report,
+                     lang: str = "latin") -> None:
     """OCR every page of a scanned PDF into an editable .docx (python-docx)."""
     import fitz
     import docx
 
-    _make_ocr_engine()
+    _make_ocr_engine(lang, report)
+    rtl = _ocr_lang_is_rtl(lang)
     pdf = fitz.open(src)
     try:
         npages = pdf.page_count
@@ -869,13 +872,13 @@ def _ocr_pdf_to_docx(src: Path, out: Path, report: Report) -> None:
         pdf.close()
     report(f"OCR {npages} page(s)…")
     # OCR all pages in parallel, then build the document in page order.
-    page_lines = _ocr_pages_concurrent(src, list(range(npages)), report)
+    page_lines = _ocr_pages_concurrent(src, list(range(npages)), report, lang=lang)
 
     document = docx.Document()
     for i in range(npages):
         # Reconstruct visual rows, then reflow them into readable paragraphs
         # (merge wrapped lines, de-hyphenate, break on real gaps/indents).
-        rows = _ocr_rows(page_lines.get(i, []))
+        rows = _ocr_rows(page_lines.get(i, []), rtl=rtl)
         paras = _rows_to_paragraphs(rows)
         if i:
             document.add_page_break()
@@ -895,9 +898,11 @@ def _ocr_pdf_to_docx(src: Path, out: Path, report: Report) -> None:
 _OCR_DPI = 300
 # Detections below this confidence are discarded as noise.
 _OCR_MIN_SCORE = 0.5
-# The RapidOCR engine loads several ONNX models; build it once and reuse it
-# across every page and file in a batch instead of paying that cost per file.
-_ocr_engine_cache = None
+# The RapidOCR engine loads several ONNX models; build it once per language and
+# reuse it across every page and file in a batch instead of paying that cost per
+# file. The detector/classifier are shared (script-agnostic); only the recogniser
+# differs between languages.
+_ocr_engines: dict = {}        # lang_id -> RapidOCR engine
 _ocr_engine_lock = threading.Lock()
 _ocr_active_provider = "CPU"   # set when the engine is built; for status reporting
 
@@ -970,27 +975,58 @@ def _patch_rapidocr_gpu() -> None:
     _ru._mico360_gpu_patched = True
 
 
-def _make_ocr_engine():
-    """Return a cached RapidOCR engine (models load once), or raise ProcessError.
+def _make_ocr_engine(lang: str = "latin", report=None, is_cancelled=None):
+    """Return a cached RapidOCR engine for ``lang`` (models load once), or raise
+    ProcessError.
 
-    If the machine has a usable GPU and the user hasn't disabled it, the engine's
-    ONNX models run on the GPU via DirectML (with CPU fallback); otherwise plain
-    CPU. The decision is made fresh from the running machine — never hard-coded."""
-    global _ocr_engine_cache, _ocr_active_provider
-    if _ocr_engine_cache is not None:
-        return _ocr_engine_cache
+    Latin (English & Western scripts) uses the built-in recogniser. A non-Latin
+    language (e.g. Arabic) keeps the same script-agnostic text *detector* but
+    swaps in that language's downloaded recogniser + character dictionary; the
+    model is fetched once on first use.
+
+    If the machine has a usable GPU and the user hasn't disabled it, the ONNX
+    models run on the GPU via DirectML (with CPU fallback); otherwise plain CPU.
+    The decision is made fresh from the running machine — never hard-coded."""
+    global _ocr_active_provider
+    from mico360.core import ocr_models
+
+    lang_id = ocr_models.language(lang).id
+    cached = _ocr_engines.get(lang_id)
+    if cached is not None:
+        return cached
     with _ocr_engine_lock:
-        if _ocr_engine_cache is None:
-            try:
-                from rapidocr_onnxruntime import RapidOCR
-            except Exception as exc:  # pragma: no cover - optional dependency
-                raise ProcessError(
-                    "OCR engine is not available in this build. " + str(exc))
+        cached = _ocr_engines.get(lang_id)
+        if cached is not None:
+            return cached
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+        except Exception as exc:  # pragma: no cover - optional dependency
+            raise ProcessError(
+                "OCR engine is not available in this build. " + str(exc))
+        if not _ocr_engines:
             _ocr_active_provider = "CPU"
-            if _ocr_gpu_preference() and _dml_available():
-                _patch_rapidocr_gpu()
-            _ocr_engine_cache = RapidOCR()
-    return _ocr_engine_cache
+        if _ocr_gpu_preference() and _dml_available():
+            _patch_rapidocr_gpu()
+        engine = RapidOCR()
+        # Provision + swap in a non-Latin language pack (downloads on first use).
+        pack = ocr_models.ensure_language(lang_id, report, is_cancelled)
+        if pack is not None:
+            from rapidocr_onnxruntime.ch_ppocr_v3_rec import TextRecognizer
+            engine.text_recognizer = TextRecognizer({
+                "model_path": pack["model_path"],
+                "keys_path": pack["keys_path"],
+                "use_cuda": False,
+                "rec_batch_num": 6,
+                "rec_img_shape": [3, 48, 320],
+            })
+            engine._mico360_rtl = bool(pack["rtl"])
+        _ocr_engines[lang_id] = engine
+    return engine
+
+
+def _ocr_lang_is_rtl(lang: str) -> bool:
+    from mico360.core import ocr_models
+    return bool(ocr_models.language(lang).rtl)
 
 
 def ocr_active_provider() -> str:
@@ -1057,7 +1093,8 @@ def _ocr_page_lines(engine, page, dpi: int = _OCR_DPI,
 
 def _ocr_pages_concurrent(src: Path, indices: list[int],
                           report: Report,
-                          dpi: int = _OCR_DPI) -> dict[int, list[tuple[str, tuple]]]:
+                          dpi: int = _OCR_DPI,
+                          lang: str = "latin") -> dict[int, list[tuple[str, tuple]]]:
     """OCR many pages of one PDF in parallel and return {page_index: lines}.
 
     The slow part — model inference — is concurrent (RapidOCR/onnxruntime is
@@ -1072,7 +1109,7 @@ def _ocr_pages_concurrent(src: Path, indices: list[int],
 
     import fitz
 
-    engine = _make_ocr_engine()
+    engine = _make_ocr_engine(lang, report)
     if not indices:
         return {}
     cpu = os.cpu_count() or 4
@@ -1115,12 +1152,15 @@ def _ocr_pages_concurrent(src: Path, indices: list[int],
     return results
 
 
-def _ocr_rows(lines: list[tuple[str, tuple]]) -> list[tuple[str, float, float, float]]:
+def _ocr_rows(lines: list[tuple[str, tuple]],
+              rtl: bool = False) -> list[tuple[str, float, float, float]]:
     """Group OCR fragments into visual rows for clean, readable output.
 
     Fragments whose vertical centres are within a tolerance of each other are
-    treated as one line and joined left→right. Returns
-    ``[(row_text, x_left, y_top, row_height)]`` ordered top→bottom.
+    treated as one line and joined in reading order. Returns
+    ``[(row_text, x_left, y_top, row_height)]`` ordered top→bottom. For a
+    right-to-left script (``rtl``) fragments on a row are joined right→left so
+    the recovered text reads naturally.
     """
     if not lines:
         return []
@@ -1143,7 +1183,7 @@ def _ocr_rows(lines: list[tuple[str, tuple]]) -> list[tuple[str, float, float, f
 
     out: list[tuple[str, float, float, float]] = []
     for row in rows:
-        row.sort(key=lambda it: it[1])  # left → right
+        row.sort(key=lambda it: it[1], reverse=rtl)  # reading order (RTL = right→left)
         text = " ".join(c[0] for c in row).strip()
         if not text:
             continue
@@ -1326,7 +1366,7 @@ def word_to_pdf(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
                               numbered=opt.get("same_as_source", False))
     errors: list[str] = []
 
-    soffice = find_libreoffice()
+    soffice = ensure_libreoffice(report)
     if soffice:
         try:
             _word_to_pdf_libreoffice(soffice, src, out_dir, final, report)
@@ -2274,7 +2314,10 @@ def pdf_ocr(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
     """Make a scanned PDF searchable by overlaying an invisible OCR text layer."""
     import fitz
 
-    _make_ocr_engine()   # ensure OCR is available (raises a clear error if not)
+    lang = str(opt.get("ocr_lang", "latin"))
+    # Ensure OCR (and the language pack) is available — raises a clear error /
+    # downloads the model on first use before we start rasterising pages.
+    _make_ocr_engine(lang, report)
     report(f"OCR engine ready on {ocr_active_provider()}.")
     dpi = _ocr_dpi_from_opt(opt)
     try:
@@ -2287,7 +2330,7 @@ def pdf_ocr(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
         report(f"OCR {len(todo)} page(s)…"
                + (f"  ({kept} already searchable)" if kept else ""))
         # OCR the image-only pages in parallel, then write text in page order.
-        page_lines = _ocr_pages_concurrent(src, todo, report, dpi)
+        page_lines = _ocr_pages_concurrent(src, todo, report, dpi, lang)
         added = 0
         for i in todo:
             for text, (x0, y0, x1, y1) in page_lines.get(i, []):
@@ -2401,7 +2444,7 @@ def _office_to_pdf(src: Path, out_dir: Path, opt: dict, report: Report,
     final = build_output_path(src, out_dir, ".pdf", overwrite=opt.get("overwrite", False),
                               numbered=opt.get("same_as_source", False))
     errors: list[str] = []
-    soffice = find_libreoffice()
+    soffice = ensure_libreoffice(report)
     if soffice:
         try:
             _lo_convert_to_pdf(soffice, src, out_dir, final, report)
@@ -2617,7 +2660,7 @@ def word_to_md(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path
 
     work = src
     cleanup: Path | None = None
-    soffice = find_libreoffice()
+    soffice = ensure_libreoffice(report)
     if src.suffix.lower() != ".docx":
         if not soffice:
             raise ProcessError(
@@ -2691,7 +2734,7 @@ def _excel_to_markdown(src: Path, report: Report) -> str:
 
     work, cleanup = src, None
     if ext != ".xlsx":
-        soffice = find_libreoffice()
+        soffice = ensure_libreoffice(report)
         if not soffice:
             raise ProcessError(
                 f"Converting {ext} to Markdown needs LibreOffice (install it or set "
@@ -2724,7 +2767,7 @@ def _pptx_to_markdown(src: Path, report: Report) -> str:
     ext = src.suffix.lower()
     work, cleanup = src, None
     if ext != ".pptx":
-        soffice = find_libreoffice()
+        soffice = ensure_libreoffice(report)
         if not soffice:
             raise ProcessError(
                 f"Converting {ext} to Markdown needs LibreOffice (install it or set "

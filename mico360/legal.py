@@ -24,7 +24,7 @@ to any server, and your originals are always preserved.</p>
   <li><b>Lossless compression</b> for PDFs &amp; images — verified content-identical —
       plus a target-file-size mode.</li>
   <li>Convert PDF ⇄ Word / PowerPoint / Excel / images, Office → PDF, and
-      Document → Markdown — the conversion engine is <b>built in</b> (no Office needed).</li>
+      Document → Markdown — the conversion engine downloads once on first use (no Office needed).</li>
   <li><b>OCR</b> turns scanned, image-only PDFs into searchable text, and uses your
       <b>GPU</b> automatically when one is available.</li>
   <li>A real <b>file queue</b> with batch processing across all CPU cores, and
@@ -61,9 +61,10 @@ process, and in compliance with all applicable laws. You are responsible for the
 content you process.</p>
 
 <h3>3. Third-party components</h3>
-<p>The Software may bundle or use third-party engines (e.g. Ghostscript, LibreOffice,
-PyMuPDF, RapidOCR). These remain the property of their respective owners and are
-provided under their own licences.</p>
+<p>The Software may bundle, download on demand, or use third-party engines (e.g.
+Ghostscript, LibreOffice, PyMuPDF, RapidOCR, and PaddleOCR / PaddlePaddle OCR
+models). These remain the property of their respective owners and are provided
+under their own licences.</p>
 
 <h3>4. No warranty</h3>
 <p>The Software is provided "as is", without warranty of any kind, express or
@@ -103,12 +104,21 @@ or any third party.</p>
 <p>The Software does not require an account, does not include advertising or
 analytics, and does not track your activity.</p>
 
-<h3>3. The only network activity: updates</h3>
-<p>The single time {__app_name__} contacts the internet is to <b>check for and
-download application updates</b> from our public releases page on GitHub. This sends
-<b>no files and no personal data</b> — only a request for the latest version
-information and, if you choose to update, the installer itself. You can turn the
-automatic update check off in <b>Settings → Updates</b>.</p>
+<h3>3. Network activity</h3>
+<p>{__app_name__} contacts the internet only for these things, and <b>never to send
+your files or personal data</b>:</p>
+<ul>
+<li><b>Updates</b> — it checks our public releases page on GitHub for a newer version
+and, if you choose to update, downloads the installer. Turn the automatic check off in
+<b>Settings → Updates</b>.</li>
+<li><b>Optional engines &amp; language packs</b> — the first time you need them, it can
+download the LibreOffice conversion engine and OCR language models (e.g. Arabic) from
+their official sources. These are one-time downloads of software components, not your
+data, and you can manage them in <b>Settings</b>.</li>
+<li><b>Error reports (only if you ask)</b> — if something goes wrong, a report is saved
+<b>on your computer</b>. It is <b>never sent automatically</b>; you decide whether to
+copy or email it. You can disable the prompt in <b>Settings → Updates</b>.</li>
+</ul>
 
 <h3>4. What is stored locally</h3>
 <p>Only your app preferences (theme, output folder, last-used options) are saved

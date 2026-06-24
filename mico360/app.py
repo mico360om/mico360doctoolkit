@@ -57,17 +57,39 @@ def install_crash_guard(log) -> None:
             sys.__excepthook__(exc_type, exc, tb)
             return
         log.critical("Unhandled exception", exc_info=(exc_type, exc, tb))
+        # Always write a local report; never transmit anything automatically.
+        report = path = None
+        try:
+            from mico360.core import crash
+            report = crash.format_report(exc_type, exc, tb)
+            path = crash.write_report(report)
+        except Exception:
+            pass
         try:
             from PySide6.QtGui import QGuiApplication
             from PySide6.QtWidgets import QApplication, QMessageBox
-            if (QApplication.instance() is not None
-                    and QGuiApplication.platformName() != "offscreen"):
-                QMessageBox.warning(
-                    None, __app_name__,
-                    "Something went wrong, but the app is still running.\n\n"
-                    f"{exc_type.__name__}: {exc}\n\n"
-                    "If this keeps happening, please check Settings → Open logs "
-                    "folder and send us the log.")
+            from mico360.config import settings
+            if (QApplication.instance() is None
+                    or QGuiApplication.platformName() == "offscreen"
+                    or not settings.crash_reports_enabled):
+                return
+            box = QMessageBox(QMessageBox.Warning, __app_name__,
+                              "Something went wrong, but the app is still running.\n\n"
+                              f"{exc_type.__name__}: {exc}\n\n"
+                              "A report was saved on your computer. You can send it to "
+                              "help us fix it — nothing is sent unless you choose to.")
+            b_email = box.addButton("Email report", QMessageBox.AcceptRole)
+            b_copy = box.addButton("Copy details", QMessageBox.ActionRole)
+            box.addButton("Continue", QMessageBox.RejectRole)
+            box.exec()
+            clicked = box.clickedButton()
+            if clicked is b_copy and report:
+                QApplication.clipboard().setText(report)
+            elif clicked is b_email and report:
+                from PySide6.QtCore import QUrl
+                from PySide6.QtGui import QDesktopServices
+                from mico360.core import crash
+                QDesktopServices.openUrl(QUrl(crash.mailto_url(report)))
         except Exception:
             pass
     sys.excepthook = _hook

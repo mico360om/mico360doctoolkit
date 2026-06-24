@@ -20,6 +20,12 @@ datas = [
     (str(RES / "logo-w.png"), "mico360/resources"),
     (str(RES / "app.ico"), "mico360/resources"),
 ]
+
+# Bundled OCR language dictionaries (character sets for downloaded language packs).
+_OCR_DATA = ROOT / "mico360" / "core" / "ocr_data"
+if _OCR_DATA.is_dir():
+    for _f in _OCR_DATA.glob("*.txt"):
+        datas.append((str(_f), "mico360/core/ocr_data"))
 binaries = []
 hiddenimports = [
     "PySide6.QtNetwork",   # QLocalServer/QLocalSocket — single-instance guard
@@ -64,10 +70,17 @@ except Exception:
     pass
 
 # Bundle vendored binaries into the frozen app if present (optional).
+# LibreOffice is NOT bundled by default — it's downloaded on demand at runtime to
+# keep the installer small (~110 MB vs ~480 MB). Set MICO360_BUNDLE_LIBREOFFICE=1
+# to produce a full offline build that ships the engine inside the installer.
 vendor = ROOT / "vendor"
+_bundle_lo = os.environ.get("MICO360_BUNDLE_LIBREOFFICE") == "1"
 if vendor.exists():
     for path in vendor.rglob("*"):
         if path.is_file():
+            rel = path.relative_to(vendor)
+            if not _bundle_lo and rel.parts and rel.parts[0] == "libreoffice":
+                continue   # on-demand engine: don't bundle the ~1 GB LibreOffice
             datas.append((str(path), str(Path("vendor") / path.parent.relative_to(vendor))))
 
 
