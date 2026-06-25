@@ -2150,31 +2150,135 @@ def pdf_sign(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
     return [out]
 
 
+def _pdf_date(dt) -> str:
+    """Format a datetime as a PDF date string: ``D:YYYYMMDDHHmmSS+HH'mm'``."""
+    import time
+    off = -time.timezone           # seconds east of UTC (ignoring DST is fine here)
+    sign = "+" if off >= 0 else "-"
+    hh, mm = divmod(abs(off) // 60, 60)
+    return dt.strftime("D:%Y%m%d%H%M%S") + f"{sign}{hh:02d}'{mm:02d}'"
+
+
+def _xmp_rights_packet(copyright_text: str) -> bytes:
+    """A minimal, valid XMP packet carrying the copyright (dc:rights) and marking
+    the document as rights-managed — the way Acrobat stores 'Copyright'."""
+    from xml.sax.saxutils import escape
+    c = escape(copyright_text)
+    return (
+        '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>'
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+        '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+        '<rdf:Description rdf:about="" '
+        'xmlns:dc="http://purl.org/dc/elements/1.1/" '
+        'xmlns:xmpRights="http://ns.adobe.com/xap/1.0/rights/">'
+        f'<dc:rights><rdf:Alt><rdf:li xml:lang="x-default">{c}</rdf:li></rdf:Alt></dc:rights>'
+        '<xmpRights:Marked>True</xmpRights:Marked>'
+        '</rdf:Description></rdf:RDF></x:xmpmeta>'
+        '<?xpacket end="w"?>').encode("utf-8")
+
+
 def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    """Edit the full set of PDF document properties — the standard Info dictionary
+    (title/author/subject/keywords/creator/producer/dates/trapped), custom
+    properties (company/manager/category/comments), the copyright (XMP), the
+    document language and the title-bar preference — or strip everything out.
+
+    Cloning the source preserves every field you don't touch; only what you fill
+    in is changed."""
     from pypdf import PdfWriter
+    from pypdf.generic import (BooleanObject, DictionaryObject, NameObject,
+                               create_string_object)
+
     reader, _ = _open_reader(src)
-    writer = PdfWriter()
-    writer.append(reader)
-    existing = dict(reader.metadata or {})
-    fields = {"/Title": "title", "/Author": "author",
-              "/Subject": "subject", "/Keywords": "keywords"}
-    meta = {}
-    changed = []
-    for pdfkey, optkey in fields.items():
-        val = opt.get(optkey, None)
-        if val is None or str(val).strip() == "":
-            if existing.get(pdfkey):
-                meta[pdfkey] = existing[pdfkey]   # keep what's there
-        else:
-            meta[pdfkey] = str(val)
-            changed.append(optkey)
     try:
-        writer.add_metadata(meta)
+        writer = PdfWriter(clone_from=reader)   # preserve the whole document
     except Exception as exc:
-        raise ProcessError(f"Couldn't write metadata ({exc}).")
+        raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
+    root = writer._root_object
+
     out = build_output_path(src, out_dir, ".pdf", name_suffix="_metadata",
                             overwrite=opt.get("overwrite", False),
                             numbered=opt.get("same_as_source", False))
+
+    # --- privacy: wipe everything --------------------------------------------
+    if opt.get("remove_all"):
+        try:
+            writer._info.get_object().clear()
+        except Exception:
+            pass
+        for key in ("/Metadata", "/Lang"):
+            if key in root:
+                try:
+                    del root[key]
+                except Exception:
+                    pass
+        with open(out, "wb") as fh:
+            writer.write(fh)
+        report(f"Removed all metadata → {out.name}")
+        return [out]
+
+    # --- Info dictionary: standard + custom string fields --------------------
+    str_fields = {
+        "/Title": "title", "/Author": "author", "/Subject": "subject",
+        "/Keywords": "keywords", "/Creator": "creator", "/Producer": "producer",
+        "/Company": "company", "/Manager": "manager", "/Category": "category",
+        "/Comments": "comments",
+    }
+    meta: dict = {}
+    changed: list[str] = []
+    for pdfkey, optkey in str_fields.items():
+        val = opt.get(optkey, None)
+        if val is not None and str(val).strip() != "":
+            meta[NameObject(pdfkey)] = create_string_object(str(val))
+            changed.append(optkey)
+
+    # Dates (accept '2026-06-07 14:30', 'now', …) → PDF date strings.
+    for pdfkey, optkey in (("/CreationDate", "creation_date"),
+                           ("/ModDate", "mod_date")):
+        dt = _parse_dt(opt.get(optkey))
+        if dt is not None:
+            meta[NameObject(pdfkey)] = create_string_object(_pdf_date(dt))
+            changed.append(optkey)
+
+    # Trapped is a name object (/True /False /Unknown).
+    tr = str(opt.get("trapped", "") or "").strip()
+    if tr in ("True", "False", "Unknown"):
+        meta[NameObject("/Trapped")] = NameObject("/" + tr)
+        changed.append("trapped")
+
+    if meta:
+        try:
+            writer.add_metadata(meta)        # merges — untouched fields are kept
+        except Exception as exc:
+            raise ProcessError(f"Couldn't write metadata ({exc}).")
+
+    # --- document language (catalog /Lang, accessibility) --------------------
+    lang = str(opt.get("language", "") or "").strip()
+    if lang:
+        root[NameObject("/Lang")] = create_string_object(lang)
+        changed.append("language")
+
+    # --- show Title (not file name) in the window title bar ------------------
+    if opt.get("show_title"):
+        vp = root.get("/ViewerPreferences")
+        vp = vp.get_object() if vp is not None else None
+        if not isinstance(vp, DictionaryObject):
+            vp = DictionaryObject()
+            root[NameObject("/ViewerPreferences")] = vp
+        vp[NameObject("/DisplayDocTitle")] = BooleanObject(True)
+        changed.append("show_title")
+
+    # --- copyright → XMP rights ----------------------------------------------
+    copyright_text = str(opt.get("copyright", "") or "").strip()
+    if copyright_text:
+        from pypdf.generic import DecodedStreamObject
+        st = DecodedStreamObject()
+        st.set_data(_xmp_rights_packet(copyright_text))
+        st[NameObject("/Type")] = NameObject("/Metadata")
+        st[NameObject("/Subtype")] = NameObject("/XML")
+        root[NameObject("/Metadata")] = writer._add_object(st)
+        changed.append("copyright")
+
     with open(out, "wb") as fh:
         writer.write(fh)
     report(f"Updated metadata ({', '.join(changed) or 'no changes'}) → {out.name}")

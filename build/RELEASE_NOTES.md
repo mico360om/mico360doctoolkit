@@ -1,5 +1,16 @@
 ## MICO360 Doc Toolkit v6.9.1
 
+**A complete metadata editor + easier error reporting.**
+
+**Edit Metadata — now every field**
+- The **Edit Metadata** tool now covers **every document property**, not just Title/
+  Author/Subject/Keywords: **Creator, Producer, creation & modification dates**, custom
+  properties (**Company, Manager, Category, Comments**), **Copyright** (written to XMP),
+  document **Language** (accessibility), the **Trapped** flag, and a "show Title instead of
+  file name in the window bar" option. Blank fields are left untouched.
+- New **"Remove all metadata"** option strips every property plus XMP — ideal before
+  sharing a file.
+
 **Easier error reporting — straight to GitHub, still fully opt-in.**
 
 - The opt-in crash reporter can now **open a pre-filled GitHub issue** for you (title, error
