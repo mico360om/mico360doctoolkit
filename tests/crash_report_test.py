@@ -42,20 +42,54 @@ def main() -> int:
           and "boom-xyz" in report and "ValueError" in report)
     check("report includes the OS", "OS:" in report)
 
+    # Seed a recent log so we can verify it gets bundled next to the report.
+    from mico360.paths import logs_dir
+    seed_log = logs_dir() / "_crashtest_seed.log"
+    seed_log.write_text("line-A\nLOGMARKER-42\nline-C\n", encoding="utf-8")
+
     path = crash.write_report(report)
     check("report is written to a local file", path is not None and path.exists()
           and path.suffix == ".txt", str(path))
     if path:
         check("written report round-trips", "boom-xyz" in path.read_text(encoding="utf-8"))
-        try:
-            path.unlink()
-        except OSError:
-            pass
+        bundled = path.with_suffix(".log")
+        check("the last log is bundled next to the report",
+              bundled.exists() and "LOGMARKER-42" in bundled.read_text(encoding="utf-8"),
+              str(bundled))
+        for p in (path, path.with_suffix(".log")):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    try:
+        seed_log.unlink()
+    except OSError:
+        pass
 
     url = crash.mailto_url(report)
     check("a prefilled mailto link is offered (manual send only)",
           url.startswith("mailto:info@mico360.com") and "subject=" in url
           and "body=" in url)
+
+    # --- GitHub issue (pre-filled, user-submitted; no token, no auto-post) ---
+    title = crash.issue_title(exc_type, exc)
+    check("issue title is concise + names the error",
+          title.startswith("Crash: ValueError") and "boom-xyz" in title
+          and len(title) <= 120, title)
+
+    gh = crash.github_issue_url(title, report, path)
+    check("GitHub issue URL targets this repo's new-issue form",
+          gh.startswith("https://github.com/mico360om/mico360doctoolkit/issues/new?"))
+    check("issue URL carries title, body and the crash label",
+          "title=" in gh and "body=" in gh and "labels=crash" in gh)
+    check("issue URL stays under GitHub's length limit", len(gh) <= 7000, str(len(gh)))
+    check("nothing is auto-posted (it's just a prefilled link)",
+          gh.count("/issues/new") == 1 and "api.github.com" not in gh)
+
+    # A huge log must be trimmed so the link still opens (no 414).
+    big = crash.github_issue_url("Crash: X", "Q" * 50_000 + "\n", path)
+    check("oversized report is trimmed to fit the URL", len(big) <= 7000, str(len(big)))
+    check("trim leaves a breadcrumb to the saved report", "truncated" in big.lower())
 
     prev = settings.crash_reports_enabled
     settings.crash_reports_enabled = False

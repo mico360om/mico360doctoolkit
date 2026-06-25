@@ -115,9 +115,11 @@ and, if you choose to update, downloads the installer. Turn the automatic check 
 download the LibreOffice conversion engine and OCR language models (e.g. Arabic) from
 their official sources. These are one-time downloads of software components, not your
 data, and you can manage them in <b>Settings</b>.</li>
-<li><b>Error reports (only if you ask)</b> — if something goes wrong, a report is saved
-<b>on your computer</b>. It is <b>never sent automatically</b>; you decide whether to
-copy or email it. You can disable the prompt in <b>Settings → Updates</b>.</li>
+<li><b>Error reports (only if you ask)</b> — if something goes wrong, a report (with a
+copy of the recent log) is saved <b>on your computer</b>. It is <b>never sent
+automatically</b>; you decide whether to open a <b>pre-filled GitHub issue</b> (which you
+review and submit yourself), copy it, or email it. You can disable the prompt in
+<b>Settings → Updates</b>.</li>
 </ul>
 
 <h3>4. What is stored locally</h3>

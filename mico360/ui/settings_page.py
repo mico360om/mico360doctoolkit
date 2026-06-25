@@ -116,8 +116,9 @@ class SettingsPage(QWidget):
             "Offer to report errors when something goes wrong")
         self.chk_crash.setChecked(settings.crash_reports_enabled)
         self.chk_crash.setToolTip(
-            "Crash reports are saved on your computer. Nothing is ever sent "
-            "automatically — you choose whether to copy or email a report.")
+            "Crash reports (with the recent log) are saved on your computer. "
+            "Nothing is ever sent automatically — you choose whether to open a "
+            "pre-filled GitHub issue, copy, or email the report.")
         self.chk_crash.toggled.connect(
             lambda v: setattr(settings, "crash_reports_enabled", v))
         card.add(self.chk_crash)

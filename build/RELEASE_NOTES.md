@@ -1,3 +1,19 @@
+## MICO360 Doc Toolkit v6.9.1
+
+**Easier error reporting — straight to GitHub, still fully opt-in.**
+
+- The opt-in crash reporter can now **open a pre-filled GitHub issue** for you (title, error
+  and recent log already filled in) — you **review it and press Submit** yourself. Copy and
+  email options remain. As always, **nothing is sent automatically**.
+- Each crash now **bundles a copy of the most recent log** next to the saved report, so the
+  full context is easy to attach.
+
+> Why a pre-filled issue rather than instant submit? Auto-posting would mean shipping a
+> GitHub token inside the app (which could be extracted and misused). The pre-filled form
+> keeps you in control of exactly what's shared — no token, no surprises.
+
+---
+
 ## MICO360 Doc Toolkit v6.9.0
 
 **A much smaller installer, Arabic OCR, queue thumbnails — and tools grouped the way you work.**

@@ -76,20 +76,28 @@ def install_crash_guard(log) -> None:
             box = QMessageBox(QMessageBox.Warning, __app_name__,
                               "Something went wrong, but the app is still running.\n\n"
                               f"{exc_type.__name__}: {exc}\n\n"
-                              "A report was saved on your computer. You can send it to "
-                              "help us fix it — nothing is sent unless you choose to.")
-            b_email = box.addButton("Email report", QMessageBox.AcceptRole)
+                              "A report (with the recent log) was saved on your computer. "
+                              "You can report it to help us fix it — nothing is sent "
+                              "unless you choose to. \"Report on GitHub\" opens a "
+                              "pre-filled issue for you to review and submit.")
+            b_github = box.addButton("Report on GitHub", QMessageBox.AcceptRole)
+            b_email = box.addButton("Email report", QMessageBox.ActionRole)
             b_copy = box.addButton("Copy details", QMessageBox.ActionRole)
             box.addButton("Continue", QMessageBox.RejectRole)
             box.exec()
             clicked = box.clickedButton()
             if clicked is b_copy and report:
                 QApplication.clipboard().setText(report)
-            elif clicked is b_email and report:
+            elif clicked in (b_email, b_github) and report:
                 from PySide6.QtCore import QUrl
                 from PySide6.QtGui import QDesktopServices
                 from mico360.core import crash
-                QDesktopServices.openUrl(QUrl(crash.mailto_url(report)))
+                if clicked is b_github:
+                    url = crash.github_issue_url(
+                        crash.issue_title(exc_type, exc), report, path)
+                else:
+                    url = crash.mailto_url(report)
+                QDesktopServices.openUrl(QUrl(url))
         except Exception:
             pass
     sys.excepthook = _hook
