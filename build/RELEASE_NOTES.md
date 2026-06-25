@@ -26,6 +26,12 @@
 > GitHub token inside the app (which could be extracted and misused). The pre-filled form
 > keeps you in control of exactly what's shared — no token, no surprises.
 
+**Faster updates**
+- The in-app updater now downloads in larger 1 MB blocks and, on a fast connection,
+  **hunts for a faster download edge** if the one it landed on underperforms — so updates
+  (and the one-time engine / OCR-language downloads) finish quicker. Resume-on-drop and
+  checksum verification are unchanged.
+
 ---
 
 ## MICO360 Doc Toolkit v6.9.0

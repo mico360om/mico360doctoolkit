@@ -99,6 +99,27 @@ def main() -> int:
         check("bad checksum is rejected", "integrity" in str(exc).lower())
 
     srv.shutdown()
+
+    # --- adaptive faster-edge policy (pure, no network) ---------------------
+    FAST = updater._DL_FAST
+    FLOOR = updater._DL_MIN_SPEED
+    # No reconnect when there's nothing left to fetch.
+    check("no reconnect once the file is complete",
+          updater._should_reconnect(1, 1, has_remaining=False) is False)
+    # Absolute floor: a stalled/very slow edge always reconnects.
+    check("reconnects below the absolute slow floor",
+          updater._should_reconnect(FLOOR - 1, FLOOR - 1, True) is True)
+    # A genuinely slow connection (best is also slow) keeps streaming — no thrash.
+    check("slow connection does NOT thrash above the floor",
+          updater._should_reconnect(FLOOR + 1, FLOOR + 1, True) is False)
+    # A fast pipe that has degraded to <50% of its best chases a faster edge.
+    check("fast pipe reconnects when its edge degrades",
+          updater._should_reconnect(FAST * 0.4, FAST * 2, True) is True)
+    # A fast pipe holding near its best keeps streaming.
+    check("fast pipe stays put while healthy",
+          updater._should_reconnect(FAST * 1.8, FAST * 2, True) is False)
+    check("download uses 1 MB read chunks", updater._CHUNK >= (1 << 20))
+
     print()
     if failures:
         print(f"{len(failures)} check(s) failed: {', '.join(failures)}")

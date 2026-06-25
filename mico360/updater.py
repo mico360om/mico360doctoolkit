@@ -41,7 +41,7 @@ ATOM_FEED = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases.atom"
 DOWNLOAD_BASE = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest/download/"
 _HEADERS = {"User-Agent": f"MICO360-Doc-Toolkit/{__version__}",
             "Accept": "application/vnd.github+json"}
-_CHUNK = 256 * 1024
+_CHUNK = 1 << 20          # 1 MB reads — fewer loop iterations on a fast link
 
 
 @dataclass
@@ -275,9 +275,29 @@ def check_for_update(json_fetcher=_get_json) -> UpdateInfo | None:
 # connection (seen: 0.2–14 MB/s within seconds), so if a connection runs slow we
 # drop it and reconnect — resuming via HTTP Range — to chase a faster edge and to
 # survive stalls, without ever re-downloading the bytes we already have.
-_DL_WINDOW = 6.0            # seconds per throughput sample
-_DL_MIN_SPEED = 300 * 1024  # below this for a full window → reconnect
+_DL_WINDOW = 5.0            # seconds per throughput sample
+_DL_MIN_SPEED = 300 * 1024  # absolute floor: below this for a full window → reconnect
 _DL_MAX_STUCK = 6           # consecutive no-progress reconnects before giving up
+# Adaptive "faster-edge" hunt: if the connection has *demonstrated* it can go fast
+# (a window at/above _DL_FAST) but the current edge has since fallen below this
+# fraction of that best, drop and reconnect to chase a faster CDN edge. Because it
+# only triggers once a fast window has been seen, it never makes a genuinely slow
+# connection thrash — those keep streaming and only reconnect on the absolute floor.
+_DL_FAST = 2 * 1024 * 1024  # 2 MB/s — marks a "this pipe is fast" window
+_DL_DEGRADE_FRAC = 0.5      # reconnect if a fast pipe drops below half its best
+
+
+def _should_reconnect(speed: float, best: float, has_remaining: bool) -> bool:
+    """Decide whether to drop the current connection and resume on a fresh (hopefully
+    faster) CDN edge, given the latest window ``speed`` and the best window ``best``
+    seen so far. Pure function so the policy is unit-testable."""
+    if not has_remaining:
+        return False
+    if speed < _DL_MIN_SPEED:                       # stalled / very slow edge
+        return True
+    if best >= _DL_FAST and speed < best * _DL_DEGRADE_FRAC:
+        return True                                 # fast pipe stuck on a degraded edge
+    return False
 
 
 class _Cancelled(Exception):
@@ -309,6 +329,7 @@ def download(info: UpdateInfo, dest_dir: str | None = None,
 
     total: int | None = None
     stuck = 0
+    best_speed = 0.0          # best window throughput seen (persists across reconnects)
     while True:
         existing = os.path.getsize(part) if os.path.exists(part) else 0
         if total is not None and existing >= total > 0:
@@ -354,9 +375,12 @@ def download(info: UpdateInfo, dest_dir: str | None = None,
                             progress(done, total or 0)
                             emit_t, emit_b = now, done
                         if now - win_t >= _DL_WINDOW:
-                            if (win_b / (now - win_t) < _DL_MIN_SPEED
-                                    and total and done < total):
-                                break            # too slow → reconnect for a faster edge
+                            speed = win_b / (now - win_t)
+                            if speed > best_speed:
+                                best_speed = speed
+                            if _should_reconnect(speed, best_speed,
+                                                 bool(total and done < total)):
+                                break            # slow/degraded edge → chase a faster one
                             win_t, win_b = now, 0
                     if progress:                 # final position for this round
                         progress(done, total or 0)

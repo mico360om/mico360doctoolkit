@@ -29,7 +29,7 @@ LO_MSI_URL = (f"https://download.documentfoundation.org/libreoffice/stable/"
               f"{LO_VERSION}/win/x86_64/LibreOffice_{LO_VERSION}_Win_x86-64.msi")
 LO_DOWNLOAD_PAGE = "https://www.libreoffice.org/download/download-libreoffice/"
 
-_CHUNK = 256 * 1024
+_CHUNK = 1 << 20          # 1 MB reads — fewer iterations on a fast link
 _provision_lock = threading.Lock()
 
 
