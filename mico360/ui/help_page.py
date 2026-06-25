@@ -78,10 +78,13 @@ tool automatically.</p>
       · <i>Page 1</i>) and starting number.</li>
   <li><b>Sign PDF</b> — stamp a signature image on the last/first/every page.</li>
   <li><b>Edit Metadata</b> — set any document property: Title, Author, Subject,
-      Keywords, Creator, Producer, creation/modification dates, custom fields
-      (Company, Manager, Category, Comments), Copyright, document Language and the
-      Trapped flag — or tick <i>Remove all metadata</i> to strip everything before
-      sharing. Blank fields are left untouched.</li>
+      Keywords, Creator, Producer, creation/modification dates, named fields
+      (Company, Manager, Category, Comments), your own <i>custom</i> properties
+      (one <code>Key = Value</code> per line), Copyright, document Language and the
+      Trapped flag. Blank fields are left untouched. The <b>Privacy</b> menu can also
+      <i>Scrub identifying info</i> (clears Author/Creator/Producer/Company/Manager/
+      Comments and resets the dates, keeping Title/Subject/Keywords) or <i>Remove all
+      metadata</i> before sharing.</li>
   <li><b>Searchable PDF (OCR)</b> — add an invisible text layer to a scanned PDF so it
       becomes selectable and searchable (the look of the page is unchanged).</li>
   <li><b>PDF → …</b> — one tool to convert a PDF to <b>Word</b> (editable .docx; turn on

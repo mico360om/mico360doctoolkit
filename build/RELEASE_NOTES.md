@@ -8,8 +8,11 @@
   properties (**Company, Manager, Category, Comments**), **Copyright** (written to XMP),
   document **Language** (accessibility), the **Trapped** flag, and a "show Title instead of
   file name in the window bar" option. Blank fields are left untouched.
-- New **"Remove all metadata"** option strips every property plus XMP — ideal before
-  sharing a file.
+- Add your **own custom properties** — one `Key = Value` per line (shown in Acrobat's
+  Custom tab).
+- A **Privacy** menu: **Scrub identifying info** (clears Author/Creator/Producer/Company/
+  Manager/Comments and resets the dates, while keeping Title/Subject/Keywords), or
+  **Remove all metadata** (also strips XMP) — ideal before sharing a file.
 
 **Easier error reporting — straight to GitHub, still fully opt-in.**
 

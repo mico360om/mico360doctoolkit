@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPlainTextEdit,
     QPushButton,
     QRadioButton,
     QSizePolicy,
@@ -172,6 +173,12 @@ class OptionsWidget(QWidget):
             chk.setChecked(bool(default))
             chk.stateChanged.connect(self._apply_visibility)
             field = chk
+        elif opt.kind == "textarea":
+            te = QPlainTextEdit(str(default if default is not None else ""))
+            te.setPlaceholderText("Key = Value   (one per line)")
+            te.setFixedHeight(96)
+            te.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            field = te
         else:  # text
             le = QLineEdit(str(default if default is not None else ""))
             field = le
@@ -223,6 +230,8 @@ class OptionsWidget(QWidget):
                 out[opt.key] = ctrl.isChecked()
             elif isinstance(ctrl, _PosGrid):
                 out[opt.key] = ctrl.value()
+            elif isinstance(ctrl, QPlainTextEdit):
+                out[opt.key] = ctrl.toPlainText().strip()
             elif isinstance(ctrl, QLineEdit):
                 # Passwords are taken verbatim (never stripped).
                 out[opt.key] = (ctrl.text() if opt.key in self._password_keys

@@ -2200,21 +2200,43 @@ def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
                             overwrite=opt.get("overwrite", False),
                             numbered=opt.get("same_as_source", False))
 
-    # --- privacy: wipe everything --------------------------------------------
-    if opt.get("remove_all"):
-        try:
-            writer._info.get_object().clear()
-        except Exception:
-            pass
-        for key in ("/Metadata", "/Lang"):
-            if key in root:
+    # --- privacy presets (one-shot scrub; ignores the edit fields) -----------
+    privacy = str(opt.get("privacy", "") or "")
+    if privacy in ("all", "scrub"):
+        import datetime
+        info = writer._info.get_object()
+        if privacy == "all":
+            try:
+                info.clear()
+            except Exception:
+                pass
+            for key in ("/Metadata", "/Lang"):
+                if key in root:
+                    try:
+                        del root[key]
+                    except Exception:
+                        pass
+            msg = "Removed all metadata"
+        else:  # scrub: drop identifying fields, reset dates, drop XMP
+            for k in ("/Author", "/Creator", "/Producer", "/Company",
+                      "/Manager", "/Comments"):
+                if k in info:
+                    try:
+                        del info[k]
+                    except Exception:
+                        pass
+            stamp = create_string_object(_pdf_date(datetime.datetime.now()))
+            info[NameObject("/CreationDate")] = stamp
+            info[NameObject("/ModDate")] = stamp
+            if "/Metadata" in root:
                 try:
-                    del root[key]
+                    del root["/Metadata"]
                 except Exception:
                     pass
+            msg = "Scrubbed identifying metadata (kept Title/Subject/Keywords)"
         with open(out, "wb") as fh:
             writer.write(fh)
-        report(f"Removed all metadata → {out.name}")
+        report(f"{msg} → {out.name}")
         return [out]
 
     # --- Info dictionary: standard + custom string fields --------------------
@@ -2245,6 +2267,19 @@ def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
     if tr in ("True", "False", "Unknown"):
         meta[NameObject("/Trapped")] = NameObject("/" + tr)
         changed.append("trapped")
+
+    # Arbitrary custom properties — one "Key = Value" per line (Acrobat's Custom tab).
+    reserved = set(str_fields) | {"/CreationDate", "/ModDate", "/Trapped"}
+    for line in str(opt.get("custom", "") or "").splitlines():
+        line = line.strip()
+        if not line or "=" not in line:
+            continue
+        rawk, val = line.split("=", 1)
+        key = rawk.strip().lstrip("/").strip()
+        if not key or ("/" + key) in reserved:   # don't shadow the named fields
+            continue
+        meta[NameObject("/" + key)] = create_string_object(val.strip())
+        changed.append(key)
 
     if meta:
         try:

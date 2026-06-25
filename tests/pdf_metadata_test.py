@@ -57,6 +57,7 @@ def main() -> int:
         "manager": "The Boss", "category": "Reports", "comments": "hello world",
         "copyright": "© 2026 MICO360 <all rights>", "language": "en-US",
         "trapped": "Unknown", "show_title": True,
+        "custom": "Department = Finance\nProject Code = X-42\n/Title = ignored",
     }
     outs = _run(src, out_dir, opt)
     check("produces one output PDF", len(outs) == 1 and outs[0].exists())
@@ -77,6 +78,15 @@ def main() -> int:
     check("mod date is a PDF date", str(m.get("/ModDate", "")).startswith("D:2022"),
           str(m.get("/ModDate")))
     check("trapped is set", "Unknown" in str(m.get("/Trapped")), str(m.get("/Trapped")))
+
+    # custom properties (incl. a key with a space); a custom row that shadows a
+    # named field (/Title) is ignored.
+    check("custom property round-trips", str(m.get("/Department")) == "Finance",
+          str(m.get("/Department")))
+    check("custom key with a space round-trips", str(m.get("/Project Code")) == "X-42",
+          str(m.get("/Project Code")))
+    check("custom row can't overwrite a named field (/Title)",
+          str(m.get("/Title")) == "My Title", str(m.get("/Title")))
 
     root = r.trailer["/Root"]
     check("document language /Lang is set", str(root.get("/Lang")) == "en-US",
@@ -108,14 +118,28 @@ def main() -> int:
     except ProcessError as exc:
         check("invalid date raises a clear error", "date" in str(exc).lower())
 
-    # --- remove all ---------------------------------------------------------
-    stripped = _run(out, out_dir, {"remove_all": True})[0]
+    # --- privacy preset: scrub (keep Title/Subject/Keywords) ----------------
+    sc = PdfReader(str(_run(out, out_dir, {"privacy": "scrub"})[0])).metadata or {}
+    for gone in ("/Author", "/Creator", "/Producer", "/Company", "/Manager",
+                 "/Comments"):
+        check(f"scrub clears {gone}", gone not in sc or not str(sc.get(gone)).strip(),
+              f"{sc.get(gone)!r}")
+    check("scrub keeps the Title", str(sc.get("/Title")) == "My Title")
+    check("scrub keeps the Subject", str(sc.get("/Subject")) == "A subject")
+    check("scrub keeps the Keywords", str(sc.get("/Keywords")) == "alpha,beta")
+    check("scrub resets the creation date (not the original 2021)",
+          str(sc.get("/CreationDate", "")).startswith("D:")
+          and not str(sc.get("/CreationDate", "")).startswith("D:2021"),
+          str(sc.get("/CreationDate")))
+
+    # --- privacy preset: remove all -----------------------------------------
+    stripped = _run(out, out_dir, {"privacy": "all"})[0]
     rs = PdfReader(str(stripped))
     ms = rs.metadata or {}
     nonempty = {k: v for k, v in ms.items() if str(v).strip()}
-    check("remove_all clears the Info dictionary", not nonempty, str(nonempty))
+    check("remove-all clears the Info dictionary", not nonempty, str(nonempty))
     rroot = rs.trailer["/Root"]
-    check("remove_all drops XMP + /Lang",
+    check("remove-all drops XMP + /Lang",
           "/Metadata" not in rroot and "/Lang" not in rroot)
 
     # cleanup
