@@ -12,6 +12,7 @@ build/_work_onefile/
 build/_build_v5.ps1
 build/_build_v5.log
 dist/
+installer/          # compiled .exe installers (large; published via GitHub Releases)
 *.spec.bak
 *.tmp
 *.tmp.*
