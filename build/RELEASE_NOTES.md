@@ -1,3 +1,21 @@
+## MICO360 Doc Toolkit v6.9.2
+
+**macOS build fixes — feature-complete and installable.**
+
+- **Fixed the macOS build so it matches Windows.** The Mac app was missing three things
+  that had been added on Windows: the **Arabic OCR** dictionary, **HEIC** photo support,
+  and **Image → SVG** tracing. All three now ship in the `.dmg`.
+- **The Mac app is now ad-hoc code-signed**, which resolves the *"app is damaged / can't
+  be opened"* error on Apple Silicon. On first launch you still clear Gatekeeper the normal
+  way for an unsigned-developer app — **right-click → Open** (or run
+  `xattr -dr com.apple.quarantine "/Applications/MICO360 Doc Toolkit.app"`).
+- The macOS build now **self-verifies** in CI (it fails the build if any of those pieces
+  are missing), so this can't silently regress again.
+
+> Apple Silicon (M1/M2/M3+), macOS 11+. Intel Macs aren't supported by this build yet.
+
+---
+
 ## MICO360 Doc Toolkit v6.9.1
 
 **A complete metadata editor + easier error reporting.**

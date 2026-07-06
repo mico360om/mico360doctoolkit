@@ -27,19 +27,29 @@ datas = [
     (str(RES / "logo-w.png"), "mico360/resources"),
     (str(RES / "app.ico"), "mico360/resources"),
 ]
+
+# Bundled OCR language dictionaries (character sets for downloaded language packs,
+# e.g. Arabic). Must match the Windows spec or Arabic OCR fails on macOS.
+_OCR_DATA = ROOT / "mico360" / "core" / "ocr_data"
+if _OCR_DATA.is_dir():
+    for _f in _OCR_DATA.glob("*.txt"):
+        datas.append((str(_f), "mico360/core/ocr_data"))
+
 binaries = []
 hiddenimports = [
     "PySide6.QtNetwork",   # QLocalServer/QLocalSocket — single-instance guard
-    "fitz", "pypdf", "pptx", "PIL", "pdf2docx", "img2pdf",
+    "fitz", "pypdf", "pptx", "PIL", "pdf2docx", "img2pdf", "pillow_heif",
     "docx", "reportlab",
     "rapidocr_onnxruntime", "onnxruntime", "cv2", "numpy", "shapely", "pyclipper",
     "cryptography",
     "pdfplumber", "pdfminer", "openpyxl", "pypdfium2",
+    "vtracer",             # Image -> SVG vector tracing
 ]
 
 for pkg in ("pdf2docx", "fontTools", "pptx", "reportlab", "docx",
             "rapidocr_onnxruntime", "onnxruntime", "cryptography",
-            "pdfplumber", "pdfminer", "openpyxl", "pypdfium2"):
+            "pdfplumber", "pdfminer", "openpyxl", "pypdfium2", "vtracer",
+            "pillow_heif"):
     try:
         d, b, h = collect_all(pkg)
         datas += d
