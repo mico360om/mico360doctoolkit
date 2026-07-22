@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 from mico360 import __app_name__
 from mico360.config import settings
 from mico360.core.tools import TOOLS_BY_ID
-from mico360.ui.widgets import Card, section_label
+from mico360.ui.widgets import Card, section_label, tip
 
 QUICK_ACTIONS = ["pdf_compress", "pdf_merge", "pdf_convert", "office_to_pdf",
                  "pdf_ocr", "image_compress", "pdf_organize", "to_markdown"]
@@ -67,7 +67,8 @@ class Tile(QPushButton):
         lay.addWidget(icon)
         lay.addWidget(name)
         if tool:
-            self.setToolTip(tool.tagline)
+            self.setAccessibleName(tool.name)
+            tip(self, tool.tagline)
 
 
 class DashboardPage(QWidget):
@@ -177,9 +178,10 @@ class DashboardPage(QWidget):
         lst = QListWidget()
         lst.setObjectName("FileList")
         lst.setMaximumHeight(180)
+        lst.setAccessibleName("Recent files")
         for p in recents[:10]:
             it = QListWidgetItem(f"📄  {Path(p).name}")
-            it.setToolTip(p)
+            it.setToolTip(f"{p}\nDouble-click to show this file in its folder.")
             it.setData(Qt.UserRole, p)
             lst.addItem(it)
         lst.itemActivated.connect(self._open_recent)
@@ -188,6 +190,8 @@ class DashboardPage(QWidget):
         clear = QPushButton("Clear recent")
         clear.setObjectName("Ghost")
         clear.setCursor(Qt.PointingHandCursor)
+        tip(clear, "Clear the Recent files and Last activity lists. "
+                   "No files are deleted.")
         clear.clicked.connect(lambda: (settings.clear_recent(), self.refresh()))
         self._recent_card.add(clear)
 

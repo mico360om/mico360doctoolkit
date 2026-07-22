@@ -138,6 +138,17 @@ class FileListWidget(QListWidget):
         painter.end()
 
 
+def tip(widget, text: str) -> None:
+    """Set an explanatory tooltip that is both hover- and assistive-tech
+    friendly: the hover tooltip word-wraps (rich text) instead of stretching
+    into one screen-wide line, and the same text is exposed to screen readers
+    via the accessible description. Use for static explanations; dynamic data
+    tooltips (file paths, counts) should keep plain ``setToolTip``."""
+    import html
+    widget.setToolTip(f"<qt>{html.escape(text)}</qt>")   # <qt> => word-wrapped
+    widget.setAccessibleDescription(text)
+
+
 def clamp_to_screen(widget, pref_w: int, pref_h: int, margin: int = 48) -> None:
     """Size a top-level widget (e.g. a dialog) to its preferred size but never
     larger than the screen it's on — so it can't open partly off-screen on small
@@ -206,17 +217,30 @@ class Chip(QLabel):
     Geometry comes from ``#Chip`` and the colour from a dynamic ``chipState``
     property selector, so both combine in one rule set (see theme.py)."""
 
+    # What each state means, surfaced as a tooltip on the badge itself.
+    _STATE_TIPS = {
+        "ready": "Status: ready — add files and click Start.",
+        "run": "Status: working — the queue is being processed.",
+        "ok": "Status: done — every file finished successfully.",
+        "err": "Status: finished with errors — failed rows show the reason; "
+               "right-click one to retry.",
+    }
+
     def __init__(self, text: str = "Ready", state: str = "ready",
                  parent: QWidget | None = None):
         super().__init__(text, parent)
         self.setObjectName("Chip")
         self.setAlignment(Qt.AlignCenter)
+        self.setAccessibleName("Status")
         self.set_state(state, text)
 
     def set_state(self, state: str, text: str | None = None) -> None:
         self.setProperty("chipState", state)
         if text is not None:
             self.setText(text)
+        state_tip = self._STATE_TIPS.get(state)
+        if state_tip:
+            tip(self, state_tip)
         self.style().unpolish(self)
         self.style().polish(self)
 
@@ -345,10 +369,13 @@ class DropArea(QFrame):
         b_files = QPushButton("Browse files")
         b_files.setObjectName("Ghost")
         b_files.setCursor(Qt.PointingHandCursor)
+        tip(b_files, "Pick one or more files to add to the queue.")
         b_files.clicked.connect(self.browseFiles.emit)
         b_folder = QPushButton("Browse folder")
         b_folder.setObjectName("Ghost")
         b_folder.setCursor(Qt.PointingHandCursor)
+        tip(b_folder, "Pick a folder — it is scanned (including subfolders) "
+                      "for every supported file.")
         b_folder.clicked.connect(self.browseFolder.emit)
         btns.addWidget(b_files)
         btns.addWidget(b_folder)
@@ -385,12 +412,13 @@ class DropArea(QFrame):
         b_files = QPushButton("Browse")
         b_files.setObjectName("Ghost")
         b_files.setCursor(Qt.PointingHandCursor)
-        b_files.setToolTip("Browse for files")
+        tip(b_files, "Pick one or more files to add to the queue.")
         b_files.clicked.connect(self.browseFiles.emit)
         b_folder = QPushButton("Folder")
         b_folder.setObjectName("Ghost")
         b_folder.setCursor(Qt.PointingHandCursor)
-        b_folder.setToolTip("Browse for a folder (scanned for supported files)")
+        tip(b_folder, "Pick a folder — it is scanned (including subfolders) "
+                      "for every supported file.")
         b_folder.clicked.connect(self.browseFolder.emit)
         lay.addWidget(b_files, 0, Qt.AlignVCenter)
         lay.addWidget(b_folder, 0, Qt.AlignVCenter)
@@ -425,26 +453,37 @@ class NavItem(QPushButton):
     """A checkable sidebar entry that shows an icon + label, and collapses to
     an icon-only button when the sidebar is collapsed."""
 
-    def __init__(self, glyph: str, label: str, parent: QWidget | None = None):
+    def __init__(self, glyph: str, label: str, description: str = "",
+                 parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("NavItem")
         self.setCheckable(True)
         self.setCursor(Qt.PointingHandCursor)
         self._glyph = glyph
         self._label = label
+        self._description = description
         self.setMinimumHeight(40)
         # Keep a stable screen-reader name even when collapsed to an icon.
         self.setAccessibleName(label)
+        if description:
+            self.setAccessibleDescription(description)
         self.set_collapsed(False)
 
     def set_collapsed(self, collapsed: bool) -> None:
         if collapsed:
+            # Icon-only: the tooltip must carry the name (plus what it does).
             self.setText(self._glyph)
-            self.setToolTip(self._label)
+            text = (f"{self._label} — {self._description}" if self._description
+                    else self._label)
+            tip(self, text)
             self.setStyleSheet("text-align: center;")
         else:
+            # Label visible: only the description adds information.
             self.setText(f"  {self._glyph}   {self._label}")
-            self.setToolTip("")
+            if self._description:
+                tip(self, self._description)
+            else:
+                self.setToolTip("")
             self.setStyleSheet("text-align: left;")
 
 

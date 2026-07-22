@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from mico360 import __version__
 from mico360.config import settings
 from mico360.paths import resource_path
-from mico360.ui.widgets import NavItem
+from mico360.ui.widgets import NavItem, tip
 
 EXPANDED_W = 236
 COLLAPSED_W = 66
@@ -79,6 +79,9 @@ class Sidebar(QWidget):
         self._search.setObjectName("NavSearch")
         self._search.setPlaceholderText("Search tools…")
         self._search.setClearButtonEnabled(True)
+        self._search.setAccessibleName("Search tools")
+        tip(self._search, "Type part of a tool's name to filter the list — "
+                          "clear the box to show every tool again.")
         self._search.textChanged.connect(self._on_search)
         sw.addWidget(self._search)
         root.addWidget(self._search_wrap)
@@ -107,6 +110,8 @@ class Sidebar(QWidget):
         btn = QPushButton()
         btn.setObjectName("NavSection")
         btn.setCursor(Qt.PointingHandCursor)
+        btn.setAccessibleName(f"{name} section")
+        tip(btn, f"Click to collapse or expand the {name} section.")
         grp = {"name": name, "header": btn, "items": [], "collapsed": False}
         btn.clicked.connect(lambda _=False, g=grp: self._toggle_group(g))
         self._groups.append(grp)
@@ -115,8 +120,9 @@ class Sidebar(QWidget):
         self._update_section_text(grp)
         self._nav.addWidget(btn)
 
-    def add_item(self, glyph: str, label: str, page_index: int) -> NavItem:
-        item = NavItem(glyph, label)
+    def add_item(self, glyph: str, label: str, page_index: int,
+                 description: str = "") -> NavItem:
+        item = NavItem(glyph, label, description)
         item.clicked.connect(lambda: self.navigated.emit(page_index))
         item._page_index = page_index  # type: ignore[attr-defined]
         item._group = self._cur_group  # type: ignore[attr-defined]

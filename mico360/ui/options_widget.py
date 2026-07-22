@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 
 from mico360.config import settings
 from mico360.core.tools import Option, Tool
+from mico360.ui.widgets import tip
 
 
 class _PosGrid(QWidget):
@@ -184,6 +185,16 @@ class OptionsWidget(QWidget):
             field = le
 
         self._controls[opt.key] = read_widget if read_widget is not None else field
+
+        # Accessibility + hover help, generated from the spec: the control is
+        # named after its label for screen readers, and the option's hint (when
+        # it has one) doubles as a word-wrapped tooltip on the control itself —
+        # so the explanation is available right under the pointer, not only in
+        # the small hint line below. Obvious, hint-less options get no tooltip.
+        for w in {field, read_widget} - {None}:
+            w.setAccessibleName(opt.label)
+            if opt.hint:
+                tip(w, opt.hint)
 
         if opt.kind == "bool":
             # Span the whole row so the checkbox sits left-aligned with its

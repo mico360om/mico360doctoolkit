@@ -27,7 +27,7 @@ from mico360.config import settings
 from mico360.core.deps import find_ghostscript, find_libreoffice
 from mico360.paths import logs_dir
 from mico360.theme import palette
-from mico360.ui.widgets import Card, section_label
+from mico360.ui.widgets import Card, section_label, tip
 
 
 class SettingsPage(QWidget):
@@ -96,6 +96,9 @@ class SettingsPage(QWidget):
         self.btn_check = QPushButton("Check for updates")
         self.btn_check.setObjectName("Ghost")
         self.btn_check.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_check,
+            "Check GitHub for a newer version right now. Nothing is installed "
+            "without your confirmation.")
         self.btn_check.clicked.connect(self._check_updates)
         row.addWidget(self.btn_check)
         self.update_status = QLabel("")
@@ -106,6 +109,9 @@ class SettingsPage(QWidget):
         w = QWidget(); w.setLayout(row); card.add(w)
 
         self.chk_auto_update = QCheckBox("Check for updates automatically on startup")
+        tip(self.chk_auto_update,
+            "Runs a quiet check a few seconds after the app opens. You're only "
+            "prompted when a new version actually exists.")
         self.chk_auto_update.setChecked(settings.auto_check_updates)
         self.chk_auto_update.stateChanged.connect(
             lambda: setattr(settings, "auto_check_updates",
@@ -115,7 +121,7 @@ class SettingsPage(QWidget):
         self.chk_crash = QCheckBox(
             "Offer to report errors when something goes wrong")
         self.chk_crash.setChecked(settings.crash_reports_enabled)
-        self.chk_crash.setToolTip(
+        tip(self.chk_crash,
             "Crash reports (with the recent log) are saved on your computer. "
             "Nothing is ever sent automatically — you choose whether to open a "
             "pre-filled GitHub issue, copy, or email the report.")
@@ -176,7 +182,10 @@ class SettingsPage(QWidget):
         for label, getter in (("About Us", legal.about_us),
                               ("Terms & Conditions", legal.terms_and_conditions),
                               ("Privacy Policy", legal.privacy_policy)):
-            b = QPushButton(label)
+            # "&" in a button label is a Qt mnemonic marker (it would render as
+            # "Terms _Conditions"); escape it so the ampersand shows literally.
+            b = QPushButton(label.replace("&", "&&"))
+            tip(b, f"Read the {label} in a window.")
             b.setObjectName("Ghost")
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _=False, t=label, g=getter: self._show_doc(t, g()))
@@ -212,6 +221,10 @@ class SettingsPage(QWidget):
         self.theme_combo.addItem("System", "system")
         self.theme_combo.addItem("Light", "light")
         self.theme_combo.addItem("Dark", "dark")
+        self.theme_combo.setAccessibleName("Theme")
+        tip(self.theme_combo,
+            "System follows your Windows light/dark appearance automatically; "
+            "Light or Dark pins a fixed look.")
         self.sync_theme_combo()
         self.theme_combo.currentIndexChanged.connect(
             lambda: self.themeChanged.emit(self.theme_combo.currentData()))
@@ -236,18 +249,27 @@ class SettingsPage(QWidget):
         row.addWidget(QLabel("Default output folder"))
         self.out_edit = QLineEdit(settings.output_dir)
         self.out_edit.setReadOnly(True)
+        self.out_edit.setAccessibleName("Default output folder")
+        self.out_edit.setToolTip(settings.output_dir)   # dynamic: the full path
         btn = QPushButton("Change…"); btn.setObjectName("Ghost")
+        tip(btn, "Choose where results are saved unless a tool is set to "
+                 "save beside the originals.")
         btn.clicked.connect(self._choose_output)
         row.addWidget(self.out_edit, 1); row.addWidget(btn)
         w = QWidget(); w.setLayout(row); card.add(w)
 
         self.chk_open = QCheckBox("Open output folder when a batch finishes")
+        tip(self.chk_open, "After a run completes, the folder with the results "
+                           "opens automatically so they're easy to find.")
         self.chk_open.setChecked(settings.open_output_when_done)
         self.chk_open.stateChanged.connect(
             lambda: setattr(settings, "open_output_when_done", self.chk_open.isChecked()))
         card.add(self.chk_open)
 
         self.chk_overwrite = QCheckBox("Overwrite existing files by default")
+        tip(self.chk_overwrite,
+            "When an output file already exists, replace it instead of adding "
+            "a number to the name. Careful: replaced files are not recoverable.")
         self.chk_overwrite.setChecked(settings.overwrite)
         self.chk_overwrite.stateChanged.connect(
             lambda: setattr(settings, "overwrite", self.chk_overwrite.isChecked()))
@@ -262,6 +284,11 @@ class SettingsPage(QWidget):
         self.workers = QSpinBox()
         self.workers.setRange(0, 64)
         self.workers.setValue(settings.max_workers)
+        self.workers.setAccessibleName("Parallel workers")
+        tip(self.workers,
+            "How many files are processed at the same time. 0 = automatic "
+            "(CPU cores − 1). Lower it if the PC feels sluggish during big "
+            "batches; raising it beyond your core count won't help.")
         self.workers.valueChanged.connect(
             lambda v: setattr(settings, "max_workers", v))
         row.addWidget(self.workers); row.addStretch(1)
@@ -274,6 +301,10 @@ class SettingsPage(QWidget):
         # --- GPU OCR ---------------------------------------------------------
         self.chk_gpu_ocr = QCheckBox("Use the GPU for OCR when available "
                                      "(DirectML — falls back to CPU)")
+        tip(self.chk_gpu_ocr,
+            "Runs text recognition on your graphics card (any NVIDIA / AMD / "
+            "Intel GPU) — usually several times faster. Safe to leave on: PCs "
+            "without a usable GPU automatically use the CPU.")
         self.chk_gpu_ocr.setChecked(settings.ocr_use_gpu)
         self.chk_gpu_ocr.toggled.connect(
             lambda v: setattr(settings, "ocr_use_gpu", v))
@@ -295,9 +326,16 @@ class SettingsPage(QWidget):
         for lid, label in ocr_models.language_choices():
             if not ocr_models.language(lid).builtin:   # only downloadable packs
                 self.ocr_lang_combo.addItem(label, lid)
+        self.ocr_lang_combo.setAccessibleName("OCR language to download")
+        tip(self.ocr_lang_combo,
+            "Languages beyond English/Latin need a small recognition model. "
+            "Pick one here to fetch it ahead of time.")
         self.btn_ocr_lang = QPushButton("Download language")
         self.btn_ocr_lang.setObjectName("Ghost")
         self.btn_ocr_lang.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_ocr_lang,
+            "Download the selected OCR language now (~8 MB, one time) so it's "
+            "ready to use offline — otherwise it downloads on first use.")
         self.btn_ocr_lang.clicked.connect(self._download_ocr_language)
         lrow.addWidget(self.ocr_lang_combo, 1)
         lrow.addWidget(self.btn_ocr_lang)
@@ -425,11 +463,18 @@ class SettingsPage(QWidget):
         self.btn_engine = QPushButton("Download engine now")
         self.btn_engine.setObjectName("Ghost")
         self.btn_engine.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_engine,
+            "Fetch the LibreOffice conversion engine now (~340 MB, one time) "
+            "instead of waiting for the first Office conversion. It survives "
+            "app updates.")
         self.btn_engine.clicked.connect(self._download_engine)
         erow.addWidget(self.btn_engine); erow.addStretch(1)
         ew = QWidget(); ew.setLayout(erow); card.add(ew)
         self.chk_auto_engine = QCheckBox(
             "Download it automatically the first time it's needed")
+        tip(self.chk_auto_engine,
+            "If off, Office → PDF and Document → Markdown will ask you to "
+            "install LibreOffice yourself (or download the engine here).")
         self.chk_auto_engine.setChecked(settings.auto_download_engine)
         self.chk_auto_engine.toggled.connect(
             lambda v: setattr(settings, "auto_download_engine", v))
@@ -439,8 +484,12 @@ class SettingsPage(QWidget):
 
         btns = QHBoxLayout()
         detect = QPushButton("Auto-detect"); detect.setObjectName("Ghost")
+        tip(detect, "Search the standard install locations for Ghostscript "
+                    "and LibreOffice and fill in the paths above.")
         detect.clicked.connect(self._detect)
         openlogs = QPushButton("Open logs folder"); openlogs.setObjectName("Ghost")
+        tip(openlogs, "Open the folder with the app's log files — useful when "
+                      "reporting a problem.")
         openlogs.clicked.connect(self._open_logs)
         btns.addWidget(detect); btns.addWidget(openlogs); btns.addStretch(1)
         w = QWidget(); w.setLayout(btns); card.add(w)
@@ -456,7 +505,11 @@ class SettingsPage(QWidget):
         box.addWidget(QLabel(label))
         row = QHBoxLayout()
         edit.setPlaceholderText(f"Path to {exe} (leave blank to auto-detect)")
+        edit.setAccessibleName(label)
+        tip(edit, f"Full path to {exe}. Leave blank to auto-detect — a manual "
+                  "path here overrides detection.")
         btn = QPushButton("Browse…"); btn.setObjectName("Ghost")
+        tip(btn, f"Locate {exe} on disk manually.")
 
         def browse():
             f, _ = QFileDialog.getOpenFileName(self, f"Locate {exe}", "",
@@ -484,6 +537,7 @@ class SettingsPage(QWidget):
                                                   settings.output_dir)
         if folder:
             self.out_edit.setText(folder)
+            self.out_edit.setToolTip(folder)
             settings.output_dir = folder
 
     def _detect(self) -> None:

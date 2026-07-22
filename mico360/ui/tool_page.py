@@ -44,7 +44,7 @@ from mico360.ui.file_collector import collect_files
 from mico360.ui.options_widget import OptionsWidget
 from mico360.ui.widgets import (
     ROLE_NAME, ROLE_STATE, ROLE_SUB, Card, Chip, DropArea, FileListWidget,
-    QueueRowDelegate, ResponsiveRow, section_label)
+    QueueRowDelegate, ResponsiveRow, section_label, tip)
 
 log = get_logger("mico360.ui")
 
@@ -136,6 +136,9 @@ class ToolPage(QWidget):
         self.log_view.setReadOnly(True)
         self.log_view.setMinimumHeight(80)
         self.log_view.setMaximumHeight(132)
+        self.log_view.setAccessibleName("Run activity")
+        tip(self.log_view, "Messages from the current run on this page. "
+                           "The full history is on the Activity page.")
         log_card.add(self.log_view)
         root.addWidget(log_card)
 
@@ -176,8 +179,8 @@ class ToolPage(QWidget):
         self.btn_fav.setProperty("pinned", "true" if on else "false")
         self.btn_fav.style().unpolish(self.btn_fav)
         self.btn_fav.style().polish(self.btn_fav)
-        self.btn_fav.setToolTip("Unpin from favourites" if on
-                                else "Pin to favourites (shown on Home)")
+        tip(self.btn_fav, "Unpin this tool from your favourites." if on
+            else "Pin this tool to your favourites — it appears on the Home page.")
 
     def _toggle_favorite(self) -> None:
         settings.toggle_favorite(self.tool.id)
@@ -224,9 +227,10 @@ class ToolPage(QWidget):
         self.file_list.setDragDropMode(QAbstractItemView.InternalMove)
         self.file_list.setDefaultDropAction(Qt.MoveAction)
         self.file_list.model().rowsMoved.connect(self._sync_order_from_list)
-        self.file_list.setToolTip(
-            "Drag to reorder. Double-click a finished row to open its output. "
-            "Right-click for more.")
+        tip(self.file_list,
+            "Drag rows to reorder. Double-click a finished row to open its "
+            "output. Right-click for more actions (retry, duplicate, delete…). "
+            "Del removes the selected rows.")
         self.file_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.file_list.customContextMenuRequested.connect(self._file_menu)
         from PySide6.QtGui import QKeySequence, QShortcut
@@ -249,25 +253,28 @@ class ToolPage(QWidget):
         self.btn_add = QPushButton("Add")
         self.btn_add.setObjectName("Subtle")
         self.btn_add.setCursor(Qt.PointingHandCursor)
-        self.btn_add.setToolTip("Add files to the queue.")
+        tip(self.btn_add, "Add files to the queue.")
         self.btn_add.clicked.connect(self._browse_files)
 
         self.btn_remove_sel = QPushButton("Remove")
         self.btn_remove_sel.setObjectName("Subtle")
         self.btn_remove_sel.setCursor(Qt.PointingHandCursor)
-        self.btn_remove_sel.setToolTip("Remove the selected rows from the queue (Del).")
+        tip(self.btn_remove_sel,
+            "Remove the selected rows from the queue (Del). "
+            "The files themselves are not touched.")
         self.btn_remove_sel.clicked.connect(self._remove_selected)
 
         self.btn_remove_fin = QPushButton("Remove done")
         self.btn_remove_fin.setObjectName("Subtle")
         self.btn_remove_fin.setCursor(Qt.PointingHandCursor)
-        self.btn_remove_fin.setToolTip("Remove every finished row (done or failed) from the queue.")
+        tip(self.btn_remove_fin,
+            "Remove every finished row (done or failed) from the queue.")
         self.btn_remove_fin.clicked.connect(self._remove_finished)
 
         self.btn_clear = QPushButton("Clear")
         self.btn_clear.setObjectName("Subtle")
         self.btn_clear.setCursor(Qt.PointingHandCursor)
-        self.btn_clear.setToolTip("Empty the queue.")
+        tip(self.btn_clear, "Empty the whole queue. Your files stay on disk.")
         self.btn_clear.clicked.connect(self._clear)
 
         bar.addWidget(self.btn_add)
@@ -295,13 +302,15 @@ class ToolPage(QWidget):
         btn_out = QPushButton("Change")
         btn_out.setObjectName("Ghost")
         btn_out.setCursor(Qt.PointingHandCursor)
+        tip(btn_out, "Choose the folder where results are saved "
+                     "(also becomes the default for other tools).")
         btn_out.clicked.connect(self._choose_output)
         out_row.addWidget(self.out_edit, 1)
         out_row.addWidget(btn_out)
         card.add_layout(out_row)
 
         self.chk_same = QCheckBox("Save beside originals")
-        self.chk_same.setToolTip(
+        tip(self.chk_same,
             "Saves each result in the same folder as its source, named "
             '"name (1).ext", "name (2).ext", … so your originals are never changed.')
         self.chk_same.setChecked(settings.same_as_source)
@@ -310,9 +319,9 @@ class ToolPage(QWidget):
         card.add(self.chk_same)
 
         self.chk_overwrite = QCheckBox("Overwrite same-named files")
-        self.chk_overwrite.setToolTip(
+        tip(self.chk_overwrite,
             "When an output file already exists, replace it instead of adding a "
-            "number to the name.")
+            "number to the name. Careful: the replaced file is not recoverable.")
         self.chk_overwrite.setChecked(settings.overwrite)
         card.add(self.chk_overwrite)
 
@@ -327,6 +336,8 @@ class ToolPage(QWidget):
         self.progress = QProgressBar()
         self.progress.setValue(0)
         self.progress.setTextVisible(True)
+        self.progress.setAccessibleName("Batch progress")
+        tip(self.progress, "Overall progress across every file in this run.")
         card.add(self.progress)
 
         # "Current: <file>" — full name, elided to the panel width with the full
@@ -346,17 +357,22 @@ class ToolPage(QWidget):
         self.btn_start = QPushButton("Start")
         self.btn_start.setObjectName("Primary")
         self.btn_start.setCursor(Qt.PointingHandCursor)
-        self.btn_start.setToolTip(f"Start {self.tool.name}")
+        tip(self.btn_start,
+            f"Run {self.tool.name} on every pending file in the queue. "
+            "Rows already done are skipped until you retry them.")
         self.btn_start.clicked.connect(self.start)
         self.btn_open = QPushButton("Open output")
         self.btn_open.setObjectName("Ghost")
         self.btn_open.setCursor(Qt.PointingHandCursor)
-        self.btn_open.setToolTip("Open the folder of the last results.")
+        tip(self.btn_open, "Show the results of the last run in their folder.")
         self.btn_open.setEnabled(False)
         self.btn_open.clicked.connect(self._open_last_output)
         self.btn_cancel = QPushButton("Cancel")
         self.btn_cancel.setObjectName("Ghost")
         self.btn_cancel.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_cancel,
+            "Stop the run. Files already being processed finish first; "
+            "completed results are kept.")
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.clicked.connect(self._cancel)
         actions.addWidget(self.btn_start, 1)

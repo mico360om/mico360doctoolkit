@@ -323,23 +323,32 @@ class UpdateDialog(QDialog):
 
         # --- buttons ---------------------------------------------------
         btns = QHBoxLayout()
+        from mico360.ui.widgets import tip
         self.btn_page = QPushButton("Open on GitHub")
         self.btn_page.setObjectName("Ghost")
         self.btn_page.setCursor(Qt.PointingHandCursor)
-        self.btn_page.setToolTip(f"Open {updater.REPO_SHORT} to download manually")
+        tip(self.btn_page, f"Open {updater.REPO_SHORT} in your browser to "
+                           "download the installer manually.")
         self.btn_page.clicked.connect(self._open_page)
         self.btn_later = QPushButton("Later")
         self.btn_later.setObjectName("Ghost")
         self.btn_later.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_later, "Skip this update for now — you'll be reminded "
+                            "on a future launch.")
         self.btn_later.clicked.connect(self.reject)
         self.btn_retry = QPushButton("Retry")
         self.btn_retry.setObjectName("Ghost")
         self.btn_retry.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_retry, "Try the download again — it resumes from where "
+                            "it stopped.")
         self.btn_retry.setVisible(False)
         self.btn_retry.clicked.connect(self._start_download)
         self.btn_install = QPushButton("Download && Install")
         self.btn_install.setObjectName("Primary")
         self.btn_install.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_install,
+            "Download the update (checksum-verified) and install it now. "
+            "The app closes and restarts automatically.")
         self.btn_install.setDefault(True)
         self.btn_install.clicked.connect(self._start_download)
         btns.addWidget(self.btn_page)

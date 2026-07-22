@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 
 from mico360.logging_setup import bridge
 from mico360.paths import logs_dir
-from mico360.ui.widgets import Card
+from mico360.ui.widgets import Card, tip
 
 
 class LogPage(QWidget):
@@ -30,9 +30,12 @@ class LogPage(QWidget):
         header.addStretch(1)
         btn_open = QPushButton("Open logs folder"); btn_open.setObjectName("Ghost")
         btn_open.setCursor(Qt.PointingHandCursor)
+        tip(btn_open, "Open the folder with the app's log files on disk — "
+                      "useful when reporting a problem.")
         btn_open.clicked.connect(self._open_logs)
         btn_clear = QPushButton("Clear"); btn_clear.setObjectName("Ghost")
         btn_clear.setCursor(Qt.PointingHandCursor)
+        tip(btn_clear, "Clear this view only — the log files on disk are kept.")
         btn_clear.clicked.connect(lambda: self.view.clear())
         header.addWidget(btn_open); header.addWidget(btn_clear)
         root.addLayout(header)

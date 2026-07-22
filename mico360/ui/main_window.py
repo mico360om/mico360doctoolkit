@@ -208,7 +208,8 @@ class MainWindow(QMainWindow):
         # Home / Dashboard (the default landing page).
         self.sidebar.add_section("Home")
         self._factories[0] = self._build_dashboard
-        self.sidebar.add_item("🏠", "Home", 0)
+        self.sidebar.add_item("🏠", "Home", 0,
+                              "Quick actions, favourites and recent files.")
         self._titles[0] = "Home"
         page_index = 1
 
@@ -216,24 +217,28 @@ class MainWindow(QMainWindow):
             self.sidebar.add_section(group_name)
             for tool in tools:
                 self._factories[page_index] = (lambda t=tool: self._build_tool_page(t))
-                self.sidebar.add_item(tool.icon, tool.name, page_index)
+                # The tagline doubles as the nav tooltip / screen-reader hint.
+                self.sidebar.add_item(tool.icon, tool.name, page_index, tool.tagline)
                 self._titles[page_index] = tool.name
                 self._tool_index[tool.id] = page_index
                 page_index += 1
 
         self.sidebar.add_section("System")
         self._factories[page_index] = self._build_settings_page
-        self.sidebar.add_item("⚙", "Settings", page_index)
+        self.sidebar.add_item("⚙", "Settings", page_index,
+                              "Theme, output folder, performance and updates.")
         self._titles[page_index] = "Settings"
         page_index += 1
 
         self._factories[page_index] = lambda: self.log_page
-        self.sidebar.add_item("📜", "Activity", page_index)
+        self.sidebar.add_item("📜", "Activity", page_index,
+                              "Everything the app has done this session.")
         self._titles[page_index] = "Activity log"
         page_index += 1
 
         self._factories[page_index] = self._build_help_page
-        self.sidebar.add_item("❔", "Help", page_index)
+        self.sidebar.add_item("❔", "Help", page_index,
+                              "How each tool works, plus About and legal info.")
         self._titles[page_index] = "Help"
         page_index += 1
 
