@@ -21,19 +21,20 @@ from PySide6.QtWidgets import (
 
 from mico360 import __app_name__
 from mico360.config import settings
-from mico360.core.tools import TOOLS_BY_ID
+from mico360.core.tools import IMAGES, OFFICE, PDF, SVG, TOOLS_BY_ID
 from mico360.ui.widgets import Card, section_label, tip
 
 QUICK_ACTIONS = ["pdf_compress", "pdf_merge", "pdf_convert", "office_to_pdf",
                  "pdf_ocr", "image_compress", "pdf_organize", "to_markdown"]
 
-# Route a dropped file extension to a sensible default tool.
+# Route a dropped file extension to a sensible default tool. The extension sets
+# come straight from the tool registry so this can never drift out of sync with
+# what the tools actually accept (e.g. HEIC photos route to Compress Image).
 _ROUTES = [
-    ({".pdf"}, "pdf_compress"),
-    ({".doc", ".docx", ".odt", ".rtf"}, "office_to_pdf"),
-    ({".xlsx", ".xls", ".ods", ".csv"}, "office_to_pdf"),
-    ({".pptx", ".ppt", ".odp"}, "office_to_pdf"),
-    ({".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}, "image_compress"),
+    (PDF, "pdf_compress"),
+    (OFFICE, "office_to_pdf"),
+    (IMAGES, "image_compress"),
+    (SVG, "svg_to_image"),
 ]
 
 
