@@ -491,7 +491,10 @@ class ToolPage(QWidget):
 
     @files.setter
     def files(self, paths) -> None:
-        self.items = [QueueItem(path=Path(p)) for p in paths]
+        # Cache the size like add_paths does, so rows show their real size (not
+        # "?") and the queue's total-bytes summary counts them.
+        self.items = [QueueItem(path=Path(p), size=_safe_size(Path(p)))
+                      for p in paths]
         self._refresh_list()
 
     @property
@@ -502,7 +505,7 @@ class ToolPage(QWidget):
         for it in self.items:
             if it.path == p:
                 return _StatusProxy(it)
-        it = QueueItem(path=Path(p))
+        it = QueueItem(path=Path(p), size=_safe_size(Path(p)))
         self.items.append(it)
         return _StatusProxy(it)
 
@@ -777,7 +780,9 @@ class ToolPage(QWidget):
         for it in self.items:
             new_list.append(it)
             if it.id in by_id:
-                copy = QueueItem(path=it.path)
+                # Carry the cached size across, else the copy shows "?" and is
+                # left out of the queue's total-size summary.
+                copy = QueueItem(path=it.path, size=it.size)
                 new_list.append(copy)
                 new_ids.add(copy.id)
         self.items = new_list

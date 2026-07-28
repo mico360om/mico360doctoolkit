@@ -93,8 +93,30 @@ _FALLBACK_DPI = {"low": 200, "medium": 130, "high": 90}
 _FALLBACK_QUALITY = {"low": 80, "medium": 60, "high": 45}
 
 
+def _require_readable_pdf(src: Path) -> None:
+    """Fail fast with a friendly message when a PDF can't be opened.
+
+    PyMuPDF raises technical errors (``FileDataError: Failed to open file …``)
+    for corrupt or password-protected files. Tools that read with pypdf get a
+    clear message from :func:`_open_reader`; this gives the PyMuPDF-based paths
+    the same courtesy instead of surfacing library jargon to the user."""
+    import fitz
+    try:
+        doc = fitz.open(str(src))
+    except Exception as exc:
+        raise ProcessError(f"Couldn't read '{src.name}' — it may be corrupt or "
+                           f"password-protected ({exc}).")
+    try:
+        if getattr(doc, "needs_pass", False):
+            raise ProcessError(f"'{src.name}' is password-protected. Remove the "
+                               "password first, then try again.")
+    finally:
+        doc.close()
+
+
 def pdf_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
     level = opt.get("level", "lossless")
+    _require_readable_pdf(src)      # clear error instead of a raw library one
     out = build_output_path(src, out_dir, ".pdf", name_suffix="_compressed",
                             overwrite=opt.get("overwrite", False),
                             numbered=opt.get("same_as_source", False))
