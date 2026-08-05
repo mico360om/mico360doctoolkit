@@ -1,3 +1,28 @@
+## MICO360 Doc Toolkit v6.9.3
+
+**Important fix: Searchable PDF (OCR) no longer crashes on multiple files.**
+
+**Bug fixes**
+- **Fixed the app closing unexpectedly during OCR.** Running **Searchable PDF (OCR)** on
+  **more than one file at a time** could crash the app on PCs using GPU acceleration —
+  two files were reading from the graphics card at the same moment, which isn't allowed.
+  OCR work is now correctly serialised on the GPU. Single-file OCR, and OCR on CPU-only
+  PCs, keep their full speed.
+- **Corrupt or password-protected PDFs now give a clear message** ("this file is
+  password-protected — remove the password first") instead of a technical error.
+- **Queue sizes are always shown.** Duplicated rows showed "?" instead of their file
+  size and were left out of the queue's total — both fixed.
+- Dropping an **iPhone HEIC photo or an SVG** on the Home page now opens the right tool
+  instead of reporting "no supported files".
+- The Settings button that read "Terms _Conditions" now shows **Terms & Conditions**.
+
+**Improvements**
+- **Helpful tooltips throughout the app.** Every button, option, filter and status badge
+  now explains what it does, what to type, any shortcut, and any warning — and the same
+  text is available to screen readers.
+
+---
+
 ## MICO360 Doc Toolkit v6.9.2
 
 **macOS build fixes — feature-complete and installable.**
