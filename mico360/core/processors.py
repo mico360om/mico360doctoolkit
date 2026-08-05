@@ -926,6 +926,11 @@ _OCR_MIN_SCORE = 0.5
 # differs between languages.
 _ocr_engines: dict = {}        # lang_id -> RapidOCR engine
 _ocr_engine_lock = threading.Lock()
+# Serialises GPU inference across EVERY thread (pages within a file and the
+# batch engine's concurrent files). A DirectML session Run() from two threads
+# at once crashes the process outright, so this lock is a correctness
+# requirement, not an optimisation. Unused on CPU (which is thread-safe).
+_ocr_infer_lock = threading.Lock()
 _ocr_active_provider = "CPU"   # set when the engine is built; for status reporting
 
 
@@ -1075,6 +1080,15 @@ def _render_page_image(page, dpi: int = _OCR_DPI):
     return img, dpi
 
 
+def _run_ocr_engine(engine, img):
+    """Invoke the OCR engine, tolerating older RapidOCR builds without use_cls."""
+    try:
+        result, _ = engine(img, use_cls=True)
+    except TypeError:                        # older RapidOCR without the kwarg
+        result, _ = engine(img)
+    return result
+
+
 def _ocr_image_lines(engine, img, dpi: int,
                      min_score: float = _OCR_MIN_SCORE) -> list[tuple[str, tuple]]:
     """Run OCR on an already-rendered image; return [(text, (x0,y0,x1,y1))] in
@@ -1082,11 +1096,20 @@ def _ocr_image_lines(engine, img, dpi: int,
 
     Angle classification (``use_cls``) is requested so upside-down / 180°-rotated
     lines on a scan are still read in the correct orientation.
+
+    On the GPU, inference is serialised process-wide by ``_ocr_infer_lock``: a
+    DirectML ONNX session cannot be Run() from several threads at once (it
+    faults the process, not a Python exception). Serialising *here* — the one
+    place the engine is actually invoked — covers pages within a file AND the
+    batch engine running several files at the same time. The GPU is a serial
+    resource anyway, so this costs no real throughput. CPU inference is
+    thread-safe and stays fully concurrent.
     """
-    try:
-        result, _ = engine(img, use_cls=True)
-    except TypeError:                        # older RapidOCR without the kwarg
-        result, _ = engine(img)
+    if ocr_active_provider() != "CPU":
+        with _ocr_infer_lock:
+            result = _run_ocr_engine(engine, img)
+    else:
+        result = _run_ocr_engine(engine, img)
     scale = 72.0 / dpi
     lines: list[tuple[str, tuple]] = []
     for box, text, score in (result or []):
