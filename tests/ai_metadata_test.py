@@ -180,7 +180,24 @@ def main() -> int:
                 check("a text-less PDF advises running OCR", False, "no error")
             except ai_metadata.NoTextError as exc:
                 check("a text-less PDF advises running OCR",
-                      "ocr" in str(exc).lower(), str(exc)[:60])
+                      "searchable pdf" in str(exc).lower(), str(exc)[:60])
+
+            # An image-only Office file must get advice that FITS ITS TYPE —
+            # the OCR tool only accepts PDFs, so "run OCR on it" would be
+            # useless for a .pptx.
+            from pptx import Presentation
+            deck = tmp / "images_only.pptx"
+            prs = Presentation()
+            prs.slides.add_slide(prs.slide_layouts[6])   # blank, no text
+            prs.save(str(deck))
+            try:
+                ai_metadata.extract_text(deck)
+                check("an image-only deck is refused with usable advice",
+                      False, "no error")
+            except ai_metadata.NoTextError as exc:
+                m = str(exc)
+                check("an image-only deck is refused with usable advice",
+                      "Office" in m and "PDF" in m, m[:80])
 
             got = ai_metadata.suggest_metadata(pdf, good)
             check("AI returns all seven metadata fields",

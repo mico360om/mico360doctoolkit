@@ -81,13 +81,7 @@ def extract_text(path: Path, max_chars: int = MAX_CHARS) -> str:
             import docx
             text = "\n".join(par.text for par in docx.Document(str(p)).paragraphs)
         elif ext == ".pptx":
-            from pptx import Presentation
-            chunks = []
-            for slide in Presentation(str(p)).slides:
-                for shape in slide.shapes:
-                    if getattr(shape, "has_text_frame", False):
-                        chunks.append(shape.text_frame.text)
-            text = "\n".join(chunks)
+            text = _from_pptx(p)
         elif ext in (".txt", ".md", ".csv"):
             text = p.read_text(encoding="utf-8", errors="replace")
         else:
@@ -102,10 +96,46 @@ def extract_text(path: Path, max_chars: int = MAX_CHARS) -> str:
     text = re.sub(r"[ \t]+", " ", text or "")
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     if len(text) < 20:
+        if ext == ".pdf":
+            raise NoTextError(
+                f"'{p.name}' has no selectable text — it looks like a scan. Run "
+                "Searchable PDF (OCR) on it first, then try again.")
         raise NoTextError(
-            f"'{p.name}' has no selectable text. If it's a scan, run "
-            "Searchable PDF (OCR) on it first, then try again.")
+            f"'{p.name}' has no readable text — its content appears to be "
+            "images. Convert it with Office → PDF, run Searchable PDF "
+            "(OCR) on the result, then try again.")
     return text[:max_chars]
+
+
+def _from_pptx(p: Path) -> str:
+    """Slide text, including grouped shapes, tables and speaker notes — a real
+    deck often puts its wording in those rather than plain text boxes."""
+    from pptx import Presentation
+
+    chunks: list[str] = []
+
+    def walk(shapes):
+        for shape in shapes:
+            try:
+                if str(getattr(shape, "shape_type", "")).startswith("GROUP"):
+                    walk(shape.shapes)
+                    continue
+                if getattr(shape, "has_text_frame", False):
+                    chunks.append(shape.text_frame.text)
+                if getattr(shape, "has_table", False):
+                    for row in shape.table.rows:
+                        chunks.append(" ".join(c.text for c in row.cells))
+            except Exception:          # noqa: BLE001 - one odd shape mustn't stop us
+                continue
+
+    for slide in Presentation(str(p)).slides:
+        walk(slide.shapes)
+        try:
+            if slide.has_notes_slide:
+                chunks.append(slide.notes_slide.notes_text_frame.text)
+        except Exception:              # noqa: BLE001
+            pass
+    return "\n".join(c for c in chunks if c)
 
 
 def _from_pdf(p: Path, max_chars: int) -> str:
