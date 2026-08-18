@@ -1,4 +1,4 @@
-# MICO360 Doc Toolkit  ·  v6.9.5
+# MICO360 Doc Toolkit  ·  v6.9.6
 
 A modern Windows 10/11 desktop app for PDF & image management — a **Dashboard**
 home plus tools to compress, merge, split, organize, protect, watermark, sign,

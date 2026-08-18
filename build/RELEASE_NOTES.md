@@ -1,3 +1,14 @@
+## MICO360 Doc Toolkit v6.9.6
+
+**Dropdowns now look like dropdowns.**
+
+- **Fixed: every dropdown in the app was drawn without its arrow**, so menus such as
+  **Model**, **Use**, **Theme** and the tool options looked like plain text boxes and
+  there was no sign you could open them. They now show the usual chevron and read
+  clearly as dropdowns, in both light and dark themes.
+
+---
+
 ## MICO360 Doc Toolkit v6.9.5
 
 **Fixes the crash when testing an AI connection.**

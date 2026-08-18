@@ -292,8 +292,11 @@ QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {{
 QComboBox:hover, QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover {{ border-color: {c['border_strong']}; }}
 QComboBox:focus, QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border: 1px solid {c['primary']}; }}
 QComboBox:disabled, QLineEdit:disabled {{ color: {c['text_faint']}; background-color: {c['surface_2']}; }}
-QComboBox::drop-down {{ border: none; width: 24px; }}
-QComboBox::down-arrow {{ width: 10px; height: 10px; }}
+/* NOTE: do NOT style ::drop-down or ::down-arrow here. Touching either moves Qt
+   onto the stylesheet painting path, where it stops drawing the native arrow —
+   and a ::down-arrow with only a size paints nothing at all, which made every
+   dropdown in the app look like a plain text box. Left alone, the style draws a
+   proper chevron in the palette's colour. (Covered by tests/combobox_arrow_test.py) */
 QComboBox QAbstractItemView {{
     background-color: {c['surface']};
     border: 1px solid {c['border_strong']};
