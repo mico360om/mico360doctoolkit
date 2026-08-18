@@ -43,6 +43,7 @@ class Tool:
     runner: Callable
     options: list = field(default_factory=list)
     group: str = "PDF"
+    ai_assist: bool = False          # show the AI metadata suggestions panel
 
 
 PDF = {".pdf"}
@@ -220,6 +221,7 @@ TOOLS: list[Tool] = [
         id="pdf_metadata", name="Edit Metadata", icon="🏷️",
         tagline="Edit every document property — or strip it all out.",
         mode=PER_FILE, accept=PDF, runner=processors.pdf_metadata, group="Edit",
+        ai_assist=True,
         options=[
             # Privacy mode first: "off" edits the fields below; a preset hides them
             # and runs a one-shot scrub instead.

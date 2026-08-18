@@ -50,6 +50,7 @@ class SettingsPage(QWidget):
         tabs.setObjectName("SettingsTabs")
         tabs.addTab(self._tab(self._appearance_card(), self._about_card()), "General")
         tabs.addTab(self._tab(self._performance_card()), "Processing")
+        tabs.addTab(self._tab(self._ai_card()), "AI")
         tabs.addTab(self._tab(self._output_card()), "Output")
         tabs.addTab(self._tab(self._updates_card()), "Updates")
         tabs.addTab(self._tab(self._deps_card()), "Advanced")
@@ -240,6 +241,176 @@ class SettingsPage(QWidget):
         idx = self.theme_combo.findData(settings.theme_mode)
         self.theme_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.theme_combo.blockSignals(False)
+
+    # ------------------------------------------------------------------
+    def _ai_card(self) -> Card:
+        """User AI configuration: provider choice, endpoint, key, model, test."""
+        from mico360.core import ai as ai_core
+
+        card = Card()
+        card.add(section_label("AI provider"))
+
+        self.chk_ai = QCheckBox("Enable AI features")
+        tip(self.chk_ai,
+            "Turns on AI assistance such as metadata suggestions on the Edit "
+            "Metadata page. Off by default - nothing is sent anywhere until "
+            "you enable it.")
+        self.chk_ai.setChecked(settings.ai_enabled)
+        self.chk_ai.toggled.connect(self._on_ai_enabled)
+        card.add(self.chk_ai)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Use"))
+        self.ai_source = QComboBox()
+        self.ai_source.addItem("System AI (provided for you)", ai_core.SOURCE_SYSTEM)
+        self.ai_source.addItem("My own AI API", ai_core.SOURCE_CUSTOM)
+        self.ai_source.setAccessibleName("AI provider")
+        tip(self.ai_source,
+            "System AI uses the endpoint your administrator provides. Choose "
+            "My own AI API to point at any OpenAI-compatible service.")
+        i = self.ai_source.findData(settings.ai_source)
+        self.ai_source.setCurrentIndex(max(0, i))
+        self.ai_source.currentIndexChanged.connect(self._on_ai_source)
+        row.addWidget(self.ai_source, 1)
+        w = QWidget(); w.setLayout(row); card.add(w)
+
+        self.ai_url = QLineEdit(settings.ai_base_url)
+        self.ai_url.setPlaceholderText(ai_core.SYSTEM_BASE_URL)
+        self.ai_url.setAccessibleName("AI API URL")
+        tip(self.ai_url,
+            "The OpenAI-compatible base URL, including the port and /v1 - for "
+            "example http://ai.mico360.com:5310/v1")
+        card.add(self._labeled("API URL", self.ai_url))
+
+        self.ai_key = QLineEdit()
+        self.ai_key.setEchoMode(QLineEdit.Password)
+        self.ai_key.setAccessibleName("AI API key")
+        tip(self.ai_key,
+            "Your API key. It is encrypted before it is saved and is never "
+            "shown again afterwards - retype it to replace it.")
+        card.add(self._labeled("API key", self.ai_key))
+
+        self.ai_key_state = QLabel("")
+        self.ai_key_state.setObjectName("Hint")
+        self.ai_key_state.setWordWrap(True)
+        card.add(self.ai_key_state)
+
+        self.ai_model = QLineEdit(settings.ai_model)
+        self.ai_model.setPlaceholderText(ai_core.SYSTEM_MODEL)
+        self.ai_model.setAccessibleName("AI model")
+        tip(self.ai_model,
+            "Model id to use, e.g. qwen2.5:0.5b. Small models answer in about a "
+            "second; large ones can take a minute on the first request.")
+        card.add(self._labeled("Model", self.ai_model))
+
+        brow = QHBoxLayout()
+        self.btn_ai_save = QPushButton("Save")
+        self.btn_ai_save.setObjectName("Ghost")
+        self.btn_ai_save.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_ai_save, "Save these AI settings (the key is encrypted).")
+        self.btn_ai_save.clicked.connect(self._save_ai)
+        self.btn_ai_test = QPushButton("Test connection")
+        self.btn_ai_test.setObjectName("Ghost")
+        self.btn_ai_test.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_ai_test,
+            "Save, then ask the server which models this key may use. Nothing "
+            "is generated and no document is sent.")
+        self.btn_ai_test.clicked.connect(self._test_ai)
+        brow.addWidget(self.btn_ai_save)
+        brow.addWidget(self.btn_ai_test)
+        brow.addStretch(1)
+        bw = QWidget(); bw.setLayout(brow); card.add(bw)
+
+        self.ai_status = QLabel("")
+        self.ai_status.setObjectName("Hint")
+        self.ai_status.setWordWrap(True)
+        card.add(self.ai_status)
+
+        note = QLabel(
+            "Your API key is encrypted on this computer"
+            + (" using Windows account protection."
+               if ai_core.is_strongly_protected()
+               else " (basic protection on this platform).")
+            + " Document text is only sent when you ask for a suggestion.")
+        note.setObjectName("Muted")
+        note.setWordWrap(True)
+        card.add(note)
+
+        self._sync_ai_fields()
+        return card
+
+    def _labeled(self, text: str, field) -> QWidget:
+        box = QVBoxLayout()
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(4)
+        box.addWidget(QLabel(text))
+        box.addWidget(field)
+        w = QWidget(); w.setLayout(box)
+        return w
+
+    def _sync_ai_fields(self) -> None:
+        """Custom-only fields are disabled under System AI, and a saved key is
+        shown masked - never in full."""
+        from mico360.core import ai as ai_core
+        custom = self.ai_source.currentData() == ai_core.SOURCE_CUSTOM
+        self.ai_url.setEnabled(custom)
+        stored = ai_core.unseal_key(settings.ai_api_key_sealed)
+        if stored:
+            self.ai_key.setPlaceholderText(ai_core.masked_key(stored) + "  (saved)")
+            self.ai_key_state.setText(
+                "A key is saved. Leave blank to keep it, or type a new one to "
+                "replace it.")
+        else:
+            self.ai_key.setPlaceholderText("Paste your API key")
+            self.ai_key_state.setText("No API key saved yet.")
+
+    def _on_ai_enabled(self, on: bool) -> None:
+        settings.ai_enabled = bool(on)
+
+    def _on_ai_source(self) -> None:
+        settings.ai_source = self.ai_source.currentData()
+        self._sync_ai_fields()
+
+    def _collect_ai(self):
+        """Form values as an AiConfig, plus the freshly typed key (if any)."""
+        from mico360.core import ai as ai_core
+        typed = self.ai_key.text().strip()
+        cfg = ai_core.AiConfig(
+            enabled=self.chk_ai.isChecked(),
+            source=self.ai_source.currentData(),
+            base_url=self.ai_url.text().strip(),
+            api_key=typed or ai_core.unseal_key(settings.ai_api_key_sealed),
+            model=self.ai_model.text().strip(),
+        )
+        return cfg, typed
+
+    def _save_ai(self) -> None:
+        from mico360.core import ai as ai_core
+        cfg, typed = self._collect_ai()
+        if cfg.source == ai_core.SOURCE_CUSTOM and cfg.base_url:
+            cfg.base_url = ai_core.normalize_base_url(cfg.base_url)
+            self.ai_url.setText(cfg.base_url)
+        ai_core.save_config(cfg, api_key=typed if typed else None)
+        self.ai_key.clear()          # never keep the secret on screen
+        self._sync_ai_fields()
+        self.ai_status.setText("Saved.")
+
+    def _test_ai(self) -> None:
+        from PySide6.QtWidgets import QApplication
+        from mico360.core import ai as ai_core
+        self._save_ai()
+        self.btn_ai_test.setEnabled(False)
+        self.ai_status.setText("Testing...")
+        QApplication.processEvents()
+        try:
+            ok, msg = ai_core.test_connection(ai_core.load_config())
+        finally:
+            self.btn_ai_test.setEnabled(True)
+        colour = palette(settings.theme)["success" if ok else "danger"]
+        self.ai_status.setTextFormat(Qt.RichText)
+        mark = "OK" if ok else "X"
+        self.ai_status.setText(
+            f"<span style='color:{colour};'>{mark} {msg}</span>")
 
     def _output_card(self) -> Card:
         card = Card()

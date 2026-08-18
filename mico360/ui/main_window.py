@@ -255,7 +255,15 @@ class MainWindow(QMainWindow):
         page = ToolPage(tool)
         page.activity.connect(self.log_page.append)
         page.toast.connect(self.show_toast)
+        page.openSettings.connect(self.open_settings)
         return self._scrollable(page)
+
+    def open_settings(self) -> None:
+        """Jump to Settings — used by the 'AI API not configured' link."""
+        idx = next((i for i, f in self._factories.items()
+                    if getattr(f, "__name__", "") == "_build_settings_page"), None)
+        if idx is not None:
+            self.sidebar.select(idx)
 
     def open_tool(self, tool_id: str, files=None) -> None:
         """Navigate to a tool by id, optionally pre-loading dropped files."""
@@ -368,6 +376,10 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(widget)
         self.stack.setCurrentWidget(widget)
         self.top_title.setText(self._titles.get(page_index, ""))
+        inner = widget.widget() if isinstance(widget, QScrollArea) else widget
+        panel = getattr(inner, "ai_panel", None)
+        if panel is not None:
+            panel.refresh_availability()   # pick up Settings changes
         if page_index == 0 and getattr(self, "dashboard", None) is not None:
             self.dashboard.refresh()    # show the latest recents / favourites
 

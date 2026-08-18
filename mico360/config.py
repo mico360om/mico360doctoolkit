@@ -190,6 +190,53 @@ class Settings:
     def crash_reports_enabled(self, value: bool) -> None:
         self._set("privacy/crash_reports", bool(value))
 
+    # --- AI provider -----------------------------------------------------
+    @property
+    def ai_enabled(self) -> bool:
+        """Master switch for AI features (default off — opt-in)."""
+        return self._get("ai/enabled", False, bool)
+
+    @ai_enabled.setter
+    def ai_enabled(self, value: bool) -> None:
+        self._set("ai/enabled", bool(value))
+
+    @property
+    def ai_source(self) -> str:
+        """'system' = the administrator's default endpoint, 'custom' = the
+        user's own API URL/model."""
+        v = self._get("ai/source", "system", str)
+        return v if v in ("system", "custom") else "system"
+
+    @ai_source.setter
+    def ai_source(self, value: str) -> None:
+        self._set("ai/source", value if value in ("system", "custom") else "system")
+
+    @property
+    def ai_base_url(self) -> str:
+        return self._get("ai/base_url", "", str)
+
+    @ai_base_url.setter
+    def ai_base_url(self, value: str) -> None:
+        self._set("ai/base_url", str(value or "").strip())
+
+    @property
+    def ai_model(self) -> str:
+        return self._get("ai/model", "", str)
+
+    @ai_model.setter
+    def ai_model(self, value: str) -> None:
+        self._set("ai/model", str(value or "").strip())
+
+    @property
+    def ai_api_key_sealed(self) -> str:
+        """The API key AS STORED — encrypted (DPAPI on Windows). Never render
+        this; use mico360.core.ai.masked_key() on the decrypted value."""
+        return self._get("ai/api_key", "", str)
+
+    @ai_api_key_sealed.setter
+    def ai_api_key_sealed(self, value: str) -> None:
+        self._set("ai/api_key", str(value or ""))
+
     @property
     def open_output_when_done(self) -> bool:
         return self._get("ui/open_output_when_done", True, bool)

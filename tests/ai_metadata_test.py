@@ -1,0 +1,298 @@
+"""AI metadata generator + user AI configuration.
+
+Runs entirely offline: a stub HTTP server stands in for the AI provider, so the
+whole path (config -> request -> parse -> suggestion panel -> apply) is exercised
+without a key or a network. Key storage is asserted to never keep clear text.
+
+Run:  python tests/ai_metadata_test.py
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import tempfile
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+failures: list[str] = []
+
+
+def check(name, ok, detail=""):
+    print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f": {detail}" if detail else ""))
+    if not ok:
+        failures.append(name)
+
+
+GOOD_KEY = "mico_test_key_abcdefghijklmnop"
+REPLY = {
+    "title": "Quarterly Portfolio Review",
+    "author": "Strategy Office",
+    "subject": "Performance of the 2026 portfolio",
+    "keywords": "portfolio, governance, review",
+    "comments": "A quarterly review of portfolio performance and risks.",
+    "category": "Report",
+    "language": "en-US",
+}
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def _json(self, code, obj):
+        body = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _authed(self) -> bool:
+        return self.headers.get("Authorization") == f"Bearer {GOOD_KEY}"
+
+    def do_GET(self):
+        if not self._authed():
+            return self._json(401, {"error": {"message": "Invalid or missing API key."}})
+        if self.path.rstrip("/").endswith("/v1/models"):
+            return self._json(200, {"object": "list", "data": [
+                {"id": "qwen2.5:0.5b", "object": "model"}]})
+        self._json(404, {"error": {"message": "no route"}})
+
+    def do_POST(self):
+        if not self._authed():
+            return self._json(401, {"error": {"message": "Invalid or missing API key."}})
+        if not self.path.rstrip("/").endswith("/v1/chat/completions"):
+            return self._json(404, {"error": {"message": "no route"}})
+        n = int(self.headers.get("Content-Length") or 0)
+        body = json.loads(self.rfile.read(n) or b"{}")
+        # The document excerpt must actually reach the model.
+        sent = " ".join(m.get("content", "") for m in body.get("messages", [])
+                        if isinstance(m.get("content"), str))
+        content = ("Here you go:\n```json\n" + json.dumps(REPLY) + "\n```"
+                   if "PORTFOLIO REVIEW" in sent.upper() else "{}")
+        self._json(200, {"choices": [{"index": 0, "message":
+                                      {"role": "assistant", "content": content},
+                                      "finish_reason": "stop"}]})
+
+
+def main() -> int:
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication([])
+
+    from mico360.config import settings
+    from mico360.core import ai as ai_core
+    from mico360.core import ai_metadata
+
+    srv = HTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}/v1"
+
+    saved = (settings.ai_enabled, settings.ai_source, settings.ai_base_url,
+             settings.ai_model, settings.ai_api_key_sealed)
+    try:
+        # ---------- key security ------------------------------------
+        sealed = ai_core.seal_key(GOOD_KEY)
+        check("stored key is never clear text", GOOD_KEY not in sealed, sealed[:12])
+        check("stored key decrypts back correctly",
+              ai_core.unseal_key(sealed) == GOOD_KEY)
+        check("masked key hides the secret",
+              GOOD_KEY not in ai_core.masked_key(GOOD_KEY)
+              and ai_core.masked_key(GOOD_KEY).endswith(GOOD_KEY[-4:]),
+              ai_core.masked_key(GOOD_KEY))
+        check("a corrupt stored key fails safely (no crash)",
+              ai_core.unseal_key("dpapi:not-base64!!") == "")
+
+        # ---------- URL normalisation --------------------------------
+        cases = {
+            "ai.example.com:5310": "http://ai.example.com:5310/v1",
+            "http://x.test:5310/": "http://x.test:5310/v1",
+            "http://x.test:5310/v1/": "http://x.test:5310/v1",
+            "http://x.test:5310/v1/chat/completions": "http://x.test:5310/v1",
+        }
+        bad = {k: ai_core.normalize_base_url(k) for k, v in cases.items()
+               if ai_core.normalize_base_url(k) != v}
+        check("base URLs are normalised (port + /v1, no duplicate path)",
+              not bad, str(bad))
+
+        # ---------- config gating ------------------------------------
+        cfg = ai_core.AiConfig(enabled=False)
+        check("disabled AI reports why", cfg.is_usable()[0] is False
+              and "turned off" in cfg.is_usable()[1])
+        cfg = ai_core.AiConfig(enabled=True, source=ai_core.SOURCE_CUSTOM,
+                               base_url=base, api_key="")
+        check("missing key reports 'not configured'",
+              cfg.is_usable()[0] is False and "key" in cfg.is_usable()[1].lower())
+
+        # ---------- connection test ----------------------------------
+        good = ai_core.AiConfig(enabled=True, source=ai_core.SOURCE_CUSTOM,
+                                base_url=base, api_key=GOOD_KEY,
+                                model="qwen2.5:0.5b")
+        ok, msg = ai_core.test_connection(good)
+        check("Test connection succeeds and names the model", ok and "qwen2.5" in msg,
+              msg)
+
+        wrong = ai_core.AiConfig(enabled=True, source=ai_core.SOURCE_CUSTOM,
+                                 base_url=base, api_key="nope")
+        ok, msg = ai_core.test_connection(wrong)
+        check("a rejected key gives actionable advice",
+              not ok and "key" in msg.lower(), msg[:60])
+
+        dead = ai_core.AiConfig(enabled=True, source=ai_core.SOURCE_CUSTOM,
+                                base_url="http://127.0.0.1:9/v1", api_key="x")
+        ok, msg = ai_core.test_connection(dead)
+        check("an unreachable server fails gracefully",
+              not ok and "couldn't reach" in msg.lower(), msg[:60])
+
+        # ---------- extraction + suggestion --------------------------
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            import fitz
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_text((60, 90), "PORTFOLIO REVIEW", fontsize=18)
+            page.insert_text((60, 130),
+                             "This document reviews the 2026 portfolio "
+                             "performance across all programmes.", fontsize=11)
+            pdf = tmp / "review.pdf"
+            doc.save(str(pdf))
+            doc.close()
+
+            text = ai_metadata.extract_text(pdf)
+            check("document text is extracted locally",
+                  "PORTFOLIO REVIEW" in text.upper(), text[:40])
+
+            scan = tmp / "scan.pdf"
+            d2 = fitz.open()
+            d2.new_page()
+            d2.save(str(scan))
+            d2.close()
+            try:
+                ai_metadata.extract_text(scan)
+                check("a text-less PDF advises running OCR", False, "no error")
+            except ai_metadata.NoTextError as exc:
+                check("a text-less PDF advises running OCR",
+                      "ocr" in str(exc).lower(), str(exc)[:60])
+
+            got = ai_metadata.suggest_metadata(pdf, good)
+            check("AI returns all seven metadata fields",
+                  set(got) == set(ai_metadata.FIELDS), str(sorted(got)))
+            check("suggested title matches the document",
+                  got["title"] == REPLY["title"], got.get("title"))
+            check("JSON wrapped in prose/code fences is still parsed",
+                  got["language"] == "en-US")
+
+            # ---------- panel: review, edit, apply -------------------
+            settings.ai_enabled = True
+            settings.ai_source = ai_core.SOURCE_CUSTOM
+            settings.ai_base_url = base
+            settings.ai_model = "qwen2.5:0.5b"
+            settings.ai_api_key_sealed = ai_core.seal_key(GOOD_KEY)
+
+            from mico360.core.tools import TOOLS_BY_ID
+            from mico360.ui.tool_page import ToolPage
+            page_ui = ToolPage(TOOLS_BY_ID["pdf_metadata"])
+            check("Edit Metadata page shows the AI panel",
+                  page_ui.ai_panel is not None)
+            panel = page_ui.ai_panel
+            panel.refresh_availability()
+            check("panel reports ready when AI is configured",
+                  panel.btn_suggest.isEnabled()
+                  and "not configured" not in panel.status.text().lower(),
+                  panel.status.text()[:60])
+
+            # Suggestions are shown, NOT auto-applied. (Option fields may hold
+            # remembered values, so compare against what was there before.)
+            title_ctrl = page_ui.options_widget._controls["title"]
+            before_title = title_ctrl.text()
+            panel._show(got)
+            check("suggestions are shown for review, not applied automatically",
+                  title_ctrl.text() == before_title, repr(title_ctrl.text()))
+            # NOTE: isVisible() is False for any widget whose window isn't shown,
+            # so assert on the not-hidden state instead.
+            check("every suggested field gets a row",
+                  not panel.results.isHidden()
+                  and all(panel._rows[k][1].text() for k in got))
+
+            # Apply one field.
+            author_ctrl = page_ui.options_widget._controls["author"]
+            before_author = author_ctrl.text()
+            panel._apply_one("title")
+            check("applying one field fills ONLY that option",
+                  title_ctrl.text() == REPLY["title"]
+                  and author_ctrl.text() == before_author,
+                  f"title={title_ctrl.text()!r} author={author_ctrl.text()!r}")
+
+            # Edit a suggestion, then apply all.
+            panel._rows["author"][1].setText("Edited Author")
+            panel._apply_all()
+            vals = page_ui.options_widget.values()
+            check("Apply all uses the EDITED value",
+                  vals.get("author") == "Edited Author", vals.get("author"))
+            check("Apply all fills the remaining fields",
+                  vals.get("keywords") == REPLY["keywords"]
+                  and vals.get("category") == REPLY["category"])
+            check("suggested comments land in the custom Comments field",
+                  vals.get("comments") == REPLY["comments"])
+
+            # Dismiss hides them.
+            panel.clear()
+            check("Dismiss hides the suggestions and forgets them",
+                  panel.results.isHidden() and not panel._current)
+
+            # ---------- not configured -> clear message + link -------
+            settings.ai_enabled = False
+            panel.refresh_availability()
+            check("turning AI off shows 'AI API not configured'",
+                  "not configured" in panel.status.text().lower()
+                  and not panel.btn_suggest.isEnabled(), panel.status.text()[:50])
+            check("a Configure button is offered when unconfigured",
+                  not panel.btn_configure.isHidden())
+
+            # ---------- settings page round-trip ---------------------
+            settings.ai_enabled = True
+            from mico360.ui.settings_page import SettingsPage
+            sp = SettingsPage()
+            check("Settings has the AI fields",
+                  all(hasattr(sp, a) for a in
+                      ("chk_ai", "ai_source", "ai_url", "ai_key", "ai_model",
+                       "btn_ai_test")))
+            check("the saved key is never rendered in full",
+                  GOOD_KEY not in sp.ai_key.text()
+                  and GOOD_KEY not in sp.ai_key.placeholderText(),
+                  sp.ai_key.placeholderText())
+            check("the key field is masked input",
+                  sp.ai_key.echoMode() == type(sp.ai_key).Password)
+            sp.ai_key.setText("mico_a_brand_new_key_value")
+            sp._save_ai()
+            check("saving a new key encrypts it and clears the box",
+                  sp.ai_key.text() == ""
+                  and ai_core.unseal_key(settings.ai_api_key_sealed)
+                  == "mico_a_brand_new_key_value")
+            check("leaving the key blank keeps the existing one",
+                  (sp._save_ai() or True)
+                  and ai_core.unseal_key(settings.ai_api_key_sealed)
+                  == "mico_a_brand_new_key_value")
+    finally:
+        srv.shutdown()
+        (settings.ai_enabled, settings.ai_source, settings.ai_base_url,
+         settings.ai_model, settings.ai_api_key_sealed) = saved
+
+    print()
+    if failures:
+        print(f"{len(failures)} AI check(s) FAILED: {', '.join(failures)}")
+        return 1
+    print("All AI metadata / configuration checks passed.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

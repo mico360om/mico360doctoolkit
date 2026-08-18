@@ -95,6 +95,7 @@ class _StatusProxy:
 class ToolPage(QWidget):
     activity = Signal(str)        # forwards notable lines to the global activity log
     toast = Signal(str, str)      # (message, kind) for a transient notification
+    openSettings = Signal()       # "take me to Settings" (e.g. to configure AI)
 
     def __init__(self, tool: Tool, parent: QWidget | None = None):
         super().__init__(parent)
@@ -292,6 +293,16 @@ class ToolPage(QWidget):
 
         self.options_widget = OptionsWidget(self.tool)
         card.add(self.options_widget)
+
+        # Optional AI assistance (Edit Metadata): suggestions are shown for
+        # review and only written into the fields when the user applies them.
+        self.ai_panel = None
+        if getattr(self.tool, "ai_assist", False):
+            from mico360.ui.ai_suggest import AiSuggestPanel
+            self.ai_panel = AiSuggestPanel(self._selected_path_for_ai)
+            self.ai_panel.applyField.connect(self._apply_ai_field)
+            self.ai_panel.openSettings.connect(self.openSettings.emit)
+            card.add(self.ai_panel)
 
         card.add(section_label("Output"))
         out_row = QHBoxLayout()
@@ -565,6 +576,35 @@ class ToolPage(QWidget):
                     f"Import stopped at the {MAX_FILES:,}-file limit", "info")
         if dupes and added:
             self._log(f"{dupes} file(s) were already queued.")
+
+    # --- AI assistance -------------------------------------------------
+    def _selected_path_for_ai(self):
+        """The file the AI should read: the selected row, else the first."""
+        sel = self._selected_items()
+        if sel:
+            return sel[0].path
+        return self.items[0].path if self.items else None
+
+    def _apply_ai_field(self, key: str, value: str) -> None:
+        """Write one accepted AI suggestion into its option control."""
+        ctrl = self.options_widget._controls.get(key)
+        if ctrl is None:
+            self._log(f"No '{key}' field on this tool — suggestion ignored.")
+            return
+        if isinstance(ctrl, QLineEdit):
+            ctrl.setText(value)
+        elif isinstance(ctrl, QPlainTextEdit):
+            ctrl.setPlainText(value)
+        else:
+            from PySide6.QtWidgets import QComboBox
+            if isinstance(ctrl, QComboBox):
+                i = ctrl.findText(value, Qt.MatchFixedString)
+                if i >= 0:
+                    ctrl.setCurrentIndex(i)
+                else:
+                    self._log(f"'{value}' isn't one of the {key} choices.")
+                return
+        self._log(f"Applied AI suggestion for {key}.")
 
     def _sub_text(self, it: QueueItem) -> str:
         size = human_size(it.size) if it.size >= 0 else "?"

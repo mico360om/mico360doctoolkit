@@ -161,8 +161,9 @@ def main() -> int:
     sp = SettingsPage()
     tabw = sp.findChild(QTabWidget)
     labels = [tabw.tabText(i) for i in range(tabw.count())]
-    check("settings has 5 tabs",
-          labels == ["General", "Processing", "Output", "Updates", "Advanced"], str(labels))
+    check("settings shows every expected tab",
+          labels == ["General", "Processing", "AI", "Output", "Updates",
+                     "Advanced"], str(labels))
     check("theme combo still accessible after tab refactor",
           hasattr(sp, "theme_combo") and sp.theme_combo.count() == 3)
 

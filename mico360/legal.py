@@ -99,6 +99,9 @@ not — do with your data.</p>
 and everything else — happens <b>locally on your computer</b>. {__app_name__} does
 <b>not</b> upload, transmit, or share your documents or images with {__publisher__}
 or any third party.</p>
+<p>The <b>one exception</b> is the optional AI features, which are <b>off unless you
+turn them on</b>: when you explicitly ask for an AI suggestion, a short excerpt of
+that one document is sent to the AI provider <b>you</b> configure. See section 3.</p>
 
 <h3>2. No accounts, no tracking</h3>
 <p>The Software does not require an account, does not include advertising or
@@ -115,6 +118,11 @@ and, if you choose to update, downloads the installer. Turn the automatic check 
 download the LibreOffice conversion engine and OCR language models (e.g. Arabic) from
 their official sources. These are one-time downloads of software components, not your
 data, and you can manage them in <b>Settings</b>.</li>
+<li><b>AI suggestions (only if you enable them)</b> — AI features are <b>off by
+default</b>. If you turn them on and ask for a suggestion, a short excerpt of that
+one document is sent to the AI endpoint <b>you</b> configure (the System AI, or your
+own API). Nothing is sent otherwise, no document is stored by this app, and your API
+key is encrypted on your computer.</li>
 <li><b>Error reports (only if you ask)</b> — if something goes wrong, a report (with a
 copy of the recent log) is saved <b>on your computer</b>. It is <b>never sent
 automatically</b>; you decide whether to open a <b>pre-filled GitHub issue</b> (which you

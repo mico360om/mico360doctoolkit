@@ -77,6 +77,15 @@ tool automatically.</p>
   <li><b>Add Page Numbers</b> — choose the position, style (<i>1, 2, 3</i> · <i>1 / N</i>
       · <i>Page 1</i>) and starting number.</li>
   <li><b>Sign PDF</b> — stamp a signature image on the last/first/every page.</li>
+  <li><b>AI metadata suggestions</b> — on the <b>Edit Metadata</b> page, click
+      <b>Suggest with AI</b> and the app reads the selected document and proposes a
+      Title, Author, Subject, Keywords, Description, Category and Language. Nothing
+      changes until you accept: edit any suggestion, <b>Apply</b> individual fields,
+      <b>Apply all</b>, or <b>Dismiss</b>. Configure a provider in
+      <b>Settings → AI</b> — use the System AI or your own OpenAI-compatible API.
+      Your API key is encrypted on your computer and never shown again after saving,
+      and only a short excerpt of the document is sent when you ask for a
+      suggestion.</li>
   <li><b>Edit Metadata</b> — set any document property: Title, Author, Subject,
       Keywords, Creator, Producer, creation/modification dates, named fields
       (Company, Manager, Category, Comments), your own <i>custom</i> properties
