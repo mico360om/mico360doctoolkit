@@ -1,10 +1,12 @@
 """Settings page: appearance, output, performance, external dependencies."""
 from __future__ import annotations
 
+import html
 import os
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -295,13 +297,45 @@ class SettingsPage(QWidget):
         self.ai_key_state.setWordWrap(True)
         card.add(self.ai_key_state)
 
-        self.ai_model = QLineEdit(settings.ai_model)
-        self.ai_model.setPlaceholderText(ai_core.SYSTEM_MODEL)
+        # Editable dropdown: pick a model the server actually offers, or type a
+        # new id to add one. Refresh pulls the live list; Remove drops an entry.
+        self.ai_model = QComboBox()
+        self.ai_model.setEditable(True)
+        self.ai_model.setInsertPolicy(QComboBox.NoInsert)   # we add explicitly
+        self.ai_model.lineEdit().setPlaceholderText(ai_core.SYSTEM_MODEL)
         self.ai_model.setAccessibleName("AI model")
+        self.ai_model.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.ai_model.setMinimumContentsLength(18)
         tip(self.ai_model,
-            "Model id to use, e.g. qwen2.5:0.5b. Small models answer in about a "
-            "second; large ones can take a minute on the first request.")
-        card.add(self._labeled("Model", self.ai_model))
+            "Pick a model the server offers, or type a new id to add it. Small "
+            "models (e.g. qwen2.5:0.5b) answer in about a second; large ones can "
+            "take a minute on the first request.")
+
+        mrow = QHBoxLayout()
+        mrow.setContentsMargins(0, 0, 0, 0)
+        mrow.addWidget(self.ai_model, 1)
+        self.btn_models_refresh = QPushButton("Refresh")
+        self.btn_models_refresh.setObjectName("Ghost")
+        self.btn_models_refresh.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_models_refresh,
+            "Ask the server which models this key may use and fill the list.")
+        self.btn_models_refresh.clicked.connect(self._refresh_models)
+        self.btn_models_remove = QPushButton("Remove")
+        self.btn_models_remove.setObjectName("Ghost")
+        self.btn_models_remove.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_models_remove,
+            "Remove the selected model from this list. It isn't deleted from "
+            "the server — only from your dropdown.")
+        self.btn_models_remove.clicked.connect(self._remove_model)
+        mrow.addWidget(self.btn_models_refresh)
+        mrow.addWidget(self.btn_models_remove)
+        mw = QWidget(); mw.setLayout(mrow)
+        card.add(self._labeled("Model", mw))
+
+        self.ai_models_state = QLabel("")
+        self.ai_models_state.setObjectName("Hint")
+        self.ai_models_state.setWordWrap(True)
+        card.add(self.ai_models_state)
 
         brow = QHBoxLayout()
         self.btn_ai_save = QPushButton("Save")
@@ -336,6 +370,7 @@ class SettingsPage(QWidget):
         note.setWordWrap(True)
         card.add(note)
 
+        self._load_models()
         self._sync_ai_fields()
         return card
 
@@ -347,6 +382,73 @@ class SettingsPage(QWidget):
         box.addWidget(field)
         w = QWidget(); w.setLayout(box)
         return w
+
+    # --- model dropdown ------------------------------------------------
+    def _load_models(self, models=None, keep: str | None = None) -> None:
+        """Fill the dropdown from the saved list (plus the current selection)."""
+        from mico360.core import ai as ai_core
+        known = list(models if models is not None else settings.ai_models)
+        current = keep if keep is not None else self.ai_model.currentText().strip()
+        for extra in (current, settings.ai_model, ai_core.SYSTEM_MODEL):
+            if extra and extra not in known:
+                known.append(extra)
+        self.ai_model.blockSignals(True)
+        self.ai_model.clear()
+        self.ai_model.addItems(known)
+        i = self.ai_model.findText(current or settings.ai_model)
+        if i >= 0:
+            self.ai_model.setCurrentIndex(i)
+        elif current:
+            self.ai_model.setEditText(current)
+        self.ai_model.blockSignals(False)
+        self.btn_models_remove.setEnabled(self.ai_model.count() > 1)
+
+    def _refresh_models(self) -> None:
+        """Fetch the live model list for the configured key."""
+        from mico360.core import ai as ai_core
+        self._save_ai()                       # use what's on screen right now
+        self.btn_models_refresh.setEnabled(False)
+        self.ai_models_state.setText("Fetching models…")
+        QApplication.processEvents()
+        try:
+            models = ai_core.list_models(ai_core.load_config())
+        except ai_core.AiError as exc:
+            self.ai_models_state.setText(f"Couldn't list models: {exc}")
+            return
+        except Exception as exc:              # noqa: BLE001
+            self.ai_models_state.setText(f"Couldn't list models: {exc}")
+            return
+        finally:
+            self.btn_models_refresh.setEnabled(True)
+        if not models:
+            self.ai_models_state.setText(
+                "The server offers no models to this key. Ask an administrator "
+                "to enable one.")
+            return
+        # Keep any hand-added ids the server doesn't know about.
+        merged = list(models)
+        for m in settings.ai_models:
+            if m not in merged:
+                merged.append(m)
+        settings.ai_models = merged
+        self._load_models(merged)
+        self.ai_models_state.setText(
+            f"{len(models)} model(s) available from the server.")
+
+    def _remove_model(self) -> None:
+        """Drop the selected id from the dropdown (not from the server)."""
+        name = self.ai_model.currentText().strip()
+        if not name or self.ai_model.count() <= 1:
+            return
+        remaining = [m for m in settings.ai_models if m != name]
+        settings.ai_models = remaining
+        # Move the selection off the removed id BEFORE reloading — otherwise
+        # _load_models re-adds it as "the currently selected model".
+        new_pick = remaining[0] if remaining else ""
+        settings.ai_model = new_pick
+        self._load_models(remaining, keep=new_pick)
+        self._save_ai()
+        self.ai_models_state.setText(f"Removed '{name}' from the list.")
 
     def _sync_ai_fields(self) -> None:
         """Custom-only fields are disabled under System AI, and a saved key is
@@ -380,7 +482,7 @@ class SettingsPage(QWidget):
             source=self.ai_source.currentData(),
             base_url=self.ai_url.text().strip(),
             api_key=typed or ai_core.unseal_key(settings.ai_api_key_sealed),
-            model=self.ai_model.text().strip(),
+            model=self.ai_model.currentText().strip(),
         )
         return cfg, typed
 
@@ -390,13 +492,16 @@ class SettingsPage(QWidget):
         if cfg.source == ai_core.SOURCE_CUSTOM and cfg.base_url:
             cfg.base_url = ai_core.normalize_base_url(cfg.base_url)
             self.ai_url.setText(cfg.base_url)
+        # A model id typed into the editable combo becomes a saved entry, so
+        # "new models can be added" simply by naming one.
+        if cfg.model and cfg.model not in settings.ai_models:
+            settings.ai_models = list(settings.ai_models) + [cfg.model]
         ai_core.save_config(cfg, api_key=typed if typed else None)
         self.ai_key.clear()          # never keep the secret on screen
         self._sync_ai_fields()
         self.ai_status.setText("Saved.")
 
     def _test_ai(self) -> None:
-        from PySide6.QtWidgets import QApplication
         from mico360.core import ai as ai_core
         self._save_ai()
         self.btn_ai_test.setEnabled(False)
@@ -406,11 +511,14 @@ class SettingsPage(QWidget):
             ok, msg = ai_core.test_connection(ai_core.load_config())
         finally:
             self.btn_ai_test.setEnabled(True)
-        colour = palette(settings.theme)["success" if ok else "danger"]
+        pal = palette(settings.theme)
+        # .get() with a fallback: a missing palette key must never turn a failed
+        # connection test into a crash (the failure path is the one users hit).
+        colour = pal.get("success" if ok else "error", pal["text"])
         self.ai_status.setTextFormat(Qt.RichText)
-        mark = "OK" if ok else "X"
+        mark = "✓" if ok else "✗"
         self.ai_status.setText(
-            f"<span style='color:{colour};'>{mark} {msg}</span>")
+            f"<span style='color:{colour};'>{mark} {html.escape(msg)}</span>")
 
     def _output_card(self) -> Card:
         card = Card()

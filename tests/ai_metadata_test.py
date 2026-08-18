@@ -64,7 +64,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(401, {"error": {"message": "Invalid or missing API key."}})
         if self.path.rstrip("/").endswith("/v1/models"):
             return self._json(200, {"object": "list", "data": [
-                {"id": "qwen2.5:0.5b", "object": "model"}]})
+                {"id": "qwen2.5:0.5b", "object": "model"},
+                {"id": "qwen2.5vl:7b", "object": "model"},
+                {"id": "llama3.1:8b", "object": "model"}]})
         self._json(404, {"error": {"message": "no route"}})
 
     def do_POST(self):
@@ -139,6 +141,9 @@ def main() -> int:
         ok, msg = ai_core.test_connection(good)
         check("Test connection succeeds and names the model", ok and "qwen2.5" in msg,
               msg)
+        check("the server's full model list is returned",
+              set(ai_core.list_models(good)) ==
+              {"qwen2.5:0.5b", "qwen2.5vl:7b", "llama3.1:8b"})
 
         wrong = ai_core.AiConfig(enabled=True, source=ai_core.SOURCE_CUSTOM,
                                  base_url=base, api_key="nope")
@@ -298,6 +303,88 @@ def main() -> int:
                   (sp._save_ai() or True)
                   and ai_core.unseal_key(settings.ai_api_key_sealed)
                   == "mico_a_brand_new_key_value")
+
+            # --- Test connection: BOTH outcomes must render, not crash ------
+            # (A missing palette key once made the FAILURE path raise KeyError,
+            #  which is exactly the path a misconfigured user hits.)
+            for theme in ("light", "dark"):
+                prev_theme = settings.theme_mode
+                settings.theme_mode = theme
+                sp.ai_source.setCurrentIndex(
+                    sp.ai_source.findData(ai_core.SOURCE_CUSTOM))
+                # success
+                sp.ai_url.setText(base)
+                sp.ai_key.setText(GOOD_KEY)
+                sp._test_ai()
+                ok_txt = sp.ai_status.text()
+                check(f"Test connection renders SUCCESS ({theme} theme)",
+                      "qwen2.5" in ok_txt and "<span" in ok_txt, ok_txt[:60])
+                # failure — unreachable server
+                sp.ai_url.setText("http://127.0.0.1:9/v1")
+                sp._test_ai()
+                bad_txt = sp.ai_status.text()
+                check(f"Test connection renders FAILURE without crashing ({theme})",
+                      "reach" in bad_txt.lower() and "<span" in bad_txt,
+                      bad_txt[:70])
+                settings.theme_mode = prev_theme
+
+            # A server message containing markup must not corrupt the label.
+            sp.ai_status.setText("")
+            import mico360.core.ai as _ai
+            _orig = _ai.test_connection
+            try:
+                _ai.test_connection = lambda cfg: (False, "bad <b>url</b> & key")
+                sp._test_ai()
+                check("a message with markup is escaped, not rendered",
+                      "&lt;b&gt;" in sp.ai_status.text(), sp.ai_status.text()[:70])
+            finally:
+                _ai.test_connection = _orig
+
+            # --- model dropdown: list / add / remove --------------------
+            from PySide6.QtWidgets import QComboBox
+            check("Model is a dropdown you can also type into",
+                  isinstance(sp.ai_model, QComboBox) and sp.ai_model.isEditable())
+
+            sp.ai_source.setCurrentIndex(
+                sp.ai_source.findData(ai_core.SOURCE_CUSTOM))
+            sp.ai_url.setText(base)
+            sp.ai_key.setText(GOOD_KEY)
+            sp._refresh_models()
+            listed = [sp.ai_model.itemText(i) for i in range(sp.ai_model.count())]
+            check("Refresh lists every model the server offers",
+                  {"qwen2.5:0.5b", "qwen2.5vl:7b", "llama3.1:8b"} <= set(listed),
+                  str(listed))
+            check("the model list is remembered in settings",
+                  "llama3.1:8b" in settings.ai_models)
+
+            # Add: type an id the server doesn't know, save -> it joins the list.
+            sp.ai_model.setEditText("my-private-model:latest")
+            sp._save_ai()
+            check("typing a new model id adds it to the list",
+                  "my-private-model:latest" in settings.ai_models
+                  and settings.ai_model == "my-private-model:latest")
+            sp._load_models()
+            check("the added model appears in the dropdown",
+                  "my-private-model:latest" in
+                  [sp.ai_model.itemText(i) for i in range(sp.ai_model.count())])
+
+            # Remove: drops it from the dropdown, not from the server.
+            i = sp.ai_model.findText("my-private-model:latest")
+            sp.ai_model.setCurrentIndex(i)
+            sp._remove_model()
+            after = [sp.ai_model.itemText(i) for i in range(sp.ai_model.count())]
+            check("Remove takes the model out of the list",
+                  "my-private-model:latest" not in after
+                  and "my-private-model:latest" not in settings.ai_models,
+                  str(after))
+            check("removing never empties the dropdown", len(after) >= 1)
+
+            # A refresh against an unreachable server must not crash.
+            sp.ai_url.setText("http://127.0.0.1:9/v1")
+            sp._refresh_models()
+            check("Refresh against a dead server reports it, no crash",
+                  "couldn" in sp.ai_models_state.text().lower(),
+                  sp.ai_models_state.text()[:60])
     finally:
         srv.shutdown()
         (settings.ai_enabled, settings.ai_source, settings.ai_base_url,

@@ -1,3 +1,26 @@
+## MICO360 Doc Toolkit v6.9.5
+
+**Fixes the crash when testing an AI connection.**
+
+- **Fixed: the app closed when you pressed "Test connection" in Settings -> AI and the
+  test did not succeed.** The success case worked, but any failure (wrong URL, server
+  unreachable, rejected key) hit an internal error while colouring the message and
+  brought the app down - exactly when you needed to see what was wrong. The result is
+  now shown properly in both light and dark themes, whatever the outcome.
+- Messages coming back from an AI server are now displayed safely even if they contain
+  special characters.
+
+**Improved: pick your AI model from a list**
+- **Model** in **Settings -> AI** is now a **dropdown** instead of a text box. Press
+  **Refresh** and it fills with every model your API key is actually allowed to use, so
+  you can just pick one instead of typing an id from memory.
+- You can still **add** a model that isn't listed - type its id and save. **Remove**
+  takes an entry out of your list (it is not deleted from the server).
+- Your list is remembered, and a refresh against an unreachable server reports the
+  problem instead of failing silently.
+
+---
+
 ## MICO360 Doc Toolkit v6.9.4
 
 **AI metadata suggestions, and rock-solid file import.**

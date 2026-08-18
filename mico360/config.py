@@ -228,6 +228,23 @@ class Settings:
         self._set("ai/model", str(value or "").strip())
 
     @property
+    def ai_models(self) -> list:
+        """Known model ids for the dropdown: whatever the server last reported,
+        plus any the user added by hand."""
+        v = self._get_json("ai/models", [])
+        return [str(m) for m in v] if isinstance(v, list) else []
+
+    @ai_models.setter
+    def ai_models(self, value) -> None:
+        seen, out = set(), []
+        for m in (value or []):
+            m = str(m).strip()
+            if m and m not in seen:
+                seen.add(m)
+                out.append(m)
+        self._set_json("ai/models", out)
+
+    @property
     def ai_api_key_sealed(self) -> str:
         """The API key AS STORED — encrypted (DPAPI on Windows). Never render
         this; use mico360.core.ai.masked_key() on the decrypted value."""
