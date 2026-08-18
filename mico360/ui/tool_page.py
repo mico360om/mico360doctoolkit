@@ -299,7 +299,12 @@ class ToolPage(QWidget):
         self.ai_panel = None
         if getattr(self.tool, "ai_assist", False):
             from mico360.ui.ai_suggest import AiSuggestPanel
-            self.ai_panel = AiSuggestPanel(self._selected_path_for_ai)
+            # Count only the fields AI can actually fill on this tool, so the
+            # "x of y fields" summary matches what the user sees.
+            from mico360.core.ai_metadata import FIELDS as _AI_FIELDS
+            n_fields = sum(1 for o in self.tool.options if o.key in _AI_FIELDS)
+            self.ai_panel = AiSuggestPanel(self._selected_path_for_ai,
+                                           field_count=n_fields)
             self.ai_panel.applyField.connect(self._apply_ai_field)
             self.ai_panel.openSettings.connect(self.openSettings.emit)
             card.add(self.ai_panel)
@@ -586,7 +591,17 @@ class ToolPage(QWidget):
         return self.items[0].path if self.items else None
 
     def _apply_ai_field(self, key: str, value: str) -> None:
-        """Write one accepted AI suggestion into its option control."""
+        """Write one accepted AI suggestion into its option control.
+
+        Guards: a blank suggestion is never written (it would wipe a good
+        value), and nothing is applied while a Privacy preset is selected —
+        those presets ignore the edit fields entirely."""
+        if not (value or "").strip():
+            return
+        privacy = self.options_widget.values().get("privacy", "")
+        if privacy:
+            self._log("Privacy mode is on — AI suggestions were not applied.")
+            return
         ctrl = self.options_widget._controls.get(key)
         if ctrl is None:
             self._log(f"No '{key}' field on this tool — suggestion ignored.")

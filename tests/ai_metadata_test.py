@@ -38,9 +38,21 @@ REPLY = {
     "author": "Strategy Office",
     "subject": "Performance of the 2026 portfolio",
     "keywords": "portfolio, governance, review",
-    "comments": "A quarterly review of portfolio performance and risks.",
+    "creator": "Microsoft Word",
+    "producer": "Acrobat Distiller",
+    "creation_date": "2026-03-04",
+    "mod_date": "2026-03-09",
+    "company": "MICO360",
+    "manager": "A. Manager",
     "category": "Report",
+    "comments": "A quarterly review of portfolio performance and risks.",
+    "custom": "Invoice Number = INV-1042",
+    "copyright": "(c) 2026 MICO360",
     "language": "en-US",
+    "trapped": "Unknown",
+    # Values the AI is NOT confident about must come back blank and must never
+    # be applied over an existing value.
+    "_unused": "",
 }
 
 
@@ -205,8 +217,14 @@ def main() -> int:
                       "Office" in m and "PDF" in m, m[:80])
 
             got = ai_metadata.suggest_metadata(pdf, good)
-            check("AI returns all seven metadata fields",
-                  set(got) == set(ai_metadata.FIELDS), str(sorted(got)))
+            check("AI returns every supported metadata field",
+                  set(got) == set(ai_metadata.FIELDS),
+                  f"{len(got)}/{len(ai_metadata.FIELDS)}: {sorted(got)}")
+            check("dates come back normalised", got["creation_date"] == "2026-03-04")
+            check("trapped is one of the allowed values",
+                  got["trapped"] in ("True", "False", "Unknown"))
+            check("custom properties keep their Key = Value form",
+                  "=" in got["custom"], got["custom"])
             check("suggested title matches the document",
                   got["title"] == REPLY["title"], got.get("title"))
             check("JSON wrapped in prose/code fences is still parsed",
@@ -242,7 +260,7 @@ def main() -> int:
             # so assert on the not-hidden state instead.
             check("every suggested field gets a row",
                   not panel.results.isHidden()
-                  and all(panel._rows[k][1].text() for k in got))
+                  and all(panel._rows[k][2].text() for k in got))
 
             # Apply one field.
             author_ctrl = page_ui.options_widget._controls["author"]
@@ -254,7 +272,7 @@ def main() -> int:
                   f"title={title_ctrl.text()!r} author={author_ctrl.text()!r}")
 
             # Edit a suggestion, then apply all.
-            panel._rows["author"][1].setText("Edited Author")
+            panel._rows["author"][2].setText("Edited Author")
             panel._apply_all()
             vals = page_ui.options_widget.values()
             check("Apply all uses the EDITED value",
@@ -385,6 +403,75 @@ def main() -> int:
             check("Refresh against a dead server reports it, no crash",
                   "couldn" in sp.ai_models_state.text().lower(),
                   sp.ai_models_state.text()[:60])
+
+            # ===== panel: all fields, bulk update, auto apply ==========
+            panel = page_ui.ai_panel
+            page_ui.options_widget._controls["privacy"].setCurrentIndex(0)
+            check("a row exists for every metadata field",
+                  len(panel._rows) == len(ai_metadata.FIELDS))
+            check("the summary counts this tool's AI-fillable fields",
+                  panel._total_fields == len(ai_metadata.FIELDS),
+                  str(panel._total_fields))
+
+            panel._show(got)
+            check("all suggested fields are shown", len(panel._current) == len(got))
+
+            # Bulk update: tick only two fields, apply just those.
+            for k in panel._current:
+                panel._rows[k][0].setChecked(False)
+            panel._rows["company"][0].setChecked(True)
+            panel._rows["manager"][0].setChecked(True)
+            for k in ("company", "manager", "copyright"):
+                page_ui.options_widget._controls[k].setText("")
+            panel._apply_selected()
+            vals = page_ui.options_widget.values()
+            check("Apply selected updates ONLY the ticked fields",
+                  vals["company"] == "MICO360" and vals["manager"] == "A. Manager"
+                  and vals["copyright"] == "",
+                  f"copyright={vals['copyright']!r}")
+            check("the summary reports how many fields were updated",
+                  "2 of" in panel.status.text(), panel.status.text()[:60])
+
+            # Select all -> apply all covers the rest, including the choice and
+            # multi-line controls.
+            panel._toggle_select_all()
+            panel._apply_all()
+            vals = page_ui.options_widget.values()
+            check("Apply all fills every suggested field",
+                  vals["copyright"] == "(c) 2026 MICO360"
+                  and vals["creation_date"] == "2026-03-04")
+            check("a choice field (Trapped) takes the suggestion",
+                  vals["trapped"] == "Unknown", str(vals["trapped"]))
+            check("a multi-line field (Custom) takes the suggestion",
+                  "Invoice Number = INV-1042" in vals["custom"], vals["custom"])
+
+            # Never overwrite a good value with a blank suggestion.
+            page_ui.options_widget._controls["title"].setText("Keep me")
+            page_ui._apply_ai_field("title", "   ")
+            check("a blank suggestion never wipes an existing value",
+                  page_ui.options_widget.values()["title"] == "Keep me")
+
+            # Privacy preset must be respected.
+            pv = page_ui.options_widget._controls["privacy"]
+            pv.setCurrentIndex(pv.findData("scrub"))
+            page_ui.options_widget._controls["author"].setText("Original")
+            page_ui._apply_ai_field("author", "AI Person")
+            check("suggestions are not applied while Privacy is on",
+                  page_ui.options_widget.values()["author"] == "Original")
+            pv.setCurrentIndex(pv.findData(""))
+
+            # Auto apply: suggestions land without any confirmation.
+            for k in ("company", "category"):
+                page_ui.options_widget._controls[k].setText("")
+            panel.chk_auto.setChecked(True)
+            panel._on_done(dict(got))
+            vals = page_ui.options_widget.values()
+            check("Auto apply fills the fields with no confirmation",
+                  vals["company"] == "MICO360" and vals["category"] == "Report")
+            check("auto-apply preference is remembered", settings.ai_auto_apply)
+            panel.chk_auto.setChecked(False)
+            check("turning auto-apply off is remembered too",
+                  not settings.ai_auto_apply)
     finally:
         srv.shutdown()
         (settings.ai_enabled, settings.ai_source, settings.ai_base_url,

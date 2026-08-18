@@ -1,9 +1,17 @@
 """AI metadata suggestions panel for the Edit Metadata page.
 
-Suggestions are always *shown first* and never applied on their own: each row
-has the AI's value in an editable box with its own Apply, plus Apply all and
-Dismiss for the whole set. Generation runs on a worker thread so the window
-never freezes.
+Suggestions cover every metadata field the tool supports. They are shown for
+review first — each row has a tick box (for bulk selection), an editable value
+and its own Apply — plus Apply all, Apply selected and Dismiss. Turning on
+*Auto apply* accepts them as soon as they arrive.
+
+Two rules protect existing metadata:
+  * a blank / low-confidence suggestion is never applied, so a useful value is
+    never overwritten with nothing;
+  * a field left at "Keep current" (and the whole panel under a Privacy preset)
+    is left alone.
+
+Generation runs on a worker thread so the window never freezes.
 """
 from __future__ import annotations
 
@@ -11,12 +19,12 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -46,20 +54,22 @@ class _SuggestWorker(QObject):
 
 
 class AiSuggestPanel(Card):
-    """Generate + review AI metadata suggestions.
+    """Generate + review AI metadata suggestions for every field.
 
-    ``applyField(key, value)`` is emitted when the user accepts one value; the
-    tool page writes it into the matching option control.
+    ``applyField(key, value)`` is emitted per accepted value; the tool page
+    writes it into the matching option control.
     """
 
     applyField = Signal(str, str)
     openSettings = Signal()
 
-    def __init__(self, get_selected_path, parent: QWidget | None = None):
+    def __init__(self, get_selected_path, parent: QWidget | None = None,
+                 field_count: int | None = None):
         super().__init__(parent)
         self._get_path = get_selected_path
         self._rows: dict[str, tuple] = {}
-        self._current: dict[str, str] = {}   # fields currently suggested
+        self._current: dict[str, str] = {}     # fields currently suggested
+        self._total_fields = field_count or len(FIELDS)
         self._thread = None
         self._worker = None
 
@@ -68,16 +78,17 @@ class AiSuggestPanel(Card):
         self.status = QLabel("")
         self.status.setObjectName("Hint")
         self.status.setWordWrap(True)
-        self.status.setOpenExternalLinks(False)
         self.add(self.status)
 
+        # --- actions -----------------------------------------------------
         row = QHBoxLayout()
-        self.btn_suggest = QPushButton("Suggest with AI")
+        self.btn_suggest = QPushButton("Suggest All with AI")
         self.btn_suggest.setObjectName("Ghost")
         self.btn_suggest.setCursor(Qt.PointingHandCursor)
         tip(self.btn_suggest,
-            "Read the selected document and suggest its properties. Nothing is "
-            "changed until you apply a suggestion.")
+            "Read the selected document and suggest a value for every metadata "
+            "field it can. Nothing changes until you apply — unless Auto apply "
+            "is on.")
         self.btn_suggest.clicked.connect(self._suggest)
         row.addWidget(self.btn_suggest)
 
@@ -94,28 +105,42 @@ class AiSuggestPanel(Card):
         holder.setLayout(row)
         self.add(holder)
 
-        # --- suggestion rows (hidden until we have some) ------------------
+        self.chk_auto = QCheckBox("Auto apply AI suggestions")
+        tip(self.chk_auto,
+            "Fill the fields as soon as the suggestions arrive, without "
+            "confirming each one. You can still edit anything afterwards.")
+        self.chk_auto.setChecked(_auto_apply_setting())
+        self.chk_auto.toggled.connect(self._on_auto_toggled)
+        self.add(self.chk_auto)
+
+        # --- one row per field -------------------------------------------
         self.results = QWidget()
         grid = QGridLayout(self.results)
         grid.setContentsMargins(0, 4, 0, 0)
         grid.setHorizontalSpacing(8)
         grid.setVerticalSpacing(6)
         for r, key in enumerate(FIELDS):
+            pick = QCheckBox()
+            pick.setChecked(True)
+            pick.setAccessibleName(f"Include {FIELD_LABELS[key]} in bulk update")
+            tip(pick, "Tick to include this field in Apply selected.")
             lbl = QLabel(FIELD_LABELS[key])
             lbl.setObjectName("Hint")
             edit = QLineEdit()
             edit.setPlaceholderText("—")
             edit.setAccessibleName(f"AI suggestion for {FIELD_LABELS[key]}")
-            tip(edit, "Edit the suggestion before applying it if you want.")
+            tip(edit, "Review or edit the suggested value before applying it.")
             btn = QPushButton("Apply")
             btn.setObjectName("Subtle")
             btn.setCursor(Qt.PointingHandCursor)
             tip(btn, f"Use this value for {FIELD_LABELS[key]}.")
             btn.clicked.connect(lambda _=False, k=key: self._apply_one(k))
-            grid.addWidget(lbl, r, 0)
-            grid.addWidget(edit, r, 1)
-            grid.addWidget(btn, r, 2)
-            self._rows[key] = (lbl, edit, btn)
+            grid.addWidget(pick, r, 0)
+            grid.addWidget(lbl, r, 1)
+            grid.addWidget(edit, r, 2)
+            grid.addWidget(btn, r, 3)
+            self._rows[key] = (pick, lbl, edit, btn)
+        grid.setColumnStretch(2, 1)
         self.add(self.results)
 
         actions = QHBoxLayout()
@@ -124,13 +149,29 @@ class AiSuggestPanel(Card):
         self.btn_apply_all.setCursor(Qt.PointingHandCursor)
         tip(self.btn_apply_all, "Use every suggested value above.")
         self.btn_apply_all.clicked.connect(self._apply_all)
+
+        self.btn_apply_sel = QPushButton("Apply selected")
+        self.btn_apply_sel.setObjectName("Ghost")
+        self.btn_apply_sel.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_apply_sel,
+            "Bulk update: apply only the ticked fields, leaving the rest alone.")
+        self.btn_apply_sel.clicked.connect(self._apply_selected)
+
+        self.btn_select_all = QPushButton("Select all")
+        self.btn_select_all.setObjectName("Ghost")
+        self.btn_select_all.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_select_all, "Tick or untick every suggested field.")
+        self.btn_select_all.clicked.connect(self._toggle_select_all)
+
         self.btn_dismiss = QPushButton("Dismiss")
         self.btn_dismiss.setObjectName("Ghost")
         self.btn_dismiss.setCursor(Qt.PointingHandCursor)
         tip(self.btn_dismiss, "Ignore these suggestions and hide them.")
         self.btn_dismiss.clicked.connect(self.clear)
-        actions.addWidget(self.btn_apply_all)
-        actions.addWidget(self.btn_dismiss)
+
+        for b in (self.btn_apply_all, self.btn_apply_sel, self.btn_select_all,
+                  self.btn_dismiss):
+            actions.addWidget(b)
         actions.addStretch(1)
         self.actions_row = QWidget()
         self.actions_row.setLayout(actions)
@@ -154,27 +195,35 @@ class AiSuggestPanel(Card):
             self._set_status("AI API not configured. " + why, warn=True)
 
     def _set_status(self, text: str, warn: bool = False) -> None:
-        self.status.setObjectName("Hint")
         self.status.setText(("⚠  " if warn else "") + text)
+
+    def _on_auto_toggled(self, on: bool) -> None:
+        try:
+            from mico360.config import settings
+            settings.ai_auto_apply = bool(on)
+        except Exception:              # noqa: BLE001
+            pass
 
     def clear(self) -> None:
         """Hide the suggestion rows (nothing pending)."""
         self._current = {}
-        for _lbl, edit, _btn in self._rows.values():
+        for pick, _lbl, edit, _btn in self._rows.values():
             edit.clear()
+            pick.setChecked(True)
         self.results.setVisible(False)
         self.actions_row.setVisible(False)
 
     def _show(self, values: dict) -> None:
+        """Display only the fields the AI could actually fill."""
         self._current = {k: v for k, v in values.items() if v}
         any_row = False
-        for key, (lbl, edit, btn) in self._rows.items():
+        for key, (pick, lbl, edit, btn) in self._rows.items():
             val = values.get(key, "")
             edit.setText(val)
             visible = bool(val)
-            lbl.setVisible(visible)
-            edit.setVisible(visible)
-            btn.setVisible(visible)
+            for w in (pick, lbl, edit, btn):
+                w.setVisible(visible)
+            pick.setChecked(visible)
             any_row = any_row or visible
         self.results.setVisible(any_row)
         self.actions_row.setVisible(any_row)
@@ -194,8 +243,9 @@ class AiSuggestPanel(Card):
 
         self.btn_suggest.setEnabled(False)
         self.btn_suggest.setText("Analysing…")
-        self._set_status(f"Reading '{Path(path).name}' and asking the AI… "
-                         "(the first request can take up to a minute)")
+        self._set_status(f"Reading '{Path(path).name}' and asking the AI for all "
+                         f"{self._total_fields} fields… (the first request can "
+                         "take up to a minute)")
 
         self._thread = QThread(self)
         self._worker = _SuggestWorker(Path(path), cfg)
@@ -207,7 +257,7 @@ class AiSuggestPanel(Card):
 
     def _finish_thread(self) -> None:
         self.btn_suggest.setEnabled(True)
-        self.btn_suggest.setText("Suggest with AI")
+        self.btn_suggest.setText("Suggest All with AI")
         if self._thread is not None:
             self._thread.quit()
             self._thread.wait(3000)
@@ -217,8 +267,14 @@ class AiSuggestPanel(Card):
     def _on_done(self, values: dict) -> None:
         self._finish_thread()
         self._show(values)
-        self._set_status(f"{len(values)} suggestion(s) — review, edit if you "
-                         "like, then apply.")
+        n = len(self._current)
+        if self.chk_auto.isChecked():
+            self._apply_all()
+        else:
+            self._set_status(
+                f"{n} of {self._total_fields} fields suggested — review, edit "
+                "if you like, then apply. Fields the AI wasn't sure about were "
+                "left out so your existing values stay put.")
 
     def _on_failed(self, message: str) -> None:
         self._finish_thread()
@@ -228,20 +284,45 @@ class AiSuggestPanel(Card):
             self.btn_configure.setVisible(True)
 
     # -----------------------------------------------------------------
-    def _apply_one(self, key: str) -> None:
-        _lbl, edit, _btn = self._rows[key]
-        value = edit.text().strip()
-        if value:
-            self.applyField.emit(key, value)
-            self._set_status(f"Applied {FIELD_LABELS[key]}.")
-
-    def _apply_all(self) -> None:
+    def _emit(self, keys) -> int:
+        """Apply the given fields; blanks are skipped so nothing is wiped."""
         n = 0
-        for key in self._current:
-            edit = self._rows[key][1]
-            value = edit.text().strip()     # the EDITED text, if the user changed it
+        for key in keys:
+            edit = self._rows[key][2]
+            value = edit.text().strip()      # the EDITED text, if changed
             if value:
                 self.applyField.emit(key, value)
                 n += 1
-        self._set_status(f"Applied {n} field(s). Click Start to write them "
-                         "into the document.")
+        return n
+
+    def _summary(self, n: int) -> None:
+        self._set_status(f"{n} of {self._total_fields} fields updated by AI. "
+                         "Click Start to write them into the document.")
+
+    def _apply_one(self, key: str) -> None:
+        if self._emit([key]):
+            self._set_status(f"Applied {FIELD_LABELS[key]}.")
+
+    def _apply_all(self) -> None:
+        self._summary(self._emit(list(self._current)))
+
+    def _apply_selected(self) -> None:
+        keys = [k for k in self._current if self._rows[k][0].isChecked()]
+        if not keys:
+            self._set_status("Tick at least one field to bulk update.", warn=True)
+            return
+        self._summary(self._emit(keys))
+
+    def _toggle_select_all(self) -> None:
+        shown = [k for k in self._current]
+        turn_on = not all(self._rows[k][0].isChecked() for k in shown)
+        for k in shown:
+            self._rows[k][0].setChecked(turn_on)
+
+
+def _auto_apply_setting() -> bool:
+    try:
+        from mico360.config import settings
+        return bool(settings.ai_auto_apply)
+    except Exception:                  # noqa: BLE001
+        return False

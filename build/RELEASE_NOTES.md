@@ -1,3 +1,27 @@
+## MICO360 Doc Toolkit v6.9.7
+
+**AI suggestions for every metadata field, with bulk update and auto-apply.**
+
+- **Suggest All with AI** now proposes a value for **all 16 metadata fields**, not just
+  five: Title, Author, Subject, Keywords, Creator, Producer, Creation date, Modification
+  date, Company, Manager, Category, Description/Comments, Custom properties, Copyright,
+  Language and Trapped.
+- **Bulk update** — every suggestion has a tick box. Use **Apply selected** to update just
+  the fields you chose, **Apply all** for the lot, or **Select all** to flip them at once.
+  The individual **Apply** buttons are still there for full manual control.
+- **Auto apply AI suggestions** — a new option that fills the fields the moment the
+  suggestions arrive, with no per-field confirmation. Your choice is remembered.
+- **Review or edit** any suggested value before it is applied, exactly as before.
+- **Your existing metadata is protected.** The AI is told to return nothing rather than
+  guess, and a blank or low-confidence suggestion is never applied — so a good value is
+  never overwritten with an empty one. Dates, Language and Trapped are validated, so an
+  unusable answer is discarded instead of being written in.
+- **Privacy is respected** — suggestions are not applied while a Privacy preset (Scrub or
+  Remove all) is selected, and fields left at "Keep current" stay that way.
+- A clear summary tells you what happened: **"12 of 16 fields updated by AI."**
+
+---
+
 ## MICO360 Doc Toolkit v6.9.6
 
 **Dropdowns now look like dropdowns.**

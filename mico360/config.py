@@ -245,6 +245,16 @@ class Settings:
         self._set_json("ai/models", out)
 
     @property
+    def ai_auto_apply(self) -> bool:
+        """Accept AI metadata suggestions as soon as they arrive, instead of
+        confirming each field. Off by default — review is the safe default."""
+        return self._get("ai/auto_apply", False, bool)
+
+    @ai_auto_apply.setter
+    def ai_auto_apply(self, value: bool) -> None:
+        self._set("ai/auto_apply", bool(value))
+
+    @property
     def ai_api_key_sealed(self) -> str:
         """The API key AS STORED — encrypted (DPAPI on Windows). Never render
         this; use mico360.core.ai.masked_key() on the decrypted value."""

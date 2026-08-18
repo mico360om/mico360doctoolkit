@@ -19,39 +19,69 @@ from mico360.logging_setup import get_logger
 
 log = get_logger("mico360.ai_metadata")
 
-# Fields we ask for, in the order the UI shows them.
-FIELDS = ("title", "author", "subject", "keywords", "comments", "category",
-          "language")
+# Every metadata field the AI may propose, in the order the UI shows them.
+# These keys match the Edit Metadata tool's option keys exactly, so a suggestion
+# can be written straight into the matching control.
+FIELDS = ("title", "author", "subject", "keywords", "creator", "producer",
+          "creation_date", "mod_date", "company", "manager", "category",
+          "comments", "custom", "copyright", "language", "trapped")
 
 FIELD_LABELS = {
     "title": "Title",
     "author": "Author",
     "subject": "Subject",
     "keywords": "Keywords",
-    "comments": "Description / Comments",
+    "creator": "Creator (authoring app)",
+    "producer": "Producer (PDF software)",
+    "creation_date": "Creation date",
+    "mod_date": "Modification date",
+    "company": "Company",
+    "manager": "Manager",
     "category": "Category",
+    "comments": "Description / Comments",
+    "custom": "Custom properties",
+    "copyright": "Copyright",
     "language": "Language",
+    "trapped": "Trapped",
 }
+
+# Trapped is a fixed choice, not free text.
+_TRAPPED_VALUES = {"true": "True", "false": "False", "unknown": "Unknown"}
 
 # How much document text to send. Enough to characterise the document, well
 # under the platform's 32,000-character prompt limit.
 MAX_CHARS = 8000
 
-_PROMPT = """You are a document cataloguing assistant. Read the document excerpt and \
-return metadata for it.
+_PROMPT = """You are a document cataloguing assistant. Read the document excerpt and return metadata for it.
 
 Reply with ONE JSON object and nothing else. Use exactly these keys:
-"title", "author", "subject", "keywords", "comments", "category", "language".
+"title", "author", "subject", "keywords", "creator", "producer",
+"creation_date", "mod_date", "company", "manager", "category", "comments",
+"custom", "copyright", "language", "trapped".
 
-Rules:
+Rules for each field:
 - title: the document's real title, not the file name. Concise.
-- author: only if the document clearly states one, else "".
+- author: the person or team who wrote it, if the document says so.
 - subject: one short line describing what the document is about.
 - keywords: 3-8 comma-separated terms, lowercase.
+- creator: the application the document was authored in, only if it is evident.
+- producer: the software that produced the PDF, only if it is evident.
+- creation_date: the date PRINTED IN the document (e.g. an invoice or report
+  date) as YYYY-MM-DD. Never guess, and never use today's date.
+- mod_date: a revision date printed in the document as YYYY-MM-DD, else "".
+- company: the organisation the document belongs to, if named.
+- manager: the responsible manager or owner, if named.
+- category: one short classifier, e.g. Report, Invoice, Contract, Manual.
 - comments: a 1-2 sentence description.
-- category: one short classifier, e.g. Report, Invoice, Contract, Manual, Article.
+- custom: extra properties worth recording, one per line as "Key = Value"
+  (e.g. "Invoice Number = INV-1042"). Use "" if there are none.
+- copyright: a copyright line if the document states one.
 - language: the BCP-47 tag of the document's language, e.g. en-US, ar, fr-FR.
-- Use "" for anything you cannot determine. Never invent an author or a date.
+- trapped: "True", "False" or "Unknown" — use "" unless the document says.
+
+CRITICAL: use "" for anything you cannot determine from the excerpt. Never
+invent a value, a person or a date. An empty string is always better than a
+guess, because a blank suggestion leaves the existing metadata untouched.
 
 Document excerpt:
 ---
@@ -179,16 +209,49 @@ def _parse_json_object(reply: str) -> dict:
     return obj if isinstance(obj, dict) else {}
 
 
-def _clean(value) -> str:
-    """Normalise one suggested value to a single tidy line."""
+_PLACEHOLDERS = ("n/a", "none", "null", "not specified", "not stated",
+                 "not available", "unspecified", "-", "--", "tbd", "todo",
+                 "no author", "no date")
+
+
+def _clean(value, field: str = "") -> str:
+    """Normalise one suggested value. Returns "" for anything unusable, which
+    means the field is left as-is rather than being blanked."""
     if value is None:
         return ""
+    if isinstance(value, dict):                    # custom props as an object
+        value = "\n".join(f"{k} = {v}" for k, v in value.items())
     if isinstance(value, (list, tuple)):
-        value = ", ".join(str(v) for v in value)
-    text = re.sub(r"\s+", " ", str(value)).strip()
-    # Models sometimes echo a placeholder rather than leaving it empty.
-    if text.lower() in ("n/a", "none", "unknown", "null", "not specified", "-"):
+        sep = "\n" if field == "custom" else ", "
+        value = sep.join(str(v) for v in value)
+    text = str(value)
+
+    if field == "custom":
+        # Keep one "Key = Value" per line; drop anything that isn't a pair.
+        lines = [re.sub(r"\s+", " ", ln).strip() for ln in text.splitlines()]
+        keep = [ln for ln in lines
+                if "=" in ln and ln.split("=", 1)[0].strip()
+                and ln.split("=", 1)[1].strip()
+                and ln.split("=", 1)[1].strip().lower() not in _PLACEHOLDERS]
+        return "\n".join(keep)[:1000]
+
+    text = re.sub(r"\s+", " ", text).strip()
+    low = text.lower().strip(" .")
+    if not text or low in _PLACEHOLDERS:
         return ""
+
+    if field == "trapped":
+        return _TRAPPED_VALUES.get(low, "")        # only the three valid values
+    if field in ("creation_date", "mod_date"):
+        m = re.search(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})", text)
+        if not m:
+            return ""                              # unusable date -> keep existing
+        y, mo, d = (int(x) for x in m.groups())
+        if not (1900 <= y <= 2200 and 1 <= mo <= 12 and 1 <= d <= 31):
+            return ""
+        return f"{y:04d}-{mo:02d}-{d:02d}"
+    if field == "language":
+        return text if re.fullmatch(r"[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*", text) else ""
     return text[:500]
 
 
@@ -203,7 +266,7 @@ def suggest_metadata(path: Path, cfg: AiConfig, excerpt: str | None = None) -> d
     obj = _parse_json_object(reply)
     out = {}
     for key in FIELDS:
-        val = _clean(obj.get(key))
+        val = _clean(obj.get(key), key)
         if val:
             out[key] = val
     if not out:
