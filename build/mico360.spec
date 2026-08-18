@@ -43,6 +43,8 @@ hiddenimports = [
     "pdfplumber", "pdfminer", "openpyxl", "pypdfium2",
     # Image -> SVG vector tracing
     "vtracer",
+    # AI metadata generator (ai_suggest is imported lazily inside a method)
+    "mico360.core.ai", "mico360.core.ai_metadata", "mico360.ui.ai_suggest",
 ]
 
 # Bundle tricky packages completely (data files, submodules).

@@ -1,3 +1,40 @@
+## MICO360 Doc Toolkit v6.9.4
+
+**AI metadata suggestions, and rock-solid file import.**
+
+**New: AI Metadata Generator**
+- On the **Edit Metadata** page, click **Suggest with AI** and the app reads the selected
+  document and proposes a **Title, Author, Subject, Keywords, Description, Category and
+  Language**.
+- **Nothing is applied until you say so.** Every suggestion appears in an editable box with
+  its own **Apply**, plus **Apply all** and **Dismiss** - so you can accept, tweak, or ignore
+  each field.
+
+**New: Settings -> AI**
+- Choose **System AI** (provided for you) or **My own AI API** - any OpenAI-compatible
+  service. Set the API URL, key and model, and use **Test connection** to check it works.
+- **Your API key is encrypted on your computer** and is never shown again after saving.
+- AI is **off by default**. When you do use it, only a short excerpt of that one document is
+  sent - never the whole file.
+
+**Improved: file import never gives up**
+- Importing a folder now streams through it instead of loading the whole tree first, skips
+  folders it isn't allowed to read, and can't be tripped up by broken shortcuts, disconnected
+  network drives or over-long names.
+- The queue now **tells you what it skipped** ("12 unsupported file(s) skipped") instead of
+  silently dropping files, and very large imports stop safely at a sensible limit.
+- A corrupt, empty or damaged file is **flagged as failed with a clear reason** while every
+  other file in the batch keeps processing.
+
+**Bug fixes**
+- Corrupt and password-protected PDFs now explain themselves instead of showing a technical
+  error.
+- PowerPoint text is now read from grouped shapes, tables and speaker notes too.
+- An image-only Office file now gets advice you can actually follow (convert to PDF, then
+  run OCR) instead of being pointed at a PDF-only tool.
+
+---
+
 ## MICO360 Doc Toolkit v6.9.3
 
 **Important fix: Searchable PDF (OCR) no longer crashes on multiple files.**
