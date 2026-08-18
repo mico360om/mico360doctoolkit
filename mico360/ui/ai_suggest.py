@@ -255,6 +255,12 @@ class AiSuggestPanel(Card):
         self._worker.failed.connect(self._on_failed)
         self._thread.start()
 
+    def closeEvent(self, event):        # noqa: N802
+        """Never let a running suggestion thread outlive the panel — Qt aborts
+        the process if a QThread is destroyed while still running."""
+        self._finish_thread()
+        super().closeEvent(event)
+
     def _finish_thread(self) -> None:
         self.btn_suggest.setEnabled(True)
         self.btn_suggest.setText("Suggest All with AI")
