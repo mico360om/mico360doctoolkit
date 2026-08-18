@@ -40,7 +40,7 @@ from mico360.core.tools import AGGREGATE, Tool
 from mico360.core.util import human_size
 from mico360.logging_setup import get_logger
 from mico360.theme import palette
-from mico360.ui.file_collector import collect_files
+from mico360.ui.file_collector import MAX_FILES, collect_files_detailed
 from mico360.ui.options_widget import OptionsWidget
 from mico360.ui.widgets import (
     ROLE_NAME, ROLE_STATE, ROLE_SUB, Card, Chip, DropArea, FileListWidget,
@@ -523,22 +523,48 @@ class ToolPage(QWidget):
     # -----------------------------------------------------------------
     # File management
     # -----------------------------------------------------------------
+    @staticmethod
+    def _dedupe_key(p: Path):
+        """Identity used to spot an already-queued file. Never raises — a path
+        that can't be resolved (dead network drive, over-long name) still gets a
+        stable key instead of taking the whole import down."""
+        try:
+            return p.resolve()
+        except OSError:
+            import os
+            return os.path.normcase(os.path.abspath(str(p)))
+
     def add_paths(self, paths: list) -> None:
-        found = collect_files(paths, self.tool.accept)
-        existing = {p.resolve() for p in (it.path for it in self.items)}
-        added = 0
+        """Import files/folders into the queue. Unsupported, unreadable and
+        duplicate files are skipped and reported — never fatal."""
+        found, stats = collect_files_detailed(paths, self.tool.accept)
+        existing = {self._dedupe_key(it.path) for it in self.items}
+        added = dupes = 0
         for p in found:
-            if p.resolve() not in existing:
-                self.items.append(QueueItem(path=p, size=_safe_size(p)))
-                existing.add(p.resolve())
-                added += 1
+            key = self._dedupe_key(p)
+            if key in existing:
+                dupes += 1
+                continue
+            self.items.append(QueueItem(path=p, size=_safe_size(p)))
+            existing.add(key)
+            added += 1
         self._refresh_list()
+
         if added:
             self._log(f"Added {added} file(s).")
-        elif found:
+        elif dupes:
             self._log("Those files are already in the queue.")
-        else:
+        elif not stats.unsupported and not stats.unreadable:
             self._log("No supported files found in the selection.")
+        # Always say what was skipped, so nothing disappears silently.
+        note = stats.summary()
+        if note:
+            self._log(f"Skipped: {note}.")
+            if stats.truncated:
+                self.toast.emit(
+                    f"Import stopped at the {MAX_FILES:,}-file limit", "info")
+        if dupes and added:
+            self._log(f"{dupes} file(s) were already queued.")
 
     def _sub_text(self, it: QueueItem) -> str:
         size = human_size(it.size) if it.size >= 0 else "?"
