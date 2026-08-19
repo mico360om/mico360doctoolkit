@@ -107,4 +107,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    _rc = main()
+    # Skip Qt's crash-prone offscreen teardown at interpreter shutdown
+    # (a lingering C++ object can abort finalization with 0xC0000409,
+    #  masking an otherwise-clean pass). Flush and exit with the result.
+    import os as _os, sys as _sys
+    _sys.stdout.flush(); _sys.stderr.flush()
+    _os._exit(_rc if isinstance(_rc, int) else 0)

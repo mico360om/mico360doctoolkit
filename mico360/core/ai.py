@@ -14,6 +14,7 @@ Networking is stdlib-only (urllib), so no new dependency ships in the installer.
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import sys
 import urllib.error
@@ -209,6 +210,17 @@ def _request(cfg: AiConfig, path: str, payload=None, timeout=DEFAULT_TIMEOUT):
         raise AiError("The AI server replied with something that isn't JSON. "
                       "That address may be a website rather than an AI API — "
                       "check the base URL includes the port and /v1.")
+    except http.client.HTTPException as exc:
+        # A truncated / malformed response (IncompleteRead, BadStatusLine, …) is
+        # an HTTPException, not an OSError — it would otherwise escape raw.
+        raise AiError(f"The AI server at {base} sent an incomplete or malformed "
+                      f"response ({type(exc).__name__}). Try again in a moment.")
+    except OSError as exc:
+        # A connection dropped/reset/aborted *while reading the response* is not
+        # wrapped in URLError by urllib (it escapes getresponse() raw), so catch
+        # it here and give the same friendly guidance instead of a WinError code.
+        raise AiError(f"The connection to the AI server at {base} was "
+                      f"interrupted ({exc}). Check your connection and try again.")
 
 
 def _http_message(exc, url: str) -> str:
@@ -240,10 +252,23 @@ def _http_message(exc, url: str) -> str:
 
 
 def list_models(cfg: AiConfig) -> list[str]:
-    """Model ids the key may use. Raises AiError with a readable reason."""
+    """Model ids the key may use, in order, de-duplicated and free of blanks.
+
+    A server that returns a whitespace-only or repeated id must not put an empty
+    or duplicate entry in the dropdown. Raises AiError with a readable reason.
+    """
     data = _request(cfg, "/models", timeout=CONNECT_TEST_TIMEOUT)
     items = data.get("data") or []
-    return [str(m.get("id")) for m in items if isinstance(m, dict) and m.get("id")]
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in items:
+        if not (isinstance(m, dict) and m.get("id")):
+            continue
+        mid = str(m["id"]).strip()
+        if mid and mid not in seen:
+            seen.add(mid)
+            out.append(mid)
+    return out
 
 
 def test_connection(cfg: AiConfig) -> tuple[bool, str]:

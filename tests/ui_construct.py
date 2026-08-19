@@ -39,3 +39,9 @@ for i in sorted(w._titles):
 assert len(w._widgets) == n_pages, f"only {len(w._widgets)}/{n_pages} pages built"
 print("Lazy navigation built all", len(w._widgets), "pages OK")
 print("Done.")
+# All checks above are asserts, so reaching here means success. Skip Qt's
+# crash-prone offscreen teardown (0xC0000409 at interpreter shutdown) with a
+# hard exit 0 so the result code reflects the actual outcome.
+sys.stdout.flush()
+sys.stderr.flush()
+os._exit(0)
