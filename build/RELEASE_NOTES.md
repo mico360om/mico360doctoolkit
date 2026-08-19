@@ -1,3 +1,21 @@
+## MICO360 Doc Toolkit v6.9.8
+
+**The AI model list keeps itself up to date.**
+
+- **Settings -> AI -> Model now updates automatically.** When you open Settings it checks the
+  server and fills the list with the models that are **active and online right now**, and it
+  re-checks periodically while the page is open - so a model that is switched off or whose
+  node goes offline **disappears on its own**, with no need to press Refresh.
+- Models that become unavailable are **hidden and briefly noted** (e.g. "Hidden: gemma2:9b"),
+  rather than silently vanishing.
+- If the model you have selected stops being offered, it is **kept and flagged** ("no longer
+  available - pick one from the list") instead of being silently swapped for another.
+- If the server can't be reached during a background check, your **last known list is kept**
+  so the dropdown is never suddenly empty.
+- **Refresh** (manual) and **Remove** (for models you added by hand) still work as before.
+
+---
+
 ## MICO360 Doc Toolkit v6.9.7
 
 **AI suggestions for every metadata field, with bulk update and auto-apply.**

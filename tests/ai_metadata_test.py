@@ -56,6 +56,9 @@ REPLY = {
 }
 
 
+AVAILABLE = ["qwen2.5:0.5b", "qwen2.5vl:7b", "llama3.1:8b"]
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -76,9 +79,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(401, {"error": {"message": "Invalid or missing API key."}})
         if self.path.rstrip("/").endswith("/v1/models"):
             return self._json(200, {"object": "list", "data": [
-                {"id": "qwen2.5:0.5b", "object": "model"},
-                {"id": "qwen2.5vl:7b", "object": "model"},
-                {"id": "llama3.1:8b", "object": "model"}]})
+                {"id": m, "object": "model"} for m in AVAILABLE]})
         self._json(404, {"error": {"message": "no route"}})
 
     def do_POST(self):
@@ -397,12 +398,101 @@ def main() -> int:
                   str(after))
             check("removing never empties the dropdown", len(after) >= 1)
 
-            # A refresh against an unreachable server must not crash.
+            # ===== availability: the list mirrors the server =========
+            def listed():
+                return [sp.ai_model.itemText(i) for i in range(sp.ai_model.count())]
+
+            sp.ai_url.setText(base)
+            sp.ai_key.setText(GOOD_KEY)
+            sp._save_ai()
+
+            # Drain any refresh still in flight from the earlier dropdown tests,
+            # so this sub-test starts from a known-quiet state.
+            wait_models = None
+            def _wait(pred, ms=15000):
+                from PySide6.QtCore import QEventLoop, QTimer
+                waited = 0
+                while not pred() and waited < ms:
+                    loop = QEventLoop()
+                    QTimer.singleShot(100, loop.quit)
+                    loop.exec()
+                    waited += 100
+                return pred()
+            wait_models = _wait
+            wait_models(lambda: getattr(sp, "_models_thread", None) is None, 5000)
+
+            # The list updates itself, with no button press.
+            settings.ai_models = []
+            sp.refresh_models_async(quiet=True)
+            auto_ok = wait_models(lambda: set(AVAILABLE) <= set(listed()))
+            check("the model list updates itself from the API (no click)",
+                  auto_ok, str(listed()))
+            # Fully settle: let any coalesced re-check finish so the next
+            # refresh is the one and only observer of a model going away.
+            wait_models(lambda: sp._models_thread is None and not sp._models_again)
+            wait_models(lambda: set(settings.ai_models) == set(AVAILABLE))
+
+            # A model going offline / being switched off disappears by itself —
+            # nothing in the user's settings changes, the server just stops
+            # advertising it. A background re-check is all it takes.
+            gone = AVAILABLE.pop()                      # server stops offering it
+            sp.refresh_models_async(quiet=True)
+            ok = wait_models(lambda: gone not in listed())
+            check("an unavailable model is hidden automatically", ok, str(listed()))
+            check("still-available models remain",
+                  set(AVAILABLE) <= set(listed()), str(listed()))
+            check("the hidden model is reported, not silently dropped",
+                  gone in sp.ai_models_state.text(), sp.ai_models_state.text()[:80])
+
+            # It comes back on its own once the server offers it again.
+            AVAILABLE.append(gone)
+            sp.refresh_models_async(quiet=True)
+            back = wait_models(lambda: gone in listed())
+            check("a model that comes back online reappears", back, str(listed()))
+
+            # If the SELECTED model vanishes it is kept + flagged, never
+            # silently swapped for another one.
+            sp.ai_model.setCurrentIndex(sp.ai_model.findText(gone))
+            sp._save_ai()
+            AVAILABLE.remove(gone)
+            sp.refresh_models_async(quiet=True)
+            flagged = wait_models(
+                lambda: "no longer available" in sp.ai_models_state.text())
+            check("losing the SELECTED model warns instead of switching it",
+                  flagged and sp.ai_model.currentText() == gone,
+                  f"{sp.ai_model.currentText()} | {sp.ai_models_state.text()[:60]}")
+            AVAILABLE.append(gone)
+
+            # A background failure keeps the last known list rather than
+            # emptying the dropdown.
+            before = listed()
             sp.ai_url.setText("http://127.0.0.1:9/v1")
+            sp._save_ai()
+            sp.refresh_models_async(quiet=True)
+            kept = wait_models(lambda: "last known" in sp.ai_models_state.text())
+            check("an offline server keeps the last known list", kept
+                  and len(listed()) == len(before), sp.ai_models_state.text()[:60])
+
+            # Opening Settings starts a periodic re-check; closing stops it.
+            from PySide6.QtCore import Qt as _Qt
+            sp.setAttribute(_Qt.WA_DontShowOnScreen, True)
+            sp.show()
+            check("opening Settings starts a periodic availability re-check",
+                  sp._model_timer is not None and sp._model_timer.isActive()
+                  and sp._model_timer.interval() >= 60000,
+                  f"{None if sp._model_timer is None else sp._model_timer.interval()}ms")
+            sp.close()
+            check("closing Settings stops the periodic re-check",
+                  not sp._model_timer.isActive())
+            sp.show()          # reopen for the remaining checks
+
+            # A manual refresh against a dead server must not crash.
             sp._refresh_models()
             check("Refresh against a dead server reports it, no crash",
-                  "couldn" in sp.ai_models_state.text().lower(),
+                  wait_models(lambda: "couldn" in sp.ai_models_state.text().lower()),
                   sp.ai_models_state.text()[:60])
+            sp.ai_url.setText(base)
+            sp._save_ai()
 
             # ===== panel: all fields, bulk update, auto apply ==========
             panel = page_ui.ai_panel
@@ -476,6 +566,14 @@ def main() -> int:
         srv.shutdown()
         (settings.ai_enabled, settings.ai_source, settings.ai_base_url,
          settings.ai_model, settings.ai_api_key_sealed) = saved
+        try:
+            sp._stop_model_work()
+            sp.close()
+            page_ui.ai_panel._finish_thread()
+            from PySide6.QtWidgets import QApplication as _QA
+            _QA.processEvents()
+        except Exception:
+            pass
 
     print()
     if failures:
@@ -486,4 +584,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    import os
+    _rc = main()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(_rc)     # skip Qt's crash-prone offscreen teardown at shutdown

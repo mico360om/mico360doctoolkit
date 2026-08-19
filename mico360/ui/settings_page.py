@@ -307,9 +307,9 @@ class SettingsPage(QWidget):
         self.ai_model.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
         self.ai_model.setMinimumContentsLength(18)
         tip(self.ai_model,
-            "Pick a model the server offers, or type a new id to add it. Small "
-            "models (e.g. qwen2.5:0.5b) answer in about a second; large ones can "
-            "take a minute on the first request.")
+            "Models currently available to your API key. The list updates "
+            "itself, and models that go offline or are switched off disappear "
+            "from it. You can still type an id to use one that isn't listed.")
 
         mrow = QHBoxLayout()
         mrow.setContentsMargins(0, 0, 0, 0)
@@ -318,7 +318,8 @@ class SettingsPage(QWidget):
         self.btn_models_refresh.setObjectName("Ghost")
         self.btn_models_refresh.setCursor(Qt.PointingHandCursor)
         tip(self.btn_models_refresh,
-            "Ask the server which models this key may use and fill the list.")
+            "Check the server for available models right now. The list also "
+            "refreshes itself automatically.")
         self.btn_models_refresh.clicked.connect(self._refresh_models)
         self.btn_models_remove = QPushButton("Remove")
         self.btn_models_remove.setObjectName("Ghost")
@@ -370,6 +371,12 @@ class SettingsPage(QWidget):
         note.setWordWrap(True)
         card.add(note)
 
+        self._models_thread = None
+        self._models_worker = None
+        self._models_again = False
+        self._models_gen = 0            # supersedes stale in-flight fetches
+        self._model_timer = None
+        self._stale_model = False
         self._load_models()
         self._sync_ai_fields()
         return card
@@ -384,71 +391,193 @@ class SettingsPage(QWidget):
         return w
 
     # --- model dropdown ------------------------------------------------
+    # The server only advertises models that are active platform-wide AND
+    # installed on a node that is online and accepting work, so whatever
+    # /v1/models returns IS the currently-available set. We simply mirror it,
+    # which means anything switched off or offline disappears on its own.
+    MODEL_REFRESH_MS = 5 * 60 * 1000        # background re-check while open
+
+    def _available_models(self) -> list:
+        """Last known live list (cached so the dropdown isn't empty offline)."""
+        return list(settings.ai_models)
+
     def _load_models(self, models=None, keep: str | None = None) -> None:
-        """Fill the dropdown from the saved list (plus the current selection)."""
+        """Fill the dropdown with the available models.
+
+        The currently-selected model is always kept in the list even if the
+        server no longer offers it — silently dropping the user's choice would
+        change what runs without telling them. It is flagged instead.
+        """
         from mico360.core import ai as ai_core
-        known = list(models if models is not None else settings.ai_models)
+        available = list(models if models is not None else self._available_models())
         current = keep if keep is not None else self.ai_model.currentText().strip()
-        for extra in (current, settings.ai_model, ai_core.SYSTEM_MODEL):
-            if extra and extra not in known:
-                known.append(extra)
+        current = current or settings.ai_model
+        items = list(available)
+        self._stale_model = bool(current) and bool(available) and current not in available
+        if current and current not in items:
+            items.append(current)          # never lose the active selection
+        if not items:
+            items = [ai_core.SYSTEM_MODEL]
+
         self.ai_model.blockSignals(True)
         self.ai_model.clear()
-        self.ai_model.addItems(known)
-        i = self.ai_model.findText(current or settings.ai_model)
+        self.ai_model.addItems(items)
+        i = self.ai_model.findText(current)
         if i >= 0:
             self.ai_model.setCurrentIndex(i)
         elif current:
             self.ai_model.setEditText(current)
         self.ai_model.blockSignals(False)
-        self.btn_models_remove.setEnabled(self.ai_model.count() > 1)
+        self.btn_models_remove.setEnabled(len(items) > 1)
+
+    def _set_models_state(self, text: str) -> None:
+        self.ai_models_state.setText(text)
+
+    def showEvent(self, event):         # noqa: N802
+        """Refresh the available models when Settings opens, and keep them
+        current on a timer while it stays open."""
+        super().showEvent(event)
+        self.refresh_models_async(quiet=True)
+        self._start_model_timer()
+
+    def hideEvent(self, event):         # noqa: N802
+        self._stop_model_work()
+        super().hideEvent(event)
+
+    def closeEvent(self, event):        # noqa: N802
+        """Stop the timer and any in-flight fetch so no QThread/QTimer outlives
+        the page (Qt aborts if a QThread is destroyed while running)."""
+        self._stop_model_work()
+        super().closeEvent(event)
+
+    def _stop_model_work(self) -> None:
+        t = getattr(self, "_model_timer", None)
+        if t is not None:
+            t.stop()
+        self._models_again = False
+        self._end_models_thread()
+
+    def _start_model_timer(self) -> None:
+        """Re-check availability periodically while Settings is open."""
+        if getattr(self, "_model_timer", None) is None:
+            from PySide6.QtCore import QTimer
+            self._model_timer = QTimer(self)
+            self._model_timer.setInterval(self.MODEL_REFRESH_MS)
+            self._model_timer.timeout.connect(lambda: self.refresh_models_async(quiet=True))
+        if not self._model_timer.isActive():
+            self._model_timer.start()
+
+    def refresh_models_async(self, quiet: bool = False) -> None:
+        """Fetch the available models off the UI thread. Safe to call often —
+        it does nothing when AI isn't configured, and never blocks."""
+        from mico360.core import ai as ai_core
+        if getattr(self, "_models_thread", None) is not None:
+            # One request at a time, but don't lose this one: the settings may
+            # have just changed, so re-run as soon as the current check ends.
+            self._models_again = True
+            return
+        cfg = ai_core.load_config()
+        ok, why = cfg.is_usable()
+        if not ok:
+            if not quiet:
+                self._set_models_state(why)
+            return
+        if not quiet:
+            self._set_models_state("Checking which models are available…")
+
+        self._models_gen += 1
+        gen = self._models_gen
+
+        from PySide6.QtCore import QObject, QThread, Signal
+
+        class _Worker(QObject):
+            done = Signal(list)
+            failed = Signal(str)
+
+            def run(self):
+                try:
+                    self.done.emit(list(ai_core.list_models(cfg)))
+                except Exception as exc:               # noqa: BLE001
+                    self.failed.emit(str(exc))
+
+        self._models_thread = QThread(self)
+        self._models_worker = _Worker()
+        self._models_worker.moveToThread(self._models_thread)
+        self._models_thread.started.connect(self._models_worker.run)
+        self._models_worker.done.connect(
+            lambda models: self._on_models(models, quiet, gen))
+        self._models_worker.failed.connect(
+            lambda msg: self._on_models_failed(msg, quiet, gen))
+        self._models_thread.start()
+
+    def _end_models_thread(self) -> None:
+        t = getattr(self, "_models_thread", None)
+        if t is not None:
+            t.quit()
+            t.wait(3000)
+        self._models_thread = None
+        self._models_worker = None
+        if getattr(self, "_models_again", False):
+            self._models_again = False
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: self.refresh_models_async(quiet=True))
+
+    def _on_models(self, models: list, quiet: bool, gen: int = 0) -> None:
+        self._end_models_thread()
+        self.btn_models_refresh.setEnabled(True)
+        if gen and gen != self._models_gen:
+            return                          # a newer request supersedes this one
+        previous = set(self._available_models())
+        settings.ai_models = models                    # cache the live set
+        self._load_models(models)
+        if not models:
+            self._set_models_state(
+                "No models are available to this key right now. Ask an "
+                "administrator to enable one.")
+            return
+        gone = sorted(previous - set(models))
+        note = f"{len(models)} model(s) available."
+        if gone:
+            note += f"  Hidden (offline or switched off): {', '.join(gone[:3])}"
+            if len(gone) > 3:
+                note += f" +{len(gone) - 3} more"
+        if getattr(self, "_stale_model", False):
+            note += (f"  ⚠ '{self.ai_model.currentText()}' is no longer "
+                     "available — pick one from the list.")
+        self._set_models_state(note)
+
+    def _on_models_failed(self, message: str, quiet: bool, gen: int = 0) -> None:
+        self._end_models_thread()
+        self.btn_models_refresh.setEnabled(True)
+        if gen and gen != self._models_gen:
+            return                          # superseded — don't clobber fresh state
+        if quiet:
+            # A background re-check shouldn't shout; keep the cached list.
+            self._set_models_state(
+                f"Couldn't refresh the model list. Showing the last known "
+                f"models. ({message})")
+        else:
+            self._set_models_state(f"Couldn't list models: {message}")
 
     def _refresh_models(self) -> None:
-        """Fetch the live model list for the configured key."""
-        from mico360.core import ai as ai_core
-        self._save_ai()                       # use what's on screen right now
+        """Manual Refresh — save what's on screen first, then re-check."""
+        self._save_ai()
         self.btn_models_refresh.setEnabled(False)
-        self.ai_models_state.setText("Fetching models…")
-        QApplication.processEvents()
-        try:
-            models = ai_core.list_models(ai_core.load_config())
-        except ai_core.AiError as exc:
-            self.ai_models_state.setText(f"Couldn't list models: {exc}")
-            return
-        except Exception as exc:              # noqa: BLE001
-            self.ai_models_state.setText(f"Couldn't list models: {exc}")
-            return
-        finally:
-            self.btn_models_refresh.setEnabled(True)
-        if not models:
-            self.ai_models_state.setText(
-                "The server offers no models to this key. Ask an administrator "
-                "to enable one.")
-            return
-        # Keep any hand-added ids the server doesn't know about.
-        merged = list(models)
-        for m in settings.ai_models:
-            if m not in merged:
-                merged.append(m)
-        settings.ai_models = merged
-        self._load_models(merged)
-        self.ai_models_state.setText(
-            f"{len(models)} model(s) available from the server.")
+        self.refresh_models_async(quiet=False)
 
     def _remove_model(self) -> None:
-        """Drop the selected id from the dropdown (not from the server)."""
+        """Forget a hand-added model. Server-provided ones come back on the
+        next refresh, because availability is decided by the server."""
         name = self.ai_model.currentText().strip()
+        remaining = [m for m in self._available_models() if m != name]
         if not name or self.ai_model.count() <= 1:
             return
-        remaining = [m for m in settings.ai_models if m != name]
         settings.ai_models = remaining
-        # Move the selection off the removed id BEFORE reloading — otherwise
-        # _load_models re-adds it as "the currently selected model".
         new_pick = remaining[0] if remaining else ""
         settings.ai_model = new_pick
         self._load_models(remaining, keep=new_pick)
         self._save_ai()
-        self.ai_models_state.setText(f"Removed '{name}' from the list.")
+        self._set_models_state(f"Removed '{name}' from the list.")
 
     def _sync_ai_fields(self) -> None:
         """Custom-only fields are disabled under System AI, and a saved key is
@@ -500,6 +629,8 @@ class SettingsPage(QWidget):
         self.ai_key.clear()          # never keep the secret on screen
         self._sync_ai_fields()
         self.ai_status.setText("Saved.")
+        # New endpoint or key => a different set of models may be available.
+        self.refresh_models_async(quiet=True)
 
     def _test_ai(self) -> None:
         from mico360.core import ai as ai_core
