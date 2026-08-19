@@ -17,6 +17,7 @@ import base64
 import http.client
 import json
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -33,6 +34,15 @@ SYSTEM_MODEL = "qwen2.5:0.5b"
 # guidance is a client timeout of at least 120s.
 DEFAULT_TIMEOUT = 120
 CONNECT_TEST_TIMEOUT = 30
+
+# Transient statuses worth an automatic retry: 429 (rate/quota) and 503 (no node
+# free right now — the platform queues work and a node may free up, and from
+# relay 1.4.4 a 503 is refused before a job is created, so retrying is safe).
+# 502 (the job ran and FAILED) and 504 ("the job may still be queued — do not
+# blindly resubmit") are deliberately NOT retried. Retry-After is honoured.
+RETRYABLE_STATUS = frozenset({429, 503})
+MAX_RETRIES = 2
+RETRY_BACKOFF_CAP = 8      # seconds; a longer Retry-After surfaces the message instead
 
 SOURCE_SYSTEM = "system"
 SOURCE_CUSTOM = "custom"
@@ -177,7 +187,30 @@ def normalize_base_url(url: str) -> str:
 # =====================================================================
 # HTTP
 # =====================================================================
-def _request(cfg: AiConfig, path: str, payload=None, timeout=DEFAULT_TIMEOUT):
+def _retry_after_seconds(exc, fallback: float) -> float:
+    """Seconds to wait before a retry, honouring a numeric ``Retry-After``
+    header when the server sends one. HTTP-date forms fall back to our backoff."""
+    hdr = None
+    try:
+        headers = getattr(exc, "headers", None)
+        if headers is not None:
+            hdr = headers.get("Retry-After")
+    except Exception:           # noqa: BLE001 - a header must never break a request
+        hdr = None
+    if hdr:
+        try:
+            return max(0.0, float(hdr))
+        except (TypeError, ValueError):
+            return fallback
+    return fallback
+
+
+def _request(cfg: AiConfig, path: str, payload=None, timeout=DEFAULT_TIMEOUT,
+             retries: int = 0, cancel=None):
+    """Call the API. ``retries`` auto-retries transient 429/503 responses
+    (honouring Retry-After). ``cancel`` is an optional event-like object with
+    ``is_set()``/``wait()`` — when set it aborts the wait between retries so a
+    user's Cancel is felt immediately rather than after the backoff."""
     base = cfg.effective_base_url
     if not base:
         raise AiError("No AI API URL is configured.")
@@ -193,34 +226,56 @@ def _request(cfg: AiConfig, path: str, payload=None, timeout=DEFAULT_TIMEOUT):
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers,
                                  method="POST" if data else "GET")
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-            body = resp.read().decode("utf-8", errors="replace")
-        return json.loads(body) if body.strip() else {}
-    except urllib.error.HTTPError as exc:
-        raise AiError(_http_message(exc, url))
-    except urllib.error.URLError as exc:
-        raise AiError(f"Couldn't reach the AI server at {base} "
-                      f"({getattr(exc, 'reason', exc)}). Check the URL, the port "
-                      "and your connection.")
-    except TimeoutError:
-        raise AiError("The AI server took too long to respond. Large models can "
-                      "need up to two minutes on the first request — try again.")
-    except json.JSONDecodeError:
-        raise AiError("The AI server replied with something that isn't JSON. "
-                      "That address may be a website rather than an AI API — "
-                      "check the base URL includes the port and /v1.")
-    except http.client.HTTPException as exc:
-        # A truncated / malformed response (IncompleteRead, BadStatusLine, …) is
-        # an HTTPException, not an OSError — it would otherwise escape raw.
-        raise AiError(f"The AI server at {base} sent an incomplete or malformed "
-                      f"response ({type(exc).__name__}). Try again in a moment.")
-    except OSError as exc:
-        # A connection dropped/reset/aborted *while reading the response* is not
-        # wrapped in URLError by urllib (it escapes getresponse() raw), so catch
-        # it here and give the same friendly guidance instead of a WinError code.
-        raise AiError(f"The connection to the AI server at {base} was "
-                      f"interrupted ({exc}). Check your connection and try again.")
+    attempt = 0
+    while True:
+        if cancel is not None and cancel.is_set():
+            raise AiError("Cancelled.")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+                body = resp.read().decode("utf-8", errors="replace")
+            return json.loads(body) if body.strip() else {}
+        except urllib.error.HTTPError as exc:
+            transient = (exc.code in RETRYABLE_STATUS and attempt < retries
+                         and not (cancel is not None and cancel.is_set()))
+            if transient:
+                wait = _retry_after_seconds(
+                    exc, fallback=min(2 * (attempt + 1), RETRY_BACKOFF_CAP))
+                # A very long Retry-After means "stop retrying in a tight loop";
+                # surface the server's message instead of blocking for minutes.
+                if wait <= RETRY_BACKOFF_CAP:
+                    if cancel is not None:
+                        if cancel.wait(wait):
+                            raise AiError("Cancelled.")
+                    else:
+                        time.sleep(wait)
+                    attempt += 1
+                    continue
+            raise AiError(_http_message(exc, url))
+        except urllib.error.URLError as exc:
+            raise AiError(f"Couldn't reach the AI server at {base} "
+                          f"({getattr(exc, 'reason', exc)}). Check the URL, the "
+                          "port and your connection.")
+        except TimeoutError:
+            raise AiError("The AI server took too long to respond. Large models "
+                          "can need up to two minutes on the first request — try "
+                          "again.")
+        except json.JSONDecodeError:
+            raise AiError("The AI server replied with something that isn't JSON. "
+                          "That address may be a website rather than an AI API — "
+                          "check the base URL includes the port and /v1.")
+        except http.client.HTTPException as exc:
+            # A truncated / malformed response (IncompleteRead, BadStatusLine, …)
+            # is an HTTPException, not an OSError — it would otherwise escape raw.
+            raise AiError(f"The AI server at {base} sent an incomplete or "
+                          f"malformed response ({type(exc).__name__}). Try again "
+                          "in a moment.")
+        except OSError as exc:
+            # A connection dropped/reset/aborted *while reading the response* is
+            # not wrapped in URLError by urllib (it escapes getresponse() raw),
+            # so catch it here and give friendly guidance, not a WinError code.
+            raise AiError(f"The connection to the AI server at {base} was "
+                          f"interrupted ({exc}). Check your connection and try "
+                          "again.")
 
 
 def _http_message(exc, url: str) -> str:
@@ -295,15 +350,21 @@ def test_connection(cfg: AiConfig) -> tuple[bool, str]:
 
 
 def chat(cfg: AiConfig, messages: list[dict], timeout: int = DEFAULT_TIMEOUT,
-         max_tokens: int | None = None) -> str:
-    """Send a chat completion and return the assistant's text."""
+         max_tokens: int | None = None, retries: int = MAX_RETRIES,
+         cancel=None) -> str:
+    """Send a chat completion and return the assistant's text.
+
+    Transient 429/503 responses are retried automatically (``retries``); pass a
+    ``cancel`` event-like object to abort the wait between retries promptly.
+    """
     ok, why = cfg.is_usable()
     if not ok:
         raise AiError(why)
     payload = {"model": cfg.effective_model, "messages": messages, "stream": False}
     if max_tokens:
         payload["max_tokens"] = int(max_tokens)
-    data = _request(cfg, "/chat/completions", payload, timeout=timeout)
+    data = _request(cfg, "/chat/completions", payload, timeout=timeout,
+                    retries=retries, cancel=cancel)
     try:
         return (data["choices"][0]["message"]["content"] or "").strip()
     except (KeyError, IndexError, TypeError):

@@ -569,7 +569,7 @@ def main() -> int:
         try:
             sp._stop_model_work()
             sp.close()
-            page_ui.ai_panel._finish_thread()
+            page_ui.ai_panel._teardown_threads()
             from PySide6.QtWidgets import QApplication as _QA
             _QA.processEvents()
         except Exception:

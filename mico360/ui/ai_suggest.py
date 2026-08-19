@@ -40,15 +40,17 @@ class _SuggestWorker(QObject):
     done = Signal(dict)
     failed = Signal(str)
 
-    def __init__(self, path: Path, cfg):
+    def __init__(self, path: Path, cfg, cancel=None):
         super().__init__()
         self._path = path
         self._cfg = cfg
+        self._cancel = cancel
 
     def run(self) -> None:
         try:
             from mico360.core.ai_metadata import suggest_metadata
-            self.done.emit(suggest_metadata(self._path, self._cfg))
+            self.done.emit(suggest_metadata(self._path, self._cfg,
+                                            cancel=self._cancel))
         except Exception as exc:      # noqa: BLE001 - reported, never fatal
             self.failed.emit(str(exc))
 
@@ -72,6 +74,9 @@ class AiSuggestPanel(Card):
         self._total_fields = field_count or len(FIELDS)
         self._thread = None
         self._worker = None
+        self._active_token = 0        # bumped each run; a stale result is ignored
+        self._cancel_event = None     # threading.Event for the running request
+        self._pending: set = set()    # threads awaiting non-blocking reap
 
         self.add(section_label("AI suggestions"))
 
@@ -91,6 +96,15 @@ class AiSuggestPanel(Card):
             "is on.")
         self.btn_suggest.clicked.connect(self._suggest)
         row.addWidget(self.btn_suggest)
+
+        self.btn_cancel = QPushButton("Cancel")
+        self.btn_cancel.setObjectName("Ghost")
+        self.btn_cancel.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_cancel,
+            "Stop waiting for the AI. Any answer still on its way is discarded.")
+        self.btn_cancel.clicked.connect(self._cancel)
+        self.btn_cancel.setVisible(False)
+        row.addWidget(self.btn_cancel)
 
         self.btn_configure = QPushButton("Configure AI…")
         self.btn_configure.setObjectName("Ghost")
@@ -241,37 +255,89 @@ class AiSuggestPanel(Card):
             self.btn_configure.setVisible(True)
             return
 
+        import threading
+        self._active_token += 1
+        token = self._active_token
+        self._cancel_event = threading.Event()
+
         self.btn_suggest.setEnabled(False)
         self.btn_suggest.setText("Analysing…")
+        self.btn_cancel.setVisible(True)
         self._set_status(f"Reading '{Path(path).name}' and asking the AI for all "
                          f"{self._total_fields} fields… (the first request can "
-                         "take up to a minute)")
+                         "take up to a minute — Cancel to stop waiting)")
 
-        self._thread = QThread(self)
-        self._worker = _SuggestWorker(Path(path), cfg)
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.done.connect(self._on_done)
-        self._worker.failed.connect(self._on_failed)
-        self._thread.start()
+        thread = QThread(self)
+        worker = _SuggestWorker(Path(path), cfg, self._cancel_event)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.done.connect(lambda v, t=token: self._on_done(v, t))
+        worker.failed.connect(lambda m, t=token: self._on_failed(m, t))
+        # Non-blocking self-reap: the thread quits and deletes itself when the
+        # worker finishes, so a cancelled run cleans up on its own without the UI
+        # ever calling wait() on a still-blocked network read.
+        worker.done.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(lambda th=thread: self._pending.discard(th))
+        self._pending.add(thread)
+        self._thread = thread
+        self._worker = worker
+        thread.start()
+
+    def _cancel(self) -> None:
+        """Stop waiting for the current suggestion and free the panel now.
+
+        A blocking network read can't be truly aborted, so the pending answer is
+        marked stale (its result is discarded when it eventually arrives) and the
+        request's retry-backoff wait is interrupted immediately.
+        """
+        self._active_token += 1               # any result in flight is now stale
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+        if self._thread is not None:
+            self._thread.requestInterruption()
+        self._thread = None
+        self._worker = None
+        self._reset_idle()
+        self._set_status("Cancelled.")
+
+    def _reset_idle(self) -> None:
+        self.btn_suggest.setEnabled(True)
+        self.btn_suggest.setText("Suggest All with AI")
+        self.btn_cancel.setVisible(False)
 
     def closeEvent(self, event):        # noqa: N802
         """Never let a running suggestion thread outlive the panel — Qt aborts
         the process if a QThread is destroyed while still running."""
-        self._finish_thread()
+        self._teardown_threads()
         super().closeEvent(event)
 
-    def _finish_thread(self) -> None:
-        self.btn_suggest.setEnabled(True)
-        self.btn_suggest.setText("Suggest All with AI")
-        if self._thread is not None:
-            self._thread.quit()
-            self._thread.wait(3000)
-            self._thread = None
-            self._worker = None
+    def _teardown_threads(self) -> None:
+        self._active_token += 1
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+        for th in list(self._pending):
+            # A thread may already have self-reaped (deleteLater) by the time we
+            # get here; touching a deleted QThread would raise and, at shutdown,
+            # crash the app. Guard every call.
+            try:
+                th.requestInterruption()
+                th.quit()
+                th.wait(3000)
+            except RuntimeError:
+                pass
+        self._pending.clear()
+        self._thread = None
+        self._worker = None
 
-    def _on_done(self, values: dict) -> None:
-        self._finish_thread()
+    def _on_done(self, values: dict, token=None) -> None:
+        if token is not None and token != self._active_token:
+            return                            # cancelled or superseded — ignore
+        self._thread = None
+        self._worker = None
+        self._reset_idle()
         self._show(values)
         n = len(self._current)
         if self.chk_auto.isChecked():
@@ -282,8 +348,12 @@ class AiSuggestPanel(Card):
                 "if you like, then apply. Fields the AI wasn't sure about were "
                 "left out so your existing values stay put.")
 
-    def _on_failed(self, message: str) -> None:
-        self._finish_thread()
+    def _on_failed(self, message: str, token=None) -> None:
+        if token is not None and token != self._active_token:
+            return                            # cancelled or superseded — ignore
+        self._thread = None
+        self._worker = None
+        self._reset_idle()
         self.clear()
         self._set_status(message, warn=True)
         if "not configured" in message.lower() or "api key" in message.lower():

@@ -255,14 +255,19 @@ def _clean(value, field: str = "") -> str:
     return text[:500]
 
 
-def suggest_metadata(path: Path, cfg: AiConfig, excerpt: str | None = None) -> dict:
-    """Return {field: suggested value} for a document. Raises AiError."""
+def suggest_metadata(path: Path, cfg: AiConfig, excerpt: str | None = None,
+                     cancel=None) -> dict:
+    """Return {field: suggested value} for a document. Raises AiError.
+
+    ``cancel`` is an optional event-like object (``is_set()``/``wait()``) passed
+    through to the request layer so a user's Cancel interrupts a retry wait.
+    """
     text = excerpt if excerpt is not None else extract_text(Path(path))
     reply = chat(cfg, [
         {"role": "system",
          "content": "You reply with a single JSON object and no other text."},
         {"role": "user", "content": _PROMPT.format(excerpt=text)},
-    ])
+    ], cancel=cancel)
     obj = _parse_json_object(reply)
     out = {}
     for key in FIELDS:
