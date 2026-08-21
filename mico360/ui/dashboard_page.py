@@ -119,12 +119,20 @@ class DashboardPage(QWidget):
         self.root.setContentsMargins(28, 22, 28, 22)
         self.root.setSpacing(16)
 
-        from mico360.theme import palette
-        _accent = palette(settings.theme)["primary"]
-        greeting = QLabel(f"Welcome to <span style='color:{_accent};'>"
-                          f"{__app_name__}</span>")
-        greeting.setObjectName("DashGreeting")
-        greeting.setTextFormat(Qt.RichText)
+        # Two labels rather than inline HTML colour, so the brand accent follows
+        # the active theme when the user toggles (the stylesheet re-applies).
+        grow = QHBoxLayout()
+        grow.setContentsMargins(0, 0, 0, 0)
+        grow.setSpacing(0)
+        g_lead = QLabel("Welcome to ")
+        g_lead.setObjectName("DashGreeting")
+        g_brand = QLabel(__app_name__)
+        g_brand.setObjectName("DashGreetingBrand")
+        grow.addWidget(g_lead)
+        grow.addWidget(g_brand)
+        grow.addStretch(1)
+        greeting = QWidget()
+        greeting.setLayout(grow)
         self.root.addWidget(greeting)
         sub = QLabel("Pick a quick action, drop files anywhere, or choose a tool "
                      "from the sidebar.")

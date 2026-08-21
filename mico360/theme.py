@@ -383,6 +383,7 @@ QRadioButton::indicator:checked {{ background: {c['primary']}; border: 5px solid
 #DashChevron {{ color: {c['text_faint']}; font-size: 20px; font-weight: 700; }}
 #DashTile:hover #DashChevron {{ color: {c['primary']}; }}
 #DashGreeting {{ color: {c['text']}; font-size: 30px; font-weight: 800; }}
+#DashGreetingBrand {{ color: {c['primary']}; font-size: 30px; font-weight: 800; }}
 #FavStar {{
     color: {c['text_faint']}; border: none; background: transparent;
     font-size: 20px; font-family: "Segoe UI Symbol", "Segoe UI Emoji", "Segoe UI";
