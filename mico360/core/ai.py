@@ -114,12 +114,22 @@ def unseal_key(stored: str) -> str:
 
 
 def masked_key(plain: str) -> str:
-    """A safe display form: never reveals the secret. 'mico_abc…7f42' style."""
+    """A safe display form that never reveals more than about a third of the key.
+
+    Long keys show a recognisable head and tail (``mico_••••••••7f42``); short
+    keys reveal proportionally less, and anything under 12 characters is masked
+    entirely — a fixed ``first-5 + last-4`` rule exposed 9 of an 11-character
+    key (82%).
+    """
     if not plain:
         return ""
-    if len(plain) <= 10:
-        return "•" * len(plain)
-    return f"{plain[:5]}{'•' * 8}{plain[-4:]}"
+    n = len(plain)
+    if n < 12:                       # too short to reveal any part safely
+        return "•" * n
+    reveal = min(n // 3, 9)          # never reveal more than a third, capped at 9
+    tail = min(4, reveal)
+    head = min(5, reveal - tail)
+    return f"{plain[:head]}{'•' * (n - head - tail)}{plain[-tail:]}"
 
 
 def is_strongly_protected() -> bool:

@@ -326,6 +326,14 @@ def main() -> int:
             # --- Test connection: BOTH outcomes must render, not crash ------
             # (A missing palette key once made the FAILURE path raise KeyError,
             #  which is exactly the path a misconfigured user hits.)
+            # Test connection now runs off the UI thread; wait for it to finish.
+            def await_test(timeout=15000):
+                from PySide6.QtCore import QEventLoop, QTimer
+                w = 0
+                while getattr(sp, "_test_thread", None) is not None and w < timeout:
+                    loop = QEventLoop(); QTimer.singleShot(50, loop.quit); loop.exec()
+                    w += 50
+
             for theme in ("light", "dark"):
                 prev_theme = settings.theme_mode
                 settings.theme_mode = theme
@@ -334,13 +342,13 @@ def main() -> int:
                 # success
                 sp.ai_url.setText(base)
                 sp.ai_key.setText(GOOD_KEY)
-                sp._test_ai()
+                sp._test_ai(); await_test()
                 ok_txt = sp.ai_status.text()
                 check(f"Test connection renders SUCCESS ({theme} theme)",
                       "qwen2.5" in ok_txt and "<span" in ok_txt, ok_txt[:60])
                 # failure — unreachable server
                 sp.ai_url.setText("http://127.0.0.1:9/v1")
-                sp._test_ai()
+                sp._test_ai(); await_test()
                 bad_txt = sp.ai_status.text()
                 check(f"Test connection renders FAILURE without crashing ({theme})",
                       "reach" in bad_txt.lower() and "<span" in bad_txt,
@@ -353,7 +361,7 @@ def main() -> int:
             _orig = _ai.test_connection
             try:
                 _ai.test_connection = lambda cfg: (False, "bad <b>url</b> & key")
-                sp._test_ai()
+                sp._test_ai(); await_test()
                 check("a message with markup is escaped, not rendered",
                       "&lt;b&gt;" in sp.ai_status.text(), sp.ai_status.text()[:70])
             finally:

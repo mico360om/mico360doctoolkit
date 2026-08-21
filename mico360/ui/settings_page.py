@@ -377,6 +377,13 @@ class SettingsPage(QWidget):
         self._models_gen = 0            # supersedes stale in-flight fetches
         self._model_timer = None
         self._stale_model = False
+        self._test_thread = None
+        self._test_worker = None
+        # The server-advertised models seen most recently, so a refresh can tell
+        # which models genuinely went offline (vs. the user's own hand-added
+        # ids). Reconstruct the split from what was saved last session.
+        self._server_models = [m for m in settings.ai_models
+                               if m not in settings.ai_custom_models]
         self._load_models()
         self._sync_ai_fields()
         return card
@@ -456,6 +463,15 @@ class SettingsPage(QWidget):
             t.stop()
         self._models_again = False
         self._end_models_thread()
+        tt = getattr(self, "_test_thread", None)
+        if tt is not None:
+            try:
+                tt.quit()
+                tt.wait(3000)
+            except RuntimeError:
+                pass
+        self._test_thread = None
+        self._test_worker = None
 
     def _start_model_timer(self) -> None:
         """Re-check availability periodically while Settings is open."""
@@ -527,16 +543,28 @@ class SettingsPage(QWidget):
         self.btn_models_refresh.setEnabled(True)
         if gen and gen != self._models_gen:
             return                          # a newer request supersedes this one
-        previous = set(self._available_models())
-        settings.ai_models = models                    # cache the live set
-        self._load_models(models)
-        if not models:
+        # Only the SERVER list is authoritative; the user's hand-added models are
+        # preserved across a refresh and never counted as "gone". An id the
+        # server now advertises is no longer custom (self-heals a wrong guess).
+        prev_server = set(getattr(self, "_server_models", []))
+        self._server_models = list(models)
+        settings.ai_custom_models = [m for m in settings.ai_custom_models
+                                     if m not in models]
+        custom = list(settings.ai_custom_models)
+        merged = list(dict.fromkeys(list(models) + custom))
+        settings.ai_models = merged                    # cache the union
+        self._load_models(merged)
+        if not merged:
             self._set_models_state(
                 "No models are available to this key right now. Ask an "
                 "administrator to enable one.")
             return
-        gone = sorted(previous - set(models))
+        gone = sorted(prev_server - set(models))       # server models only
         note = f"{len(models)} model(s) available."
+        if custom:
+            note += f"  Your own: {', '.join(custom[:3])}"
+            if len(custom) > 3:
+                note += f" +{len(custom) - 3} more"
         if gone:
             note += f"  Hidden (offline or switched off): {', '.join(gone[:3])}"
             if len(gone) > 3:
@@ -573,6 +601,8 @@ class SettingsPage(QWidget):
         if not name or self.ai_model.count() <= 1:
             return
         settings.ai_models = remaining
+        settings.ai_custom_models = [m for m in settings.ai_custom_models
+                                     if m != name]
         new_pick = remaining[0] if remaining else ""
         settings.ai_model = new_pick
         self._load_models(remaining, keep=new_pick)
@@ -622,9 +652,16 @@ class SettingsPage(QWidget):
             cfg.base_url = ai_core.normalize_base_url(cfg.base_url)
             self.ai_url.setText(cfg.base_url)
         # A model id typed into the editable combo becomes a saved entry, so
-        # "new models can be added" simply by naming one.
-        if cfg.model and cfg.model not in settings.ai_models:
-            settings.ai_models = list(settings.ai_models) + [cfg.model]
+        # "new models can be added" simply by naming one. A model the server
+        # doesn't advertise is the user's own — remembered separately so a
+        # refresh can't delete it.
+        if cfg.model:
+            if cfg.model not in settings.ai_models:
+                settings.ai_models = list(settings.ai_models) + [cfg.model]
+            if (cfg.model not in getattr(self, "_server_models", [])
+                    and cfg.model not in settings.ai_custom_models):
+                settings.ai_custom_models = (list(settings.ai_custom_models)
+                                             + [cfg.model])
         ai_core.save_config(cfg, api_key=typed if typed else None)
         self.ai_key.clear()          # never keep the secret on screen
         self._sync_ai_fields()
@@ -633,15 +670,47 @@ class SettingsPage(QWidget):
         self.refresh_models_async(quiet=True)
 
     def _test_ai(self) -> None:
+        """Test the connection OFF the UI thread — an unreachable host can block
+        the connect for the full timeout (~30s), which would otherwise freeze the
+        whole window with no way to interact."""
         from mico360.core import ai as ai_core
         self._save_ai()
+        if getattr(self, "_test_thread", None) is not None:
+            return                          # a test is already running
         self.btn_ai_test.setEnabled(False)
-        self.ai_status.setText("Testing...")
-        QApplication.processEvents()
-        try:
-            ok, msg = ai_core.test_connection(ai_core.load_config())
-        finally:
-            self.btn_ai_test.setEnabled(True)
+        self.ai_status.setTextFormat(Qt.PlainText)
+        self.ai_status.setText("Testing…")
+        cfg = ai_core.load_config()
+
+        from PySide6.QtCore import QObject, QThread, Signal
+
+        class _Tester(QObject):
+            done = Signal(bool, str)
+
+            def run(self):
+                try:
+                    ok, msg = ai_core.test_connection(cfg)
+                except Exception as exc:            # noqa: BLE001
+                    ok, msg = False, f"Unexpected error: {exc}"
+                self.done.emit(ok, msg)
+
+        self._test_thread = QThread(self)
+        self._test_worker = _Tester()
+        self._test_worker.moveToThread(self._test_thread)
+        self._test_thread.started.connect(self._test_worker.run)
+        self._test_worker.done.connect(self._on_test_done)
+        self._test_worker.done.connect(self._test_thread.quit)
+        self._test_thread.finished.connect(self._test_worker.deleteLater)
+        self._test_thread.finished.connect(self._test_thread.deleteLater)
+        self._test_thread.finished.connect(self._clear_test_thread)
+        self._test_thread.start()
+
+    def _clear_test_thread(self) -> None:
+        self._test_thread = None
+        self._test_worker = None
+
+    def _on_test_done(self, ok: bool, msg: str) -> None:
+        self.btn_ai_test.setEnabled(True)
         pal = palette(settings.theme)
         # .get() with a fallback: a missing palette key must never turn a failed
         # connection test into a crash (the failure path is the one users hit).

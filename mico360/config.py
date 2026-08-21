@@ -12,6 +12,17 @@ ORG = "MICO360"
 APP = "DocToolkit"
 
 
+def _dedup_strs(value) -> list:
+    """Trim, drop blanks, de-duplicate (order-preserving) a list of strings."""
+    seen, out = set(), []
+    for m in (value or []):
+        m = str(m).strip()
+        if m and m not in seen:
+            seen.add(m)
+            out.append(m)
+    return out
+
+
 class Settings:
     """Thin typed wrapper around QSettings."""
 
@@ -236,13 +247,21 @@ class Settings:
 
     @ai_models.setter
     def ai_models(self, value) -> None:
-        seen, out = set(), []
-        for m in (value or []):
-            m = str(m).strip()
-            if m and m not in seen:
-                seen.add(m)
-                out.append(m)
-        self._set_json("ai/models", out)
+        self._set_json("ai/models", _dedup_strs(value))
+
+    @property
+    def ai_custom_models(self) -> list:
+        """Model ids the user added by hand (not advertised by the server).
+
+        Kept separately from :attr:`ai_models` so a background refresh — which
+        mirrors the server's live list — never deletes a model the user typed in.
+        """
+        v = self._get_json("ai/custom_models", [])
+        return [str(m) for m in v] if isinstance(v, list) else []
+
+    @ai_custom_models.setter
+    def ai_custom_models(self, value) -> None:
+        self._set_json("ai/custom_models", _dedup_strs(value))
 
     @property
     def ai_auto_apply(self) -> bool:
