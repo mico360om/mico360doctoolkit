@@ -48,25 +48,51 @@ def route_for(paths) -> str | None:
 
 
 class Tile(QPushButton):
-    """A clickable tool tile (icon + name)."""
+    """A clickable tool tile: an icon chip, the tool name, and (optionally) a
+    one-line description and a chevron — a horizontal card matching the brand
+    design system. ``compact`` drops the description/chevron (used for the
+    Favourites row, which carries a star instead)."""
 
-    def __init__(self, tool_id: str, parent: QWidget | None = None):
+    def __init__(self, tool_id: str, parent: QWidget | None = None,
+                 compact: bool = False):
         super().__init__(parent)
         tool = TOOLS_BY_ID.get(tool_id)
         self.tool_id = tool_id
+        from PySide6.QtWidgets import QSizePolicy
         self.setObjectName("DashTile")
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(74)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(12, 10, 12, 10)
-        lay.setSpacing(4)
+        self.setMinimumHeight(56 if compact else 88)
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(12)
+
         icon = QLabel(tool.icon if tool else "•")
         icon.setObjectName("DashTileIcon")
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setFixedSize(40, 40)
+        lay.addWidget(icon, 0, Qt.AlignTop if not compact else Qt.AlignVCenter)
+
+        textbox = QVBoxLayout()
+        textbox.setContentsMargins(0, 0, 0, 0)
+        textbox.setSpacing(3)
         name = QLabel(tool.name if tool else tool_id)
         name.setObjectName("DashTileName")
         name.setWordWrap(True)
-        lay.addWidget(icon)
-        lay.addWidget(name)
+        textbox.addWidget(name)
+        if not compact and tool and tool.tagline:
+            desc = QLabel(tool.tagline)
+            desc.setObjectName("DashTileDesc")
+            desc.setWordWrap(True)
+            textbox.addWidget(desc)
+        textbox.addStretch(1)
+        lay.addLayout(textbox, 1)
+
+        if not compact:
+            chev = QLabel("›")           # ›
+            chev.setObjectName("DashChevron")
+            lay.addWidget(chev, 0, Qt.AlignVCenter)
+
         if tool:
             self.setAccessibleName(tool.name)
             tip(self, tool.tagline)
@@ -93,8 +119,12 @@ class DashboardPage(QWidget):
         self.root.setContentsMargins(28, 22, 28, 22)
         self.root.setSpacing(16)
 
-        greeting = QLabel(f"Welcome to {__app_name__}")
+        from mico360.theme import palette
+        _accent = palette(settings.theme)["primary"]
+        greeting = QLabel(f"Welcome to <span style='color:{_accent};'>"
+                          f"{__app_name__}</span>")
         greeting.setObjectName("DashGreeting")
+        greeting.setTextFormat(Qt.RichText)
         self.root.addWidget(greeting)
         sub = QLabel("Pick a quick action, drop files anywhere, or choose a tool "
                      "from the sidebar.")
@@ -160,7 +190,7 @@ class DashboardPage(QWidget):
             h = QHBoxLayout(row)
             h.setContentsMargins(0, 0, 0, 0)
             h.setSpacing(2)
-            tile = Tile(tid)
+            tile = Tile(tid, compact=True)
             tile.clicked.connect(lambda _=False, t=tid: self.openTool.emit(t))
             h.addWidget(tile, 1)
             grid.addWidget(row, i // 4, i % 4)

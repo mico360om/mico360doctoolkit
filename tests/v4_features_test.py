@@ -41,10 +41,10 @@ def main() -> int:
     saved_mode = settings._s.value("ui/theme_mode", None)
     settings._s.remove("ui/theme"); settings._s.remove("ui/theme_mode")
     settings._s.sync()
-    check("theme mode defaults to 'system' on first run",
-          settings.theme_mode == "system", settings.theme_mode)
-    check("theme defaults to the system mode on first run",
-          settings.theme == system_theme(), f"{settings.theme} vs {system_theme()}")
+    check("theme mode defaults to 'light' on first run",
+          settings.theme_mode == "light", settings.theme_mode)
+    check("theme defaults to light on first run",
+          settings.theme == "light", f"{settings.theme}")
     settings.theme = "light"
     check("explicit theme is remembered (not overridden by system)",
           settings.theme == "light")
@@ -58,12 +58,16 @@ def main() -> int:
         settings._s.setValue("ui/theme_mode", saved_mode)
     settings._s.sync()
 
-    # --- borderless checkbox in the stylesheet --------------------------
+    # --- checkbox is a defined control (bordered box, red fill when checked) ---
     css = stylesheet("dark")
     import re
     m = re.search(r"QCheckBox::indicator \{([^}]*)\}", css)
-    check("checkbox indicator has no border",
-          bool(m) and "border: none" in m.group(1), m.group(1) if m else "no rule")
+    mc = re.search(r"QCheckBox::indicator:checked \{([^}]*)\}", css)
+    check("checkbox indicator is a defined, rounded box",
+          bool(m) and "border:" in m.group(1) and "border-radius" in m.group(1),
+          m.group(1) if m else "no rule")
+    check("a checked checkbox fills with the brand colour",
+          bool(mc) and "background" in mc.group(1), mc.group(1) if mc else "no rule")
 
     # --- lazy page construction (startup hang fix) ----------------------
     from mico360.ui.main_window import MainWindow

@@ -1,24 +1,26 @@
-"""MICO360 design system — brand tokens and Qt stylesheets (v2).
+"""MICO360 design system — brand tokens and Qt stylesheets (v3).
 
-A modern, responsive refresh built on the MICO360 brand (maroon / black / white).
-Each theme is a flat dict of design tokens; ``stylesheet()`` turns the active
-theme into a single Qt Style Sheet applied app-wide.
+A premium refresh built on the MICO360 brand: near-black charcoal surfaces,
+crisp white text, and refined red accents drawn from the logo. Each theme is a
+flat dict of design tokens; ``stylesheet()`` turns the active theme into a
+single Qt Style Sheet applied app-wide, so every screen shares one look.
 """
 from __future__ import annotations
 
-# --- Brand ---------------------------------------------------------------
-BRAND_MAROON = "#A0201F"
-BRAND_MAROON_HOVER = "#B83532"
-BRAND_MAROON_PRESSED = "#7E1719"
-BRAND_MAROON_SOFT = "#C8514F"   # lighter accent for dark surfaces
+# --- Brand: a refined, vivid red drawn from the MICO360 logo -------------
+BRAND_RED = "#E1222E"
+BRAND_RED_HOVER = "#F0333F"
+BRAND_RED_PRESSED = "#BE1621"
+BRAND_RED_SOFT = "#F06A72"        # lighter accent for dark surfaces
 
-RADIUS = 12
-RADIUS_SM = 8
+RADIUS = 14
+RADIUS_SM = 10
+RADIUS_XS = 8
 
 
 def system_theme() -> str:
-    """Return the OS appearance — 'light' or 'dark'. Used as the default theme
-    on first run when the user hasn't picked one yet. Falls back to 'dark'."""
+    """Return the OS appearance — 'light' or 'dark'. Used only when the user
+    explicitly picks 'System' in Settings. Falls back to 'light'."""
     import sys
     if sys.platform == "darwin":          # macOS
         try:
@@ -29,7 +31,7 @@ def system_theme() -> str:
             # The key exists (value "Dark") only in dark mode; absent ⇒ light.
             return "dark" if "dark" in out.stdout.lower() else "light"
         except Exception:
-            return "dark"
+            return "light"
     try:                                  # Windows
         import winreg
         key = winreg.OpenKey(
@@ -41,88 +43,91 @@ def system_theme() -> str:
             winreg.CloseKey(key)
         return "light" if apps_use_light else "dark"
     except Exception:
-        return "dark"
+        return "light"
 
 
 DARK = {
     "name": "dark",
-    # surfaces (low -> high elevation)
-    "bg": "#101113",
-    "sidebar": "#16181B",
-    "surface": "#1B1D21",
-    "surface_2": "#22252A",
-    "input": "#191B1F",
-    "hover": "#2A2E35",
-    "selected": "#2E333B",
+    # surfaces (low -> high elevation), neutral near-black charcoal
+    "bg": "#0C0C0E",
+    "sidebar": "#0F0F12",
+    "surface": "#161619",
+    "surface_2": "#1C1C21",
+    "input": "#141417",
+    "hover": "#212128",
+    "selected": "#2A2A32",
     # lines
-    "border": "#2C3036",
-    "border_strong": "#3B4047",
-    "divider": "#23262B",
+    "border": "#242429",
+    "border_strong": "#34343C",
+    "divider": "#1C1C21",
     # text
-    "text": "#F3F4F6",
-    "text_muted": "#A2A8B0",
-    "text_faint": "#8B929B",   # raised for WCAG contrast on dark surfaces
+    "text": "#F4F5F7",
+    "text_muted": "#9AA0A9",
+    "text_faint": "#787E88",
     # brand
-    "primary": BRAND_MAROON,
-    "primary_hover": BRAND_MAROON_HOVER,
-    "primary_pressed": BRAND_MAROON_PRESSED,
+    "primary": "#E5323C",          # a touch brighter so it sings on black
+    "primary_hover": "#F04A54",
+    "primary_pressed": "#C21E28",
     "on_primary": "#FFFFFF",
-    "accent_soft": BRAND_MAROON_SOFT,
+    "accent_soft": BRAND_RED_SOFT,
     # nav
-    "nav_text": "#C7CCD3",
-    "nav_hover": "#23262C",
-    "nav_active_bg": BRAND_MAROON,
+    "nav_text": "#C4C8D0",
+    "nav_hover": "#1A1A1F",
+    "nav_active_bg": "#E1222E",
     "nav_active_text": "#FFFFFF",
-    "section": "#8B929B",
+    "section": "#787E88",
     # status
-    "success": "#41C078",
-    "success_bg": "#15281D",
-    "warn": "#E3A93A",
-    "error": "#EC5B52",
-    "error_bg": "#2A1614",
-    "info": "#4D9BE0",
+    "success": "#3DBE74",
+    "success_bg": "#12241A",
+    "warn": "#E0A93A",
+    "error": "#EF6259",
+    "error_bg": "#241413",
+    "info": "#5B9BE0",
     # drop zone
-    "drop": "#191B1F",
-    "drop_active": "#221A1A",
-    "scrollbar": "#363B42",
-    "scrollbar_hover": "#4A5058",
+    "drop": "#141417",
+    "drop_active": "#1F1416",
+    "scrollbar": "#33333B",
+    "scrollbar_hover": "#474751",
+    # icon chip behind dashboard glyphs
+    "chip_bg": "#1E1E24",
 }
 
 LIGHT = {
     "name": "light",
-    "bg": "#EEF0F4",
+    "bg": "#F3F4F6",
     "sidebar": "#FFFFFF",
     "surface": "#FFFFFF",
-    "surface_2": "#F5F7FA",
-    "input": "#F5F7FA",
-    "hover": "#ECEFF3",
-    "selected": "#E7EBF1",
-    "border": "#DCDFE6",
-    "border_strong": "#C4CAD3",
-    "divider": "#E8EBF0",
-    "text": "#1A1D21",
-    "text_muted": "#586069",
-    "text_faint": "#6E7783",   # darkened for WCAG contrast on light surfaces
-    "primary": BRAND_MAROON,
-    "primary_hover": BRAND_MAROON_HOVER,
-    "primary_pressed": BRAND_MAROON_PRESSED,
+    "surface_2": "#F6F7F9",
+    "input": "#F3F5F8",
+    "hover": "#EDEFF2",
+    "selected": "#E8EAEF",
+    "border": "#E3E5EA",
+    "border_strong": "#CDD1D8",
+    "divider": "#EBEDF0",
+    "text": "#16171A",
+    "text_muted": "#585E67",
+    "text_faint": "#828892",
+    "primary": "#D81E28",          # a touch deeper for contrast on white
+    "primary_hover": "#EC2C37",
+    "primary_pressed": "#B5141D",
     "on_primary": "#FFFFFF",
-    "accent_soft": "#7E1719",
-    "nav_text": "#3C434C",
-    "nav_hover": "#EFF1F5",
-    "nav_active_bg": BRAND_MAROON,
+    "accent_soft": "#B5141D",
+    "nav_text": "#3A3F47",
+    "nav_hover": "#EFF1F4",
+    "nav_active_bg": "#D81E28",
     "nav_active_text": "#FFFFFF",
-    "section": "#6E7783",
+    "section": "#828892",
     "success": "#1E9E55",
     "success_bg": "#E7F6ED",
     "warn": "#B07D12",
     "error": "#C8372E",
     "error_bg": "#FBEAE8",
     "info": "#2D74C4",
-    "drop": "#F7F9FC",
-    "drop_active": "#FBF1F1",
-    "scrollbar": "#C7CCD4",
-    "scrollbar_hover": "#A7AEB8",
+    "drop": "#F8F9FB",
+    "drop_active": "#FDF0F1",
+    "scrollbar": "#CCD0D6",
+    "scrollbar_hover": "#ABB0B8",
+    "chip_bg": "#F1F2F5",
 }
 
 
@@ -147,7 +152,7 @@ QScrollArea {{ background: transparent; border: none; }}
 QScrollArea > QWidget > QWidget {{ background: transparent; }}
 QToolTip {{
     background-color: {c['surface_2']}; color: {c['text']};
-    border: 1px solid {c['border_strong']}; border-radius: {RADIUS_SM}px;
+    border: 1px solid {c['border_strong']}; border-radius: {RADIUS_XS}px;
     padding: 6px 9px;
 }}
 
@@ -177,22 +182,23 @@ QMenu::icon {{ padding-left: 6px; }}
     background-color: {c['sidebar']};
     border-right: 1px solid {c['divider']};
 }}
-#Brand {{ color: {c['text']}; font-size: 16px; font-weight: 800; }}
-#BrandSub {{ color: {c['text_faint']}; font-size: 10px; font-weight: 600; letter-spacing: 1px; }}
+#Brand {{ color: {c['text']}; font-size: 16px; font-weight: 800; letter-spacing: 0.3px; }}
+#BrandSub {{ color: {c['primary']}; font-size: 10px; font-weight: 800; letter-spacing: 1.5px; }}
 #NavSection {{
-    color: {c['text_muted']}; font-size: 11px; font-weight: 800;
-    letter-spacing: 1.3px; padding: 10px 8px 4px 8px;
+    color: {c['section']}; font-size: 10px; font-weight: 800;
+    letter-spacing: 1.4px; padding: 12px 8px 4px 10px;
     background: transparent; border: none; text-align: left;
 }}
-#NavSection:hover {{ color: {c['text']}; }}
+#NavSection:hover {{ color: {c['text_muted']}; }}
 QLineEdit#NavSearch {{
     background-color: {c['input']};
     border: 1px solid {c['border']};
     border-radius: {RADIUS_SM}px;
-    padding: 6px 10px;
+    padding: 8px 12px;
     color: {c['text']};
     font-size: 12px;
 }}
+QLineEdit#NavSearch:hover {{ border-color: {c['border_strong']}; }}
 QLineEdit#NavSearch:focus {{ border: 1px solid {c['primary']}; }}
 
 QPushButton#NavItem {{
@@ -200,20 +206,20 @@ QPushButton#NavItem {{
     color: {c['nav_text']};
     border: none;
     border-radius: {RADIUS_SM}px;
-    padding: 9px 12px;
+    padding: 10px 12px;
     text-align: left;
     font-size: 13px;
     font-weight: 500;
 }}
-QPushButton#NavItem:hover {{ background-color: {c['nav_hover']}; }}
+QPushButton#NavItem:hover {{ background-color: {c['nav_hover']}; color: {c['text']}; }}
 QPushButton#NavItem:checked {{
     background-color: {c['nav_active_bg']};
     color: {c['nav_active_text']};
-    font-weight: 600;
+    font-weight: 700;
 }}
 QPushButton#IconButton {{
     background: transparent; border: none; border-radius: {RADIUS_SM}px;
-    color: {c['text_muted']}; padding: 6px;
+    color: {c['text_muted']}; padding: 7px;
 }}
 QPushButton#IconButton:hover {{ background-color: {c['hover']}; color: {c['text']}; }}
 QPushButton#IconButton:checked {{ background-color: {c['hover']}; color: {c['primary']}; }}
@@ -230,9 +236,14 @@ QPushButton#IconButton:checked {{ background-color: {c['hover']}; color: {c['pri
 }}
 #CardFlat {{ background-color: {c['surface_2']}; border: 1px solid {c['border']}; border-radius: {RADIUS}px; }}
 
-#PageTitle {{ font-size: 24px; font-weight: 800; color: {c['text']}; }}
+#PageTitle {{ font-size: 25px; font-weight: 800; color: {c['text']}; }}
 #PageSubtitle {{ font-size: 13px; color: {c['text_muted']}; }}
-#SectionLabel {{ font-size: 11px; font-weight: 800; color: {c['text_muted']}; letter-spacing: 0.8px; }}
+/* Section headers carry a short red tick, echoing the brand throughout. */
+#SectionLabel {{
+    font-size: 12px; font-weight: 800; color: {c['text']};
+    letter-spacing: 0.5px; padding: 1px 0 1px 10px;
+    border-left: 3px solid {c['primary']};
+}}
 #Hint {{ color: {c['text_muted']}; font-size: 12px; }}
 #Muted {{ color: {c['text_faint']}; font-size: 12px; }}
 #ToolIcon {{ font-size: 24px; }}
@@ -243,8 +254,8 @@ QPushButton {{
     color: {c['text']};
     border: 1px solid {c['border']};
     border-radius: {RADIUS_SM}px;
-    padding: 8px 14px;
-    font-weight: 500;
+    padding: 9px 15px;
+    font-weight: 600;
 }}
 QPushButton:hover {{ background-color: {c['hover']}; border-color: {c['border_strong']}; }}
 QPushButton:pressed {{ background-color: {c['selected']}; }}
@@ -262,11 +273,11 @@ QPushButton#Primary:hover {{ background-color: {c['primary_hover']}; }}
 QPushButton#Primary:pressed {{ background-color: {c['primary_pressed']}; }}
 QPushButton#Primary:disabled {{ background-color: {c['border_strong']}; color: {c['text_faint']}; }}
 
-QPushButton#Ghost {{ background: transparent; border: 1px solid {c['border']}; color: {c['text']}; }}
-QPushButton#Ghost:hover {{ background-color: {c['hover']}; }}
+QPushButton#Ghost {{ background: transparent; border: 1px solid {c['border_strong']}; color: {c['text']}; }}
+QPushButton#Ghost:hover {{ background-color: {c['hover']}; border-color: {c['text_faint']}; }}
 QPushButton#Subtle {{ background: transparent; border: none; color: {c['text_muted']}; padding: 7px 10px; }}
 QPushButton#Subtle:hover {{ background-color: {c['hover']}; color: {c['text']}; }}
-QPushButton#Danger {{ background: transparent; border: 1px solid {c['border']}; color: {c['error']}; }}
+QPushButton#Danger {{ background: transparent; border: 1px solid {c['border_strong']}; color: {c['error']}; }}
 QPushButton#Danger:hover {{ background-color: {c['error_bg']}; border-color: {c['error']}; }}
 
 /* Keyboard focus indicators (the global outline:none hides the default ring) */
@@ -284,7 +295,7 @@ QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {{
     background-color: {c['input']};
     border: 1px solid {c['border']};
     border-radius: {RADIUS_SM}px;
-    padding: 8px 11px;
+    padding: 9px 12px;
     color: {c['text']};
     selection-background-color: {c['primary']};
     selection-color: #FFFFFF;
@@ -314,12 +325,12 @@ QSpinBox::down-button, QDoubleSpinBox::down-button {{
 /* =================== Check / Radio (borderless) =================== */
 QCheckBox, QRadioButton {{ spacing: 9px; color: {c['text']}; padding: 2px 0; }}
 QCheckBox::indicator, QRadioButton::indicator {{ width: 18px; height: 18px; }}
-QCheckBox::indicator {{ border: none; border-radius: 5px; background: {c['surface_2']}; }}
-QCheckBox::indicator:hover {{ background: {c['hover']}; }}
-QCheckBox::indicator:checked {{ background: {c['primary']}; image: none; }}
-QCheckBox::indicator:checked:hover {{ background: {c['primary_hover']}; }}
-QRadioButton::indicator {{ border: none; border-radius: 9px; background: {c['surface_2']}; }}
-QRadioButton::indicator:hover {{ background: {c['hover']}; }}
+QCheckBox::indicator {{ border: 1px solid {c['border_strong']}; border-radius: 5px; background: {c['surface_2']}; }}
+QCheckBox::indicator:hover {{ border-color: {c['primary']}; }}
+QCheckBox::indicator:checked {{ background: {c['primary']}; border-color: {c['primary']}; image: none; }}
+QCheckBox::indicator:checked:hover {{ background: {c['primary_hover']}; border-color: {c['primary_hover']}; }}
+QRadioButton::indicator {{ border: 1px solid {c['border_strong']}; border-radius: 9px; background: {c['surface_2']}; }}
+QRadioButton::indicator:hover {{ border-color: {c['primary']}; }}
 QRadioButton::indicator:checked {{ background: {c['primary']}; border: 5px solid {c['primary']}; }}
 
 /* =================== Drop zone =================== */
@@ -359,16 +370,25 @@ QRadioButton::indicator:checked {{ background: {c['primary']}; border: 5px solid
     border: 1px solid {c['border']};
     border-radius: {RADIUS}px;
 }}
-#DashTile:hover {{ border-color: {c['primary']}; }}
-#DashTileIcon {{ font-size: 22px; }}
+#DashTile:hover {{ border-color: {c['primary']}; background-color: {c['hover']}; }}
+#DashTileIcon {{
+    font-size: 20px; color: {c['primary']};
+    background-color: {c['chip_bg']};
+    border: 1px solid {c['border']};
+    border-radius: {RADIUS_SM}px;
+    padding: 8px;
+}}
 #DashTileName {{ color: {c['text']}; font-size: 13px; font-weight: 700; }}
-#DashGreeting {{ color: {c['text']}; font-size: 22px; font-weight: 800; }}
+#DashTileDesc {{ color: {c['text_muted']}; font-size: 11px; }}
+#DashChevron {{ color: {c['text_faint']}; font-size: 20px; font-weight: 700; }}
+#DashTile:hover #DashChevron {{ color: {c['primary']}; }}
+#DashGreeting {{ color: {c['text']}; font-size: 30px; font-weight: 800; }}
 #FavStar {{
-    color: {c['text_muted']}; border: none; background: transparent;
+    color: {c['text_faint']}; border: none; background: transparent;
     font-size: 20px; font-family: "Segoe UI Symbol", "Segoe UI Emoji", "Segoe UI";
 }}
-#FavStar:hover {{ color: #E8B54D; }}
-#FavStar[pinned="true"] {{ color: #E8B54D; }}
+#FavStar:hover {{ color: {c['primary']}; }}
+#FavStar[pinned="true"] {{ color: {c['primary']}; }}
 #RecentLink {{ color: {c['text']}; }}
 
 /* =================== Settings tabs =================== */
@@ -376,7 +396,7 @@ QTabWidget#SettingsTabs::pane {{ border: none; top: -1px; }}
 QTabWidget#SettingsTabs > QTabBar {{ qproperty-drawBase: 0; }}
 #SettingsTabs QTabBar::tab {{
     background: transparent; border: none; color: {c['text_muted']};
-    padding: 8px 16px; margin-right: 6px; font-size: 13px; font-weight: 600;
+    padding: 9px 16px; margin-right: 4px; font-size: 13px; font-weight: 600;
     border-bottom: 2px solid transparent;
 }}
 #SettingsTabs QTabBar::tab:hover {{ color: {c['text']}; }}
@@ -408,11 +428,11 @@ QListWidget#FileList {{
     border-radius: {RADIUS_SM}px;
     padding: 5px;
 }}
-QListWidget#FileList::item {{ padding: 8px 10px; border-radius: 6px; color: {c['text']}; }}
+QListWidget#FileList::item {{ padding: 9px 10px; border-radius: {RADIUS_XS}px; color: {c['text']}; }}
 QListWidget#FileList::item:hover {{ background-color: {c['hover']}; }}
 QListWidget#FileList::item:selected {{ background-color: {c['selected']}; color: {c['text']}; }}
 #ThumbPreview {{ background-color: {c['surface_2']}; border: 1px solid {c['border']};
-    border-radius: 8px; color: {c['text_faint']}; font-size: 12px; }}
+    border-radius: {RADIUS_XS}px; color: {c['text_faint']}; font-size: 12px; }}
 
 /* =================== Progress =================== */
 QProgressBar {{

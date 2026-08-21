@@ -82,13 +82,14 @@ class Settings:
     # --- typed properties ------------------------------------------------
     @property
     def theme_mode(self) -> str:
-        """'system' | 'light' | 'dark'. Defaults to 'system' on first run; an
-        older saved ui/theme is migrated to an explicit light/dark pin."""
+        """'system' | 'light' | 'dark'. Defaults to 'light' on first run (the
+        toggle and the 'System' option remain available); an older saved
+        ui/theme is migrated to an explicit light/dark pin."""
         if self._s.contains("ui/theme_mode"):
-            return self._get("ui/theme_mode", "system", str)
+            return self._get("ui/theme_mode", "light", str)
         if self._s.contains("ui/theme"):
             return self._get("ui/theme", "dark", str)
-        return "system"
+        return "light"
 
     @theme_mode.setter
     def theme_mode(self, value: str) -> None:

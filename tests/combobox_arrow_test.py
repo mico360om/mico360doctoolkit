@@ -38,7 +38,7 @@ def arrow_rows(app, combo):
     app.processEvents()
     img = combo.grab().toImage()
     w, h = img.width(), img.height()
-    bg = img.pixelColor(w // 2, h // 2)
+    bg = img.pixelColor(w - 6, 4)   # arrow zone, above the chevron: field bg
 
     def differs(c):
         return (abs(c.red() - bg.red()) + abs(c.green() - bg.green())
@@ -59,7 +59,7 @@ def arrow_pixel_count(app, combo) -> int:
     app.processEvents()
     img = combo.grab().toImage()
     w, h = img.width(), img.height()
-    bg = img.pixelColor(w // 2, h // 2)
+    bg = img.pixelColor(w - 6, 4)   # arrow zone, above the chevron: field bg
 
     def differs(c):
         return (abs(c.red() - bg.red()) + abs(c.green() - bg.green())
