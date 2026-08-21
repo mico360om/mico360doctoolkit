@@ -1,3 +1,37 @@
+## MICO360 Doc Toolkit v7.0.0
+
+**A premium redesign - and a more capable, more reliable AI.**
+
+**Brand-new look, same tools**
+- The whole app has been redesigned around the MICO360 brand: a **premium theme** with
+  refined red accents, cleaner cards, sharper typography and spacing, and consistent styling
+  across **every** screen - Home, tools, Settings and dialogs. Nothing moved or was removed;
+  everything just looks and feels better.
+- **Light theme is now the default** - and the light/dark toggle (and a "match my system"
+  option) are still one click away in Settings and on the top bar.
+- Home now leads with **Welcome to MICO360 Doc Toolkit** and quick-action cards that show an
+  icon, the tool name and a one-line description at a glance; section headers carry a subtle
+  brand tick, and the theme accent follows your choice everywhere.
+
+**AI: cancel and auto-retry**
+- **Cancel an AI suggestion.** "Suggest All with AI" now shows a **Cancel** button while it's
+  working, so you're never stuck waiting - the panel frees immediately and any late answer is
+  discarded.
+- **Automatic retries.** A busy server ("no node free right now") or a rate limit is now
+  retried automatically a couple of times, honouring the server's suggested wait - so a
+  transient hiccup no longer looks like a failure.
+
+**Fixes**
+- **Test connection no longer freezes the window.** It now runs in the background, so an
+  unreachable server can't lock up the app.
+- **Models you add by hand are kept.** Typing a custom model id no longer gets wiped by the
+  automatic model-list refresh, and it's clearly shown as your own rather than "offline".
+- Dropped or incomplete connections to the AI server now show a clear message instead of a
+  raw error code, and the model list never shows a blank or duplicated entry.
+- Your saved API key is shown even more conservatively (short keys are fully masked).
+
+---
+
 ## MICO360 Doc Toolkit v6.9.8
 
 **The AI model list keeps itself up to date.**
