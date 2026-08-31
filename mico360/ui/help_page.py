@@ -51,6 +51,13 @@ tool automatically.</p>
       you retry them. The same file can be queued more than once (Duplicate), each tracked
       separately.</li>
   <li><b>Cancel</b> stops the batch; long jobs (OCR, many pages) stop within a moment.</li>
+  <li>If a run finishes with failures, a <b>Retry <i>N</i> failed</b> button appears — one
+      click re-runs just the failed rows, no hunting through the list.</li>
+  <li>Removing or clearing the queue shows a brief <b>Undo</b> so an accidental
+      <i>Remove</i> / <i>Clear</i> is easy to take back.</li>
+  <li>While a batch runs, the <b>window title</b> (and its taskbar preview) shows the live
+      progress — e.g. <i>“37 of 200 · ~4m left · 2 failed”</i> — so you can glance back
+      even when the window is minimised.</li>
 </ul>
 
 <h3>The tools, in detail</h3>
@@ -78,14 +85,24 @@ tool automatically.</p>
       · <i>Page 1</i>) and starting number.</li>
   <li><b>Sign PDF</b> — stamp a signature image on the last/first/every page.</li>
   <li><b>AI metadata suggestions</b> — on the <b>Edit Metadata</b> page, click
-      <b>Suggest with AI</b> and the app reads the selected document and proposes a
-      Title, Author, Subject, Keywords, Description, Category and Language. Nothing
-      changes until you accept: edit any suggestion, <b>Apply</b> individual fields,
-      <b>Apply all</b>, or <b>Dismiss</b>. Configure a provider in
-      <b>Settings → AI</b> — use the System AI or your own OpenAI-compatible API.
-      Your API key is encrypted on your computer and never shown again after saving,
-      and only a short excerpt of the document is sent when you ask for a
-      suggestion.</li>
+      <b>Suggest All with AI</b> and the app reads the selected document and
+      proposes values for <b>every</b> metadata field it can (Title, Author,
+      Subject, Keywords, Creator, Producer, Creation/Modification date, Company,
+      Manager, Category, Description/Comments, Custom properties, Copyright,
+      Language and Trapped). <b>Nothing changes until you accept.</b> Tick the
+      fields you want and <b>Apply selected</b>, use <b>Apply all</b>, apply an
+      individual field, edit any value first, or <b>Dismiss</b>. Turn on
+      <b>Auto apply</b> to fill the fields the moment suggestions arrive.
+      <b>Cancel</b> stops a slow request; a busy AI server is <b>retried
+      automatically</b>. Your existing values are protected — a blank or
+      low-confidence suggestion is never applied, and nothing is applied while a
+      <b>Privacy</b> preset is selected. Only a short excerpt of that one document
+      is sent, and only when you ask.<br>
+      Set it up in <b>Settings → AI</b>: choose the <b>System AI</b> (provided for
+      you) or <b>your own</b> OpenAI-compatible API (URL + key + model), press
+      <b>Test connection</b>, and pick a model from the <b>Model</b> dropdown —
+      it lists the models your key may use and refreshes itself. Your API key is
+      encrypted on your computer and never shown again after saving.</li>
   <li><b>Edit Metadata</b> — set any document property: Title, Author, Subject,
       Keywords, Creator, Producer, creation/modification dates, named fields
       (Company, Manager, Category, Comments), your own <i>custom</i> properties
@@ -174,32 +191,52 @@ and recovers the text.</p>
   <li>Everything is optional — you can turn auto-checking off and update whenever you like.</li>
 </ul>
 
+<h3>Send files from File Explorer (Windows)</h3>
+<ul>
+  <li><b>Right-click a supported file</b> (PDF, image, Office document or SVG) in File
+      Explorer and open the <b>“MICO360 Toolkit”</b> menu. It lists the tools that make
+      sense for that file type.</li>
+  <li>Pick an action and MICO360 opens on that tool with the file <b>already loaded</b> —
+      no browsing. If the app is already open, the file is sent to the running window.</li>
+  <li>Turn this on or off any time in <b>Settings → Advanced → Windows integration</b>. It's
+      per-user, needs no admin rights, and is removed cleanly when you uninstall.</li>
+</ul>
+
 <h3>Keyboard &amp; mouse</h3>
 <ul>
-  <li><b>Drag &amp; drop</b> files or folders onto the drop zone to add them.</li>
+  <li><b>Shortcuts:</b> <b>Ctrl+K</b> search tools · <b>Ctrl+O</b> add files ·
+      <b>Ctrl+V</b> paste copied files · <b>Ctrl+Enter</b> Start · <b>Esc</b> cancel a
+      running batch · <b>Ctrl+1…9</b> jump to a pinned (favourite) tool · <b>F1</b> Help.</li>
+  <li><b>Search</b> the sidebar box by name <i>or</i> by what a tool does — typing
+      “password” finds Protect PDF, “dpi” finds Compress.</li>
+  <li><b>Drag &amp; drop</b> files or folders anywhere to add them; the empty queue is also a
+      click target that opens the file picker.</li>
   <li><b>Double-click</b> a finished file to reveal its output; <b>right-click</b> any file
       for more actions; <b>Delete</b> removes the selected files.</li>
-  <li><b>Tab / Shift+Tab</b> move between controls; <b>Space</b> toggles a checkbox or
-      presses a button; <b>Enter</b> activates the focused button.</li>
+  <li><b>Tab / Shift+Tab</b> move between controls; <b>Space / Enter</b> activates the focused
+      button or the drop zone (to browse); a checkbox toggles with <b>Space</b>.</li>
   <li>Use the <b>☰</b> button to collapse the sidebar for more room, and <b>☀ / 🌙</b> to
       switch light / dark.</li>
 </ul>
 
 <h3>Settings</h3>
 <ul>
-  <li><b>Appearance</b> — choose <b>System</b> (follow your Windows/macOS theme), <b>Light</b>
-      or <b>Dark</b> (the ☀/🌙 button in the top bar pins Light/Dark). Defaults to System on
-      first run.</li>
+  <li><b>Appearance</b> — choose <b>Light</b> (the default), <b>Dark</b>, or <b>System</b>
+      (follow your Windows/macOS theme). The ☀/🌙 button in the top bar pins Light/Dark.</li>
   <li><b>Output</b> — default output folder, “open the folder when a batch finishes”, and
       overwrite behaviour.</li>
   <li><b>Processing</b> — number of parallel workers (0 = automatic, uses CPU cores − 1), and
       <b>Use the GPU for OCR</b> when a graphics card is available (with automatic CPU fallback).</li>
+  <li><b>AI</b> — turn AI suggestions on or off (off by default), choose the <b>System AI</b> or
+      <b>your own</b> OpenAI-compatible API (URL, key, model), <b>Test connection</b>, pick a
+      model from the self-refreshing dropdown, and set <b>Auto apply</b>. Your API key is
+      encrypted on your computer and never displayed again.</li>
   <li><b>Updates</b> — see your current version, check for updates on demand, and turn the
       automatic startup check on or off.</li>
-  <li><b>External tools</b> — manage the <b>Conversion engine</b> (LibreOffice): see its
-      status, download it ahead of time, or turn off the automatic first‑use download. You can
-      also point the app at an existing LibreOffice, or at Ghostscript (for the smallest lossy
-      PDF compression). All optional.</li>
+  <li><b>Advanced</b> — manage the <b>Conversion engine</b> (LibreOffice): see its status,
+      download it ahead of time, or turn off the automatic first‑use download; point the app at
+      an existing LibreOffice or at Ghostscript (for the smallest lossy PDF compression); and,
+      on Windows, toggle the <b>“MICO360 Toolkit” right-click menu</b>. All optional.</li>
   <li><b>About &amp; Legal</b> — About Us, Terms &amp; Conditions, Privacy Policy, and contact info.</li>
 </ul>
 
@@ -235,6 +272,23 @@ class HelpPage(QWidget):
         sub = QLabel("Everything you need to get going.")
         sub.setObjectName("PageSubtitle")
         root.addWidget(sub)
+
+        # A live summary of THIS user's access level — which optional modules are
+        # enabled/available right now — so the page reflects what they can do.
+        setup = Card()
+        setup.add(section_label("Your setup & permissions"))
+        try:
+            from mico360.capabilities import capabilities_html
+            setup_html = capabilities_html()
+        except Exception:
+            setup_html = "<p>Manage optional features in <b>Settings</b>.</p>"
+        setup_lbl = QLabel(setup_html)
+        setup_lbl.setObjectName("HelpBody")
+        setup_lbl.setWordWrap(True)
+        setup_lbl.setTextFormat(Qt.RichText)
+        setup_lbl.setOpenExternalLinks(True)
+        setup.add(setup_lbl)
+        root.addWidget(setup)
 
         card = Card()
         card.add(section_label("How to use MICO360 Doc Toolkit"))

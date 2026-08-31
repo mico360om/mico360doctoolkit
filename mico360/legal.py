@@ -29,7 +29,11 @@ to any server, and your originals are always preserved.</p>
       <b>GPU</b> automatically when one is available.</li>
   <li>A real <b>file queue</b> with batch processing across all CPU cores, and
       bulk <b>file-property</b> editing (dates &amp; owner).</li>
-  <li>Clean light &amp; dark themes, and built-in automatic updates.</li>
+  <li>Optional, <b>opt-in AI</b> metadata suggestions using the System AI or your own
+      OpenAI-compatible API — you review every suggestion before anything is applied.</li>
+  <li>On Windows, an optional <b>“MICO360 Toolkit” right-click menu</b> that sends a file
+      straight to the matching tool, plus <b>keyboard shortcuts</b> for the whole workflow.</li>
+  <li>Clean light &amp; dark themes (light by default), and built-in automatic updates.</li>
 </ul>
 
 <h3>Contact</h3>
@@ -66,21 +70,38 @@ Ghostscript, LibreOffice, PyMuPDF, RapidOCR, and PaddleOCR / PaddlePaddle OCR
 models). These remain the property of their respective owners and are provided
 under their own licences.</p>
 
-<h3>4. No warranty</h3>
+<h3>4. AI features (optional)</h3>
+<p>AI-assisted features (such as metadata suggestions) are <b>off by default</b>
+and used only when you enable and invoke them. You choose the AI provider — the
+<b>System AI</b> operated for you, or <b>your own</b> OpenAI-compatible API. You
+are responsible for keeping your API key secure, for any usage, quotas or fees on
+the provider you configure, and for complying with that provider's terms and with
+all laws applicable to the content you submit. AI suggestions are proposals only:
+you review them and decide what to apply, and {__publisher__} does not warrant
+their accuracy. The System AI is provided on an "as available" basis and may
+change or be withdrawn.</p>
+
+<h3>5. Windows Explorer integration (optional)</h3>
+<p>On Windows you may enable a "MICO360 Toolkit" right-click menu. It adds a
+per-user entry to your own Windows registry (no administrator rights required),
+does not alter your default programs, and is removed when you turn it off in
+Settings or uninstall the Software.</p>
+
+<h3>6. No warranty</h3>
 <p>The Software is provided "as is", without warranty of any kind, express or
 implied. Always keep backups of important files; {__publisher__} is not responsible
 for any data loss arising from use of the Software.</p>
 
-<h3>5. Limitation of liability</h3>
+<h3>7. Limitation of liability</h3>
 <p>To the maximum extent permitted by law, {__publisher__} shall not be liable for
 any indirect, incidental, or consequential damages arising from use of the
 Software.</p>
 
-<h3>6. Updates &amp; changes</h3>
+<h3>8. Updates &amp; changes</h3>
 <p>These terms may be updated from time to time. Continued use of the Software
 constitutes acceptance of the current terms.</p>
 
-<h3>7. Contact</h3>
+<h3>9. Contact</h3>
 <p>Questions about these terms? Email <a href="mailto:{EMAIL}">{EMAIL}</a> or visit
 <a href="{WEBSITE_URL}">{WEBSITE}</a>.</p>
 """
@@ -120,9 +141,14 @@ their official sources. These are one-time downloads of software components, not
 data, and you can manage them in <b>Settings</b>.</li>
 <li><b>AI suggestions (only if you enable them)</b> — AI features are <b>off by
 default</b>. If you turn them on and ask for a suggestion, a short excerpt of that
-one document is sent to the AI endpoint <b>you</b> configure (the System AI, or your
-own API). Nothing is sent otherwise, no document is stored by this app, and your API
-key is encrypted on your computer.</li>
+one document (not the whole file, and never your other files) is sent to the AI
+endpoint <b>you</b> configure — the <b>System AI</b> operated for you, or <b>your
+own</b> OpenAI-compatible API. Nothing is sent otherwise, and this app stores no
+copy of the document or the suggestion. Your API key is stored encrypted on your
+computer (Windows account protection / DPAPI on Windows; obfuscated on macOS) and
+is never displayed again after you save it. Note: the System AI connection is not
+yet encrypted in transit, so prefer a trusted network — or use your own HTTPS
+endpoint — when the content is sensitive.</li>
 <li><b>Error reports (only if you ask)</b> — if something goes wrong, a report (with a
 copy of the recent log) is saved <b>on your computer</b>. It is <b>never sent
 automatically</b>; you decide whether to open a <b>pre-filled GitHub issue</b> (which you
@@ -130,21 +156,39 @@ review and submit yourself), copy it, or email it. You can disable the prompt in
 <b>Settings → Updates</b>.</li>
 </ul>
 
-<h3>4. What is stored locally</h3>
-<p>Only your app preferences (theme, output folder, last-used options) are saved
-on your own computer so the app remembers your settings. A local activity log is
-kept on your device to help with troubleshooting. You can clear it any time from
-the Activity page, and it never leaves your machine.</p>
+<h3>4. Windows Explorer integration (optional)</h3>
+<p>If you turn on the "MICO360 Toolkit" right-click menu (Windows only), the app
+adds a small entry to <b>your own user's Windows registry</b> so File Explorer can
+show the menu. This stores no personal data, collects nothing, and is removed when
+you turn it off in Settings or uninstall. When you pick a file from that menu, the
+file path is passed to the app on your own computer to open the tool — it is not
+sent anywhere.</p>
 
-<h3>5. Outputs</h3>
+<h3>5. What is stored locally</h3>
+<p>Only your app preferences (theme, output folder, last-used options, and — if
+you configure AI — your encrypted API key and remembered model list) are saved on
+your own computer so the app remembers your settings. A local activity log is kept
+on your device to help with troubleshooting. You can clear it any time from the
+Activity page, and it never leaves your machine.</p>
+
+<h3>6. Your access level</h3>
+<p>Optional modules (AI, GPU-accelerated OCR, the conversion engine, the Explorer
+right-click menu) are <b>off or absent until you enable them</b>, and some are
+platform-specific — for example, the Explorer menu and Windows account key
+encryption are Windows-only. The <b>Help → “Your setup &amp; permissions”</b>
+section shows exactly what is enabled and available to you right now. What this
+policy describes for a given feature applies to you only when that feature is
+active for you.</p>
+
+<h3>7. Outputs</h3>
 <p>Converted/compressed files are written only to the output folder you choose (or
 next to your originals). Your original files are never modified.</p>
 
-<h3>6. Optional contact</h3>
+<h3>8. Optional contact</h3>
 <p>If you choose to email us at <a href="mailto:{EMAIL}">{EMAIL}</a>, we use your
 message only to respond to you.</p>
 
-<h3>7. Contact</h3>
+<h3>9. Contact</h3>
 <p>Questions about privacy? Email <a href="mailto:{EMAIL}">{EMAIL}</a> or visit
 <a href="{WEBSITE_URL}">{WEBSITE}</a>.</p>
 """
