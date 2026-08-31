@@ -1,3 +1,47 @@
+## MICO360 Doc Toolkit v7.1.0
+
+**Faster to drive, and it meets your files where they live.**
+
+**Send a file straight from File Explorer (Windows)**
+- Right-click a supported file (PDF, image, Office document or SVG) and open the new
+  **"MICO360 Toolkit"** menu — it lists the tools that make sense for that file type.
+  Pick one and the app opens on that tool with the file **already loaded**. No browsing.
+- If the app is already open, the file is handed to the running window. Turn the menu on
+  or off any time in **Settings → Advanced → Windows integration** (per-user, no admin,
+  removed cleanly on uninstall).
+
+**Keyboard shortcuts for the whole workflow**
+- **Ctrl+K** search tools · **Ctrl+O** add files · **Ctrl+V** paste copied files ·
+  **Ctrl+Enter** Start · **Esc** cancel a running batch · **Ctrl+1…9** jump to a pinned
+  tool · **F1** Help.
+- The sidebar search now matches a tool by **what it does**, not just its name — type
+  "password" to find Protect PDF, "dpi" to find Compress.
+
+**Batches you can glance at and recover from**
+- While a batch runs, the **window title / taskbar** shows live progress — e.g.
+  *"37 of 200 · ~4m left · 2 failed"* — so you can look away and check back.
+- Finished with failures? A **"Retry N failed"** button re-runs just those rows.
+- Removing or clearing the queue now offers a quick **Undo** instead of a dialog, and the
+  empty queue is a click-target that opens the file picker (or paste with **Ctrl+V**).
+
+**AI metadata: cancel and auto-retry**
+- **Cancel** a suggestion that's taking too long — the panel frees immediately.
+- A busy AI server ("no node free") is now **retried automatically**, so a transient hiccup
+  no longer looks like a failure.
+
+**Clearer Help, and it reflects *your* setup**
+- The Help page now leads with **"Your setup & permissions"** — a live summary of exactly
+  what's enabled and available to you (AI on/off and which provider, GPU OCR, the conversion
+  engine, the right-click menu, and platform-specific notes).
+- Help, Terms and Privacy have been updated to cover every module.
+
+**Also**
+- First launch shows a few dismissable pointers on the Home page (they never nag twice).
+- Accessibility: a predictable Tab order on tool pages, and the drop zone is keyboard-
+  reachable and activatable with Enter/Space.
+
+---
+
 ## MICO360 Doc Toolkit v7.0.0
 
 **A premium redesign - and a more capable, more reliable AI.**
