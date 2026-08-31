@@ -62,6 +62,13 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Run]
+; Register the "MICO360 Toolkit" right-click menu for supported file types
+; (per-user, HKCU — no admin needed). Runs hidden and doesn't block the wizard.
+Filename: "{app}\{#AppExeName}"; Parameters: "--register-shell"; Flags: runhidden nowait; StatusMsg: "Adding the right-click menu…"
 Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+
+[UninstallRun]
+; Remove the right-click menu before the app's files are deleted.
+Filename: "{app}\{#AppExeName}"; Parameters: "--unregister-shell"; Flags: runhidden; RunOnceId: "UnregisterShellMenu"
 
 

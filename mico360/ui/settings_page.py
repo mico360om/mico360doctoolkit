@@ -919,6 +919,16 @@ class SettingsPage(QWidget):
         return ("GPU acceleration for OCR: not available on this PC — OCR uses "
                 "the CPU. (This build accelerates GPUs on Windows via DirectML.)")
 
+    def _toggle_shell_menu(self, on: bool) -> None:
+        """Add/remove the Explorer right-click menu. If it doesn't take (e.g.
+        registry blocked), snap the checkbox back to the real state."""
+        from mico360 import shell_integration as si
+        ok = si.register() if on else si.unregister()
+        if not ok or si.is_registered() != on:
+            self.chk_shell.blockSignals(True)
+            self.chk_shell.setChecked(si.is_registered())
+            self.chk_shell.blockSignals(False)
+
     def _deps_card(self) -> Card:
         card = Card()
         card.add(section_label("External tools"))
@@ -960,6 +970,21 @@ class SettingsPage(QWidget):
         card.add(self.chk_auto_engine)
         self._engines = engines
         self._refresh_engine_status()
+
+        # --- Windows Explorer right-click integration (Windows only) --------
+        import sys as _sys
+        if _sys.platform.startswith("win"):
+            from mico360 import shell_integration as _si
+            card.add(section_label("Windows integration"))
+            self.chk_shell = QCheckBox(
+                'Add "MICO360 Toolkit" to the File Explorer right-click menu')
+            tip(self.chk_shell,
+                "When you right-click a supported file (PDF, image, Office, "
+                "SVG) in File Explorer, a MICO360 Toolkit submenu lets you send "
+                "it straight to the matching tool — already loaded.")
+            self.chk_shell.setChecked(_si.is_registered())
+            self.chk_shell.toggled.connect(self._toggle_shell_menu)
+            card.add(self.chk_shell)
 
         btns = QHBoxLayout()
         detect = QPushButton("Auto-detect"); detect.setObjectName("Ghost")

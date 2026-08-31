@@ -148,6 +148,33 @@ class MainWindow(QMainWindow):
         if w != self.width() or h != self.height():
             self.resize(max(self.minimumWidth(), w), max(self.minimumHeight(), h))
 
+    # --- external open requests (right-click "MICO360 Toolkit" menu) --
+    def on_activation(self, payload: str = "") -> None:
+        """A second launch pinged us. Always come to the front; if it carried an
+        'open tool with file' request (from the Explorer menu), honour it."""
+        self.bring_to_front()
+        if not payload:
+            return
+        try:
+            import json
+            req = json.loads(payload)
+        except Exception:
+            req = None
+        if isinstance(req, dict) and req.get("files"):
+            self.handle_open_request(req)
+
+    def handle_open_request(self, req: dict) -> None:
+        """Open the requested tool with the given file(s) already loaded. If no
+        tool is named, route by file type (same rules as drag-and-drop)."""
+        files = [f for f in (req.get("files") or []) if f]
+        if not files:
+            return
+        tool = req.get("tool")
+        if not tool or tool not in self._tool_index:
+            from mico360.ui.dashboard_page import route_for
+            tool = route_for(files) or "pdf_compress"
+        self.open_tool(tool, files)
+
     def bring_to_front(self) -> None:
         """Restore, raise and focus the window — called when the user tries to
         launch a second copy, so the existing window comes to the foreground."""

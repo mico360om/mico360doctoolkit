@@ -18,6 +18,8 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 _ACTIVATE = b"ACTIVATE\n"
 _CONNECT_TIMEOUT_MS = 400
+# The primary reads and closes the connection; give it a moment to do so.
+_WRITE_TIMEOUT_MS = 2000
 
 
 def _default_name() -> str:
@@ -39,7 +41,10 @@ class SingleInstance(QObject):
     to a slot that raises your main window.
     """
 
-    activated = Signal()   # emitted in the primary when a second launch occurs
+    # Emitted in the primary when a second launch occurs. Carries an optional
+    # payload string (e.g. a JSON "open this tool with this file" request from a
+    # right-click menu); an empty string means "just come to the front".
+    activated = Signal(str)
 
     def __init__(self, name: str | None = None, parent: QObject | None = None):
         super().__init__(parent)
@@ -73,18 +78,26 @@ class SingleInstance(QObject):
         return not self._primary
 
     # -- second instance -> ping the primary -------------------------------
-    def signal_running(self) -> bool:
-        """Tell the already-running instance to come to the front. Returns True
-        if the ping was delivered."""
+    def signal_running(self, payload: str = "") -> bool:
+        """Tell the already-running instance to come to the front, optionally
+        forwarding a request payload (e.g. an "open tool with file" request).
+        Returns True if the ping was delivered."""
         sock = QLocalSocket()
         sock.connectToServer(self._name)
         if not sock.waitForConnected(_CONNECT_TIMEOUT_MS):
             return False
         try:
-            sock.write(_ACTIVATE)
+            msg = (payload.encode("utf-8") + b"\n") if payload else _ACTIVATE
+            sock.write(msg)
             sock.flush()
-            sock.waitForBytesWritten(_CONNECT_TIMEOUT_MS)
-            sock.disconnectFromServer()
+            sock.waitForBytesWritten(_WRITE_TIMEOUT_MS)
+            # Do NOT close from this side. Wait for the PRIMARY to read the
+            # message and close the connection: an abrupt sender-side close on a
+            # Windows named pipe can transition the receiver straight to
+            # "disconnected" (buffer cleared) so its readyRead never fires and
+            # the payload is lost. Letting the primary close avoids that race.
+            if not sock.waitForDisconnected(_WRITE_TIMEOUT_MS):
+                sock.abort()
         except Exception:
             return False
         return True
@@ -94,18 +107,35 @@ class SingleInstance(QObject):
         conn = self._server.nextPendingConnection()
         if conn is None:
             return
+        buf = {"data": b"", "done": False}
 
-        def _handle() -> None:
+        def _finish() -> None:
+            # Emit exactly once, from the fully-received (newline-terminated)
+            # message. Reading on *disconnect* too means a payload is never lost
+            # when the sender disconnects immediately after writing.
+            if buf["done"]:
+                return
+            buf["done"] = True
+            text = buf["data"].decode("utf-8", "replace").strip()
+            payload = "" if text in ("", "ACTIVATE") else text
+            self.activated.emit(payload)
             try:
-                conn.readAll()
+                conn.disconnectFromServer()
             except Exception:
                 pass
-            self.activated.emit()
-            conn.disconnectFromServer()
 
-        conn.readyRead.connect(_handle)
-        # If the peer disconnects before we read (very fast), still activate.
-        conn.disconnected.connect(self.activated.emit)
+        def _drain() -> None:
+            try:
+                buf["data"] += bytes(conn.readAll().data())
+            except Exception:
+                pass
+            if b"\n" in buf["data"]:
+                _finish()
+
+        conn.readyRead.connect(_drain)
+        # On disconnect, drain any remaining bytes then finish (covers a bare
+        # probe/activation that carried no newline).
+        conn.disconnected.connect(lambda: (_drain(), _finish()))
 
     def close(self) -> None:
         if self._server is not None:

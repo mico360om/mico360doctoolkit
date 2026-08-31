@@ -103,9 +103,51 @@ def install_crash_guard(log) -> None:
     sys.excepthook = _hook
 
 
+def parse_cli(argv: list[str]) -> dict | None:
+    """Interpret the command line. Returns a request dict, or None for a plain
+    launch. Shapes:
+      {"action": "register"} / {"action": "unregister"}   — shell menu setup
+      {"action": "open", "tool": <id|None>, "files": [...]} — open a tool/file
+    """
+    args = list(argv[1:])
+    if not args:
+        return None
+    if "--register-shell" in args:
+        return {"action": "register"}
+    if "--unregister-shell" in args:
+        return {"action": "unregister"}
+    tool = None
+    files: list[str] = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("--tool", "-t") and i + 1 < len(args):
+            tool = args[i + 1]
+            i += 2
+            continue
+        if a.startswith("-"):        # ignore unknown flags
+            i += 1
+            continue
+        files.append(a)
+        i += 1
+    if files:
+        return {"action": "open", "tool": tool, "files": files}
+    return None
+
+
 def main() -> int:
     setup_logging()
     log = get_logger()
+
+    # Shell-integration setup runs without the GUI (used by the installer).
+    cli = parse_cli(sys.argv)
+    if cli and cli["action"] in ("register", "unregister"):
+        from mico360 import shell_integration
+        ok = (shell_integration.register() if cli["action"] == "register"
+              else shell_integration.unregister())
+        log.info("shell %s: %s", cli["action"], "ok" if ok else "skipped")
+        return 0 if ok else 1
+
     install_crash_guard(log)
     _set_windows_app_id()
     configure_high_dpi()
@@ -114,19 +156,26 @@ def main() -> int:
     app.setApplicationName(__app_name__)
     app.setOrganizationName("MICO360")
 
+    open_req = cli if (cli and cli["action"] == "open") else None
+
     # --- single instance: a second launch raises the first and exits ---
     from mico360.single_instance import SingleInstance
     guard = SingleInstance()
     if guard.is_running():
-        guard.signal_running()      # bring the existing window forward
-        from PySide6.QtGui import QGuiApplication
-        from PySide6.QtWidgets import QMessageBox
-        if QGuiApplication.platformName() != "offscreen":
-            QMessageBox.information(
-                None, __app_name__,
-                f"{__app_name__} is already running.\n\n"
-                "We've brought the open window to the front for you.")
-        log.info("Second instance blocked; signalled the running one.")
+        # Forward an "open" request to the running window; otherwise just raise
+        # it and tell the user it's already open.
+        import json
+        guard.signal_running(json.dumps(open_req) if open_req else "")
+        if open_req is None:
+            from PySide6.QtGui import QGuiApplication
+            from PySide6.QtWidgets import QMessageBox
+            if QGuiApplication.platformName() != "offscreen":
+                QMessageBox.information(
+                    None, __app_name__,
+                    f"{__app_name__} is already running.\n\n"
+                    "We've brought the open window to the front for you.")
+        log.info("Second instance %s the running one.",
+                 "forwarded a request to" if open_req else "signalled")
         return 0
 
     logo = resource_path("logo.png")
@@ -141,8 +190,10 @@ def main() -> int:
     try:
         win = MainWindow()
         guard.setParent(win)                       # tie its lifetime to the window
-        guard.activated.connect(win.bring_to_front)
+        guard.activated.connect(win.on_activation)
         win.show()
+        if open_req is not None:                   # launched via the shell menu
+            win.handle_open_request(open_req)
     except Exception:
         log.exception("Failed to start UI")
         raise
