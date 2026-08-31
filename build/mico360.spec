@@ -45,6 +45,8 @@ hiddenimports = [
     "vtracer",
     # AI metadata generator (ai_suggest is imported lazily inside a method)
     "mico360.core.ai", "mico360.core.ai_metadata", "mico360.ui.ai_suggest",
+    # Lazily imported inside functions — name them so PyInstaller collects them.
+    "mico360.shell_integration", "mico360.capabilities",
 ]
 
 # Bundle tricky packages completely (data files, submodules).
