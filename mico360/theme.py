@@ -363,6 +363,11 @@ QRadioButton::indicator:checked {{ background: {c['primary']}; border: 5px solid
 #Toast[toastKind="error"] {{ border-left-color: {c['error']}; }}
 #Toast[toastKind="info"] {{ border-left-color: {c['info']}; }}
 #ToastText {{ color: {c['text']}; font-size: 13px; font-weight: 600; }}
+QPushButton#ToastAction {{
+    background: transparent; border: none; color: {c['primary']};
+    font-weight: 800; font-size: 13px; padding: 2px 6px;
+}}
+QPushButton#ToastAction:hover {{ color: {c['primary_hover']}; text-decoration: underline; }}
 
 /* =================== Dashboard =================== */
 #DashTile {{

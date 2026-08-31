@@ -139,6 +139,10 @@ class DashboardPage(QWidget):
         sub.setObjectName("PageSubtitle")
         self.root.addWidget(sub)
 
+        hints = self._build_first_run_hints()
+        if hints is not None:
+            self.root.addWidget(hints)
+
         self.root.addWidget(self._quick_card())
         self._fav_card = Card()
         self.root.addWidget(self._fav_card)
@@ -151,6 +155,37 @@ class DashboardPage(QWidget):
         self.refresh()
 
     # ------------------------------------------------------------------
+    def _build_first_run_hints(self):
+        """A one-time, dismissable strip of pointers shown only on first launch.
+        Sets a flag when dismissed so it never appears again — no wizard, no nag."""
+        if settings.first_run_hints_shown:
+            return None
+        card = Card(flat=True)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(10)
+        tips = QLabel(
+            "👋  <b>New here?</b>&nbsp;&nbsp;•&nbsp; Drop files anywhere to start"
+            "&nbsp;&nbsp;•&nbsp; Pin tools with ☆&nbsp;&nbsp;•&nbsp; AI suggestions "
+            "live in <b>Edit Metadata</b> (set them up in Settings → AI)")
+        tips.setObjectName("Hint")
+        tips.setTextFormat(Qt.RichText)
+        tips.setWordWrap(True)
+        row.addWidget(tips, 1)
+        btn = QPushButton("Got it")
+        btn.setObjectName("Ghost")
+        btn.setCursor(Qt.PointingHandCursor)
+        tip(btn, "Dismiss these tips (they won't show again).")
+
+        def _dismiss():
+            settings.first_run_hints_shown = True
+            card.setVisible(False)
+
+        btn.clicked.connect(_dismiss)
+        row.addWidget(btn, 0, Qt.AlignTop)
+        card.add_layout(row)
+        return card
+
     def _quick_card(self) -> Card:
         card = Card()
         card.add(section_label("Quick actions"))
@@ -225,6 +260,9 @@ class DashboardPage(QWidget):
             lst.addItem(it)
         lst.itemActivated.connect(self._open_recent)
         lst.itemDoubleClicked.connect(self._open_recent)
+        lst.setContextMenuPolicy(Qt.CustomContextMenu)
+        lst.customContextMenuRequested.connect(
+            lambda pos, w=lst: self._recent_menu(w, pos))
         self._recent_card.add(lst)
         clear = QPushButton("Clear recent")
         clear.setObjectName("Ghost")
@@ -254,6 +292,26 @@ class DashboardPage(QWidget):
             return
         from mico360.core.platform_utils import reveal
         reveal(p)
+
+    def _recent_menu(self, lst, pos) -> None:
+        from PySide6.QtWidgets import QMenu
+        item = lst.itemAt(pos)
+        if item is None:
+            return
+        path = item.data(Qt.UserRole)
+        menu = QMenu(self)
+        act_open = menu.addAction("Show in folder")
+        tool = route_for([path]) if path else None
+        act_rerun = None
+        if tool and tool in TOOLS_BY_ID:
+            act_rerun = menu.addAction(f"Re-run with {TOOLS_BY_ID[tool].name}")
+        chosen = menu.exec(lst.mapToGlobal(pos))
+        if chosen is None:
+            return
+        if chosen == act_open:
+            self._open_recent(item)
+        elif act_rerun is not None and chosen == act_rerun:
+            self.openToolWithFiles.emit(tool, [path])
 
     # --- drag & drop anywhere -----------------------------------------
     def dragEnterEvent(self, event):  # noqa: N802

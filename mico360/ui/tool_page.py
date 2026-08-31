@@ -95,6 +95,8 @@ class _StatusProxy:
 class ToolPage(QWidget):
     activity = Signal(str)        # forwards notable lines to the global activity log
     toast = Signal(str, str)      # (message, kind) for a transient notification
+    toastAction = Signal(str, str, str, object)  # (message, kind, action, callback)
+    runStatus = Signal(str)       # running summary for the window title ("" = idle)
     openSettings = Signal()       # "take me to Settings" (e.g. to configure AI)
 
     def __init__(self, tool: Tool, parent: QWidget | None = None):
@@ -142,6 +144,19 @@ class ToolPage(QWidget):
                            "The full history is on the Activity page.")
         log_card.add(self.log_view)
         root.addWidget(log_card)
+        self._set_tab_order()
+
+    def _set_tab_order(self) -> None:
+        """A predictable keyboard path: drop zone → queue → queue toolbar →
+        output → the run buttons. The drop zone is first so Tab reaches it early
+        and Enter/Space there opens Browse."""
+        chain = [self.drop, self.file_list, self.btn_add, self.btn_remove_sel,
+                 self.btn_remove_fin, self.btn_clear, self.out_edit,
+                 self.chk_same, self.chk_overwrite, self.btn_start,
+                 self.btn_retry_failed, self.btn_open, self.btn_cancel]
+        for a, b in zip(chain, chain[1:]):
+            if a is not None and b is not None:
+                self.setTabOrder(a, b)
 
     def _build_header(self) -> QHBoxLayout:
         header = QHBoxLayout()
@@ -207,8 +222,10 @@ class ToolPage(QWidget):
 
         # The queue list — the star of the panel; it takes all the spare height.
         self.file_list = FileListWidget(
-            "No files in the queue yet.\n\nDrag files onto the band above, "
-            "or use Add files.")
+            "No files in the queue yet.\n\n"
+            "Click here to browse, drag files onto the band above,\n"
+            "or paste copied files with Ctrl+V.")
+        self.file_list.emptyClicked.connect(self._browse_files)
         self.file_list.setObjectName("FileList")
         self.file_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.file_list.setMinimumHeight(220)
@@ -254,7 +271,7 @@ class ToolPage(QWidget):
         self.btn_add = QPushButton("Add")
         self.btn_add.setObjectName("Subtle")
         self.btn_add.setCursor(Qt.PointingHandCursor)
-        tip(self.btn_add, "Add files to the queue.")
+        tip(self.btn_add, "Add files to the queue.  (Ctrl+O, or Ctrl+V to paste)")
         self.btn_add.clicked.connect(self._browse_files)
 
         self.btn_remove_sel = QPushButton("Remove")
@@ -374,9 +391,26 @@ class ToolPage(QWidget):
         self.btn_start.setObjectName("Primary")
         self.btn_start.setCursor(Qt.PointingHandCursor)
         tip(self.btn_start,
-            f"Run {self.tool.name} on every pending file in the queue. "
-            "Rows already done are skipped until you retry them.")
+            f"Run {self.tool.name} on every pending file in the queue "
+            "(Ctrl+Enter). Rows already done are skipped until you retry them.")
         self.btn_start.clicked.connect(self.start)
+
+        # Appears (as its own full-width row) only after a run finishes with
+        # failures — one click re-runs just the failed rows.
+        self.btn_retry_failed = QPushButton("Retry failed")
+        self.btn_retry_failed.setObjectName("Ghost")
+        self.btn_retry_failed.setCursor(Qt.PointingHandCursor)
+        tip(self.btn_retry_failed,
+            "Re-run only the rows that failed in the last run.")
+        self.btn_retry_failed.clicked.connect(self._retry_failed)
+        retry_lay = QHBoxLayout()
+        retry_lay.setContentsMargins(0, 0, 0, 0)
+        retry_lay.addWidget(self.btn_retry_failed, 1)
+        self.retry_row = QWidget()
+        self.retry_row.setLayout(retry_lay)
+        self.retry_row.setVisible(False)
+        card.add(self.retry_row)
+
         self.btn_open = QPushButton("Open output")
         self.btn_open.setObjectName("Ghost")
         self.btn_open.setCursor(Qt.PointingHandCursor)
@@ -387,7 +421,7 @@ class ToolPage(QWidget):
         self.btn_cancel.setObjectName("Ghost")
         self.btn_cancel.setCursor(Qt.PointingHandCursor)
         tip(self.btn_cancel,
-            "Stop the run. Files already being processed finish first; "
+            "Stop the run (Esc). Files already being processed finish first; "
             "completed results are kept.")
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.clicked.connect(self._cancel)
@@ -705,25 +739,90 @@ class ToolPage(QWidget):
         self.btn_remove_sel.setEnabled(n > 0)
         self.btn_remove_fin.setEnabled((done + failed) > 0)
         self.btn_clear.setEnabled(n > 0 and not running)
+        self._update_retry_button()
+
+    def _offer_undo(self, before_items: list, verb: str) -> None:
+        """After a queue mutation, offer a brief Undo that restores the prior
+        list — cheaper and less annoying than a confirm dialog."""
+        removed = len(before_items) - len(self.items)
+        if removed <= 0:
+            return
+        snapshot = list(before_items)
+
+        def _undo():
+            self.items = list(snapshot)
+            self._refresh_list()
+
+        plural = "s" if removed != 1 else ""
+        self.toastAction.emit(f"{verb} {removed} row{plural}.", "info",
+                              "Undo", _undo)
 
     def _remove_selected(self) -> None:
         sel = {it.id for it in self._selected_items()}
         if not sel:
             return
+        before = list(self.items)
         self.items = [it for it in self.items if it.id not in sel]
         self._refresh_list()
+        self._offer_undo(before, "Removed")
 
     def _remove_finished(self) -> None:
-        before = len(self.items)
+        before = list(self.items)
         self.items = [it for it in self.items if it.state not in ("done", "failed")]
-        removed = before - len(self.items)
+        removed = len(before) - len(self.items)
         self._refresh_list()
         if removed:
             self._log(f"Removed {removed} finished row(s).")
+            self._offer_undo(before, "Removed")
 
     def _clear(self) -> None:
+        if not self.items:
+            return
+        before = list(self.items)
         self.items.clear()
         self._refresh_list()
+        self._offer_undo(before, "Cleared")
+
+    # --- keyboard-shortcut targets & failed-item recovery -------------
+    def paste_from_clipboard(self) -> None:
+        """Ctrl+V: add files copied to the clipboard (URLs, or path text)."""
+        from PySide6.QtWidgets import QApplication
+        md = QApplication.clipboard().mimeData()
+        paths: list[str] = []
+        if md.hasUrls():
+            paths = [u.toLocalFile() for u in md.urls() if u.toLocalFile()]
+        if not paths and md.hasText():
+            for line in md.text().splitlines():
+                line = line.strip().strip('"')
+                if line and Path(line).exists():
+                    paths.append(line)
+        if paths:
+            self.add_paths(paths)
+        else:
+            self.toast.emit("Clipboard has no files to paste", "info")
+
+    def cancel_if_running(self) -> None:
+        """Esc: stop the run, but only when one is actually in progress."""
+        if self.controller is not None:
+            self._cancel()
+
+    def _retry_failed(self) -> None:
+        """Re-run only the rows that failed in the last run."""
+        failed = [it for it in self.items if it.state == "failed"]
+        if not failed:
+            self._update_retry_button()
+            return
+        self._retry(failed)          # reset the failed rows to pending…
+        self.start()                 # …and process them
+
+    def _update_retry_button(self) -> None:
+        if not hasattr(self, "retry_row"):
+            return
+        failed = sum(1 for it in self.items if it.state == "failed")
+        running = self.controller is not None
+        self.retry_row.setVisible(failed > 0 and not running)
+        if failed:
+            self.btn_retry_failed.setText(f"Retry {failed} failed")
 
     def _total_saved(self) -> str:
         """For compression tools, summarise the total bytes saved this batch."""
@@ -1021,17 +1120,29 @@ class ToolPage(QWidget):
     def _update_progress_detail(self, pct: float) -> None:
         total = self._run_total or len(self.items) or 1
         done = sum(1 for it in self.items if it.state in ("done", "failed"))
+        failed = sum(1 for it in self.items if it.state == "failed")
         running = next((it.path.name for it in self.items
                         if it.state == "running"), None)
-        parts = [f"Processing {min(done + 1, total)} of {total}"]
+        cur = min(done + 1, total)
+        parts = [f"Processing {cur} of {total}"]
+        eta = None
         if pct and pct > 1:
             parts.append(f"{int(round(pct))}%")
         if self._run_t0 is not None and pct and pct > 1:
             import time
             elapsed = time.monotonic() - self._run_t0
-            remaining = elapsed * (100.0 - pct) / max(pct, 1.0)
-            parts.append(f"about {self._fmt_eta(remaining)} left")
+            eta = elapsed * (100.0 - pct) / max(pct, 1.0)
+            parts.append(f"about {self._fmt_eta(eta)} left")
         self.status_lbl.setText("   ·   ".join(parts))
+
+        # Mirror a compact version into the window title / taskbar so progress
+        # is readable while the window is minimised or in the background.
+        tparts = [f"{cur} of {total}"]
+        if eta is not None:
+            tparts.append(f"~{self._fmt_eta(eta)} left")
+        if failed:
+            tparts.append(f"{failed} failed")
+        self.runStatus.emit(f"{self.tool.name}: {' · '.join(tparts)}")
 
         # Current-file caption: show as much of the name as fits, full on hover.
         if running:
@@ -1091,6 +1202,7 @@ class ToolPage(QWidget):
     def _on_finished(self, summary: dict) -> None:
         self.controller = None
         self._set_running(False)
+        self.runStatus.emit("")          # clear the running window title
         total = max(1, summary.get("total", 1))
         processed = summary.get("ok", 0) + summary.get("failed", 0)
         self.progress.setRange(0, 100)

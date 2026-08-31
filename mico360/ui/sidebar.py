@@ -80,8 +80,9 @@ class Sidebar(QWidget):
         self._search.setPlaceholderText("Search tools…")
         self._search.setClearButtonEnabled(True)
         self._search.setAccessibleName("Search tools")
-        tip(self._search, "Type part of a tool's name to filter the list — "
-                          "clear the box to show every tool again.")
+        tip(self._search, "Search tools by name or by what they do — e.g. "
+                          "\"password\" or \"dpi\" (Ctrl+K). Clear the box to "
+                          "show every tool again.")
         self._search.textChanged.connect(self._on_search)
         sw.addWidget(self._search)
         root.addWidget(self._search_wrap)
@@ -121,11 +122,14 @@ class Sidebar(QWidget):
         self._nav.addWidget(btn)
 
     def add_item(self, glyph: str, label: str, page_index: int,
-                 description: str = "") -> NavItem:
+                 description: str = "", search_terms: str = "") -> NavItem:
         item = NavItem(glyph, label, description)
         item.clicked.connect(lambda: self.navigated.emit(page_index))
         item._page_index = page_index  # type: ignore[attr-defined]
         item._group = self._cur_group  # type: ignore[attr-defined]
+        # Extra words this item should also match on (option names, keywords…),
+        # so searching "password" or "dpi" surfaces the right tool.
+        item._search = (search_terms or "").lower()  # type: ignore[attr-defined]
         self._group.addButton(item)
         self._nav.addWidget(item)
         self._items.append(item)
@@ -157,6 +161,15 @@ class Sidebar(QWidget):
             self._items[0].setChecked(True)
             self.navigated.emit(getattr(self._items[0], "_page_index", 0))
 
+    def focus_search(self) -> None:
+        """Put the cursor in the tool-search box (Ctrl+K). Expands the sidebar
+        first if it's collapsed, so the box is actually visible."""
+        if self._collapsed:
+            self.set_collapsed(False)
+        self._search_wrap.setVisible(True)
+        self._search.setFocus(Qt.ShortcutFocusReason)
+        self._search.selectAll()
+
     # -- search & collapsible groups ---------------------------------------
     def _update_section_text(self, grp: dict) -> None:
         name = (grp["name"] or "").upper()
@@ -187,7 +200,8 @@ class Sidebar(QWidget):
             any_match = False
             for it in grp["items"]:
                 if q:
-                    match = q in it._label.lower()
+                    match = (q in it._label.lower()
+                             or q in getattr(it, "_search", ""))
                     it.setVisible(match)
                     any_match = any_match or match
                 else:

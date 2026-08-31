@@ -63,7 +63,8 @@ def fit_window_size(pref_w: int, pref_h: int, min_w: int, min_h: int,
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle(f"{__app_name__}  v{__version__}")
+        self._base_title = f"{__app_name__}  v{__version__}"
+        self.setWindowTitle(self._base_title)
         self.setMinimumSize(MIN_W, MIN_H)
         self._geom_applied = False
         self._screen_hooked = False
@@ -89,6 +90,7 @@ class MainWindow(QMainWindow):
 
         self._build_pages()
         self._build_layout()
+        self._install_shortcuts()
         self._apply_visuals()
         self.sidebar.select_first()
 
@@ -217,8 +219,16 @@ class MainWindow(QMainWindow):
             self.sidebar.add_section(group_name)
             for tool in tools:
                 self._factories[page_index] = (lambda t=tool: self._build_tool_page(t))
+                # Extra search terms so the sidebar box also matches a tool by
+                # its option names ("password" → Protect, "dpi" → Compress).
+                terms = " ".join(
+                    [tool.name, tool.tagline, group_name]
+                    + [o.label for o in tool.options]
+                    + [o.key for o in tool.options]
+                    + [o.hint for o in tool.options if getattr(o, "hint", "")])
                 # The tagline doubles as the nav tooltip / screen-reader hint.
-                self.sidebar.add_item(tool.icon, tool.name, page_index, tool.tagline)
+                self.sidebar.add_item(tool.icon, tool.name, page_index,
+                                      tool.tagline, search_terms=terms)
                 self._titles[page_index] = tool.name
                 self._tool_index[tool.id] = page_index
                 page_index += 1
@@ -238,7 +248,7 @@ class MainWindow(QMainWindow):
 
         self._factories[page_index] = self._build_help_page
         self.sidebar.add_item("❔", "Help", page_index,
-                              "How each tool works, plus About and legal info.")
+                              "How each tool works, plus About and legal info. (F1)")
         self._titles[page_index] = "Help"
         page_index += 1
 
@@ -255,8 +265,60 @@ class MainWindow(QMainWindow):
         page = ToolPage(tool)
         page.activity.connect(self.log_page.append)
         page.toast.connect(self.show_toast)
+        page.toastAction.connect(self.show_toast)
+        page.runStatus.connect(self.set_run_title)
         page.openSettings.connect(self.open_settings)
         return self._scrollable(page)
+
+    # --- keyboard shortcuts -------------------------------------------
+    def _install_shortcuts(self) -> None:
+        """App-wide shortcuts for the core loop. The ones that act on a tool
+        (add / start / cancel / paste) are routed to whichever tool page is
+        currently open, so there's never a shortcut clash between pages."""
+        from PySide6.QtGui import QKeySequence, QShortcut
+
+        def sc(seq, slot):
+            s = QShortcut(QKeySequence(seq), self)
+            s.setContext(Qt.WindowShortcut)
+            s.activated.connect(slot)
+            return s
+
+        sc("Ctrl+K", self.sidebar.focus_search)
+        sc("F1", self.open_help)
+        sc("Ctrl+O", lambda: self._on_tool_page(lambda p: p._browse_files()))
+        sc("Ctrl+Return", lambda: self._on_tool_page(lambda p: p.start()))
+        sc("Ctrl+Enter", lambda: self._on_tool_page(lambda p: p.start()))
+        sc("Ctrl+V", lambda: self._on_tool_page(lambda p: p.paste_from_clipboard()))
+        sc("Esc", lambda: self._on_tool_page(lambda p: p.cancel_if_running()))
+        # Ctrl+1..9 jump to the Nth pinned (favourite) tool.
+        for n in range(1, 10):
+            sc(f"Ctrl+{n}", lambda i=n: self._open_favorite(i))
+
+    def _current_tool_page(self):
+        cur = self.stack.currentWidget()
+        page = cur.widget() if isinstance(cur, QScrollArea) else cur
+        return page if isinstance(page, ToolPage) else None
+
+    def _on_tool_page(self, fn) -> None:
+        page = self._current_tool_page()
+        if page is not None:
+            fn(page)
+
+    def _open_favorite(self, n: int) -> None:
+        favs = [t for t in settings.favorite_tools if t in self._tool_index]
+        if 1 <= n <= len(favs):
+            self.open_tool(favs[n - 1])
+
+    def open_help(self) -> None:
+        idx = next((i for i, f in self._factories.items()
+                    if getattr(f, "__name__", "") == "_build_help_page"), None)
+        if idx is not None:
+            self.sidebar.select(idx)
+
+    def set_run_title(self, text: str) -> None:
+        """Show a running batch's progress in the window title/taskbar so it's
+        readable while the window is minimised or in the background."""
+        self.setWindowTitle(f"{text} — {__app_name__}" if text else self._base_title)
 
     def open_settings(self) -> None:
         """Jump to Settings — used by the 'AI API not configured' link."""
@@ -279,12 +341,14 @@ class MainWindow(QMainWindow):
                 page.add_paths([Path(f) for f in files])
 
     # --- toast notifications ------------------------------------------
-    def show_toast(self, message: str, kind: str = "ok") -> None:
+    def show_toast(self, message: str, kind: str = "ok",
+                   action_text: str = "", on_action=None) -> None:
         from mico360.ui.widgets import Toast
         if not hasattr(self, "_toasts"):
             self._toasts = []
         self._toasts = [t for t in self._toasts if t.isVisible()]
-        toast = Toast(self, message, kind)
+        toast = Toast(self, message, kind, action_text=action_text,
+                      on_action=on_action)
         # Stack above any existing toasts using their real heights (+ a gap).
         offset = sum(t.height() + 8 for t in self._toasts)
         toast.show_at(offset=offset)

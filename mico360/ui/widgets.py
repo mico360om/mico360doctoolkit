@@ -111,7 +111,10 @@ class QueueRowDelegate(QStyledItemDelegate):
 
 class FileListWidget(QListWidget):
     """A file list that paints a friendly, centred empty-state message while no
-    files have been added — instead of leaving a blank box."""
+    files have been added — instead of leaving a blank box. The empty area is a
+    click target: clicking it while empty asks to browse for files."""
+
+    emptyClicked = Signal()
 
     def __init__(self, placeholder: str = "", parent: QWidget | None = None):
         super().__init__(parent)
@@ -120,6 +123,13 @@ class FileListWidget(QListWidget):
     def set_placeholder(self, text: str) -> None:
         self._placeholder = text
         self.viewport().update()
+
+    def mousePressEvent(self, event):  # noqa: N802
+        # While the queue is empty the whole area is a big "add files" target.
+        if self.count() == 0 and event.button() == Qt.LeftButton:
+            self.emptyClicked.emit()
+            return
+        super().mousePressEvent(event)
 
     def paintEvent(self, event):  # noqa: N802
         super().paintEvent(event)
@@ -326,10 +336,24 @@ class DropArea(QFrame):
         self.setAcceptDrops(True)
         self.setProperty("dragActive", False)
         self._compact = compact
+        # Keyboard-accessible: the drop zone can be Tab-focused and activated
+        # with Enter/Space (same as clicking Browse), and screen readers get a
+        # name + hint describing it.
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setAccessibleName("Drop files here")
+        self.setAccessibleDescription(
+            "Drag files or folders here, or press Enter to browse for files.")
         if compact:
             self._build_compact()
         else:
             self._build_full()
+
+    def keyPressEvent(self, event):  # noqa: N802
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            self.browseFiles.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def _build_full(self) -> None:
         # MinimumExpanding (vertical): the area grows to fill spare space but is
@@ -494,7 +518,8 @@ class Toast(QFrame):
     """A small auto-dismissing notification, overlaid on its parent window."""
 
     def __init__(self, parent: QWidget, message: str, kind: str = "ok",
-                 duration: int = 3400):
+                 duration: int = 3400, action_text: str = "",
+                 on_action=None):
         super().__init__(parent)
         self.setObjectName("Toast")
         self.setProperty("toastKind", kind)
@@ -507,7 +532,17 @@ class Toast(QFrame):
         text.setObjectName("ToastText")
         text.setWordWrap(False)            # single line → consistent height
         lay.addWidget(text)
-        self.setMaximumWidth(460)
+        # Optional inline action (e.g. "Undo") — clicking it runs the callback
+        # and dismisses the toast immediately.
+        if action_text and on_action is not None:
+            self._btn = QPushButton(action_text)
+            self._btn.setObjectName("ToastAction")
+            self._btn.setCursor(Qt.PointingHandCursor)
+            self._btn.clicked.connect(lambda: (on_action(), self.close()))
+            lay.addSpacing(6)
+            lay.addWidget(self._btn)
+            duration = max(duration, 5000)   # give the user time to react
+        self.setMaximumWidth(520)
         QTimer.singleShot(duration, self.close)
 
     def show_at(self, offset: int = 0, margin: int = 22) -> None:

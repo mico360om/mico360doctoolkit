@@ -351,6 +351,16 @@ class Settings:
         self._set_json("home/recent_activity", [])
 
     @property
+    def first_run_hints_shown(self) -> bool:
+        """Whether the one-time first-run pointer callouts have been shown.
+        Set once they're dismissed so they never nag again."""
+        return self._get("ui/first_run_hints_shown", False, bool)
+
+    @first_run_hints_shown.setter
+    def first_run_hints_shown(self, value: bool) -> None:
+        self._set("ui/first_run_hints_shown", bool(value))
+
+    @property
     def collapsed_groups(self) -> list:
         v = self._get_json("ui/collapsed_groups", [])
         return v if isinstance(v, list) else []
