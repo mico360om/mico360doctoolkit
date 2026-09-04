@@ -122,7 +122,10 @@ class OptionsWidget(QWidget):
             le = QLineEdit("")            # never pre-filled from saved settings
             le.setEchoMode(QLineEdit.Password)
             le.setPlaceholderText("••••••••")
-            eye = QPushButton("👁")
+            from mico360.ui.icons import IconButton
+            # Line-icon eye; swaps to a struck-through eye while revealed.
+            eye = IconButton("eye", 18, "text_muted",
+                             checked_name="eye-off", checked_role="primary")
             eye.setObjectName("EyeToggle")
             eye.setCheckable(True)
             eye.setFixedWidth(38)

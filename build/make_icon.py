@@ -1,9 +1,18 @@
-"""Generate a multi-resolution Windows .ico for MICO360 Doc Toolkit.
+"""Generate the square app icon for MICO360 Doc Toolkit in every format the
+app and its installers need:
+
+    mico360/resources/app.ico   Windows executable / installer / taskbar
+    mico360/resources/app.icns  macOS .app bundle (Dock, Finder, Launchpad)
+    mico360/resources/app.png   512 px square used for QApplication.setWindowIcon
+                                (Dock icon when running from source on macOS,
+                                Alt-Tab / title bar on Windows)
 
 The brand logo is a wide wordmark ("MICO 360°"), which becomes an invisible
 sliver when letterboxed into a square icon. Instead we build a proper square
 app icon: the bold white "360° + swoosh" emblem (cropped from the white logo)
 centred on a rounded maroon brand tile. This stays recognisable down to 16px.
+
+Pure Pillow, so all three formats build on any OS (no iconutil needed).
 
 Run:  python build/make_icon.py
 """
@@ -14,8 +23,14 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parent.parent
 SRC_WHITE = ROOT / "logo-w.png"      # all-white wordmark (for dark backgrounds)
 SRC_COLOR = ROOT / "logo.png"        # full-colour wordmark
-DST = ROOT / "mico360" / "resources" / "app.ico"
-PREVIEW = ROOT / "build" / "_icon_preview.png"
+RES = ROOT / "mico360" / "resources"
+DST = RES / "app.ico"
+DST_ICNS = RES / "app.icns"
+DST_PNG = RES / "app.png"
+PNG_SIZE = 512
+ICNS_SIZES = [(16, 16), (32, 32), (64, 64), (128, 128),
+              (256, 256), (512, 512), (1024, 1024)]
+PREVIEW = ROOT / "build" / "_work" / "icon_preview.png"   # scratch, not shipped
 
 MAROON = (130, 20, 20, 255)          # sampled brand maroon (#821414)
 EMBLEM_LEFT_FRAC = 0.365             # crop x: right of the MICO pill / gap (~x850/2330)
@@ -56,11 +71,21 @@ def build_master() -> Image.Image:
     return tile
 
 
+def write_all(master: Image.Image | None = None) -> list[Path]:
+    """Write app.ico, app.icns and app.png; returns the paths written."""
+    master = master or build_master()
+    RES.mkdir(parents=True, exist_ok=True)
+    master.save(DST, sizes=ICO_SIZES)
+    # Pillow's ICNS writer embeds each requested size (incl. @2x retina slots).
+    master.save(DST_ICNS, format="ICNS", sizes=ICNS_SIZES)
+    master.resize((PNG_SIZE, PNG_SIZE), Image.LANCZOS).save(DST_PNG)
+    return [DST, DST_ICNS, DST_PNG]
+
+
 def main() -> None:
     master = build_master()
-    DST.parent.mkdir(parents=True, exist_ok=True)
-    master.save(DST, sizes=ICO_SIZES)
-    print(f"Wrote {DST}")
+    for p in write_all(master):
+        print(f"Wrote {p}")
 
     # Preview strip: render the icon at several sizes on a checker-ish bg.
     sizes = [16, 32, 48, 64, 128, 256]
@@ -72,6 +97,7 @@ def main() -> None:
         thumb = master.resize((s, s), Image.LANCZOS)
         strip.alpha_composite(thumb, (x, pad + (256 - s) // 2))
         x += s + pad
+    PREVIEW.parent.mkdir(parents=True, exist_ok=True)
     strip.save(PREVIEW)
     print(f"Wrote {PREVIEW}")
 

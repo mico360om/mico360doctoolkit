@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 from mico360 import __app_name__
 from mico360.config import settings
 from mico360.core.tools import IMAGES, OFFICE, PDF, SVG, TOOLS_BY_ID
+from mico360.ui.icons import IconLabel, icon as make_icon, theme_color
 from mico360.ui.widgets import Card, section_label, tip
 
 QUICK_ACTIONS = ["pdf_compress", "pdf_merge", "pdf_convert", "office_to_pdf",
@@ -67,9 +68,9 @@ class Tile(QPushButton):
         lay.setContentsMargins(14, 12, 14, 12)
         lay.setSpacing(12)
 
-        icon = QLabel(tool.icon if tool else "•")
+        from mico360.ui.icons import IconLabel, tool_icon_name
+        icon = IconLabel(tool_icon_name(tool_id), 22, "primary")
         icon.setObjectName("DashTileIcon")
-        icon.setAlignment(Qt.AlignCenter)
         icon.setFixedSize(40, 40)
         lay.addWidget(icon, 0, Qt.AlignTop if not compact else Qt.AlignVCenter)
 
@@ -164,10 +165,12 @@ class DashboardPage(QWidget):
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(10)
+        row.addWidget(IconLabel("sparkles", 18, "primary"), 0, Qt.AlignTop)
         tips = QLabel(
-            "👋  <b>New here?</b>&nbsp;&nbsp;•&nbsp; Drop files anywhere to start"
-            "&nbsp;&nbsp;•&nbsp; Pin tools with ☆&nbsp;&nbsp;•&nbsp; AI suggestions "
-            "live in <b>Edit Metadata</b> (set them up in Settings → AI)")
+            "<b>New here?</b>&nbsp;&nbsp;•&nbsp; Drop files anywhere to start"
+            "&nbsp;&nbsp;•&nbsp; Pin tools with the star button&nbsp;&nbsp;•&nbsp; "
+            "AI suggestions live in <b>Edit Metadata</b> (set them up in "
+            "Settings → AI)")
         tips.setObjectName("Hint")
         tips.setTextFormat(Qt.RichText)
         tips.setWordWrap(True)
@@ -222,7 +225,7 @@ class DashboardPage(QWidget):
         self._fill_card(self._fav_card, "Favourite tools")
         favs = [t for t in settings.favorite_tools if t in TOOLS_BY_ID]
         if not favs:
-            hint = QLabel("No favourites yet — open a tool and click ☆ to pin it.")
+            hint = QLabel("No favourites yet — open a tool and click the star button to pin it.")
             hint.setObjectName("Hint")
             self._fav_card.add(hint)
             return
@@ -253,8 +256,9 @@ class DashboardPage(QWidget):
         lst.setObjectName("FileList")
         lst.setMaximumHeight(180)
         lst.setAccessibleName("Recent files")
+        file_icon = make_icon("file", 16, theme_color("text_muted"))
         for p in recents[:10]:
-            it = QListWidgetItem(f"📄  {Path(p).name}")
+            it = QListWidgetItem(file_icon, Path(p).name)
             it.setToolTip(f"{p}\nDouble-click to show this file in its folder.")
             it.setData(Qt.UserRole, p)
             lst.addItem(it)

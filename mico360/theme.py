@@ -18,9 +18,34 @@ RADIUS_SM = 10
 RADIUS_XS = 8
 
 
+# The resolved OS appearance is cached briefly: `settings.theme` is read many
+# times per repaint (once per tinted icon, per palette lookup…), and on macOS
+# each uncached read would spawn a `defaults` process. 2 s keeps the app
+# following the OS setting closely while collapsing a burst of reads into one.
+_SYS_THEME_TTL = 2.0
+_sys_theme_cache: tuple[float, str] | None = None
+
+
 def system_theme() -> str:
     """Return the OS appearance — 'light' or 'dark'. Used only when the user
     explicitly picks 'System' in Settings. Falls back to 'light'."""
+    global _sys_theme_cache
+    import time
+    now = time.monotonic()
+    if _sys_theme_cache is not None and now - _sys_theme_cache[0] < _SYS_THEME_TTL:
+        return _sys_theme_cache[1]
+    value = _read_system_theme()
+    _sys_theme_cache = (now, value)
+    return value
+
+
+def invalidate_system_theme_cache() -> None:
+    """Forget the cached OS appearance (tests; or after an OS theme change)."""
+    global _sys_theme_cache
+    _sys_theme_cache = None
+
+
+def _read_system_theme() -> str:
     import sys
     if sys.platform == "darwin":          # macOS
         try:
@@ -139,7 +164,8 @@ def stylesheet(theme: str) -> str:
     c = palette(theme)
     return f"""
 * {{
-    font-family: 'Segoe UI Variable', 'Segoe UI', 'Inter', Arial, sans-serif;
+    font-family: 'Segoe UI Variable', 'Segoe UI', 'SF Pro Text', 'Helvetica Neue',
+                 'Inter', Arial, sans-serif;
     font-size: 13px;
     outline: none;
 }}
@@ -389,12 +415,10 @@ QPushButton#ToastAction:hover {{ color: {c['primary_hover']}; text-decoration: u
 #DashTile:hover #DashChevron {{ color: {c['primary']}; }}
 #DashGreeting {{ color: {c['text']}; font-size: 30px; font-weight: 800; }}
 #DashGreetingBrand {{ color: {c['primary']}; font-size: 30px; font-weight: 800; }}
-#FavStar {{
-    color: {c['text_faint']}; border: none; background: transparent;
-    font-size: 20px; font-family: "Segoe UI Symbol", "Segoe UI Emoji", "Segoe UI";
-}}
-#FavStar:hover {{ color: {c['primary']}; }}
-#FavStar[pinned="true"] {{ color: {c['primary']}; }}
+/* Favourite (pin) button: a tinted star line-icon; colour comes from the icon
+   (text_faint → primary when pinned), so only the chrome is styled here. */
+#FavStar {{ border: none; background: transparent; border-radius: {RADIUS_XS}px; }}
+#FavStar:hover {{ background: {c['hover']}; }}
 #RecentLink {{ color: {c['text']}; }}
 
 /* =================== Settings tabs =================== */
@@ -467,7 +491,7 @@ QPlainTextEdit#Log, QTextEdit {{
     border: 1px solid {c['border']};
     border-radius: {RADIUS_SM}px;
     color: {c['text']};
-    font-family: 'Cascadia Mono', 'Consolas', monospace;
+    font-family: 'Cascadia Mono', 'Consolas', 'SF Mono', 'Menlo', monospace;
     font-size: 12px;
     padding: 9px;
     selection-background-color: {c['primary']};

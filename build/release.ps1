@@ -16,6 +16,11 @@
 
     The tag MUST be v<version> so updater.is_newer() compares correctly.
 #>
+param(
+    # Skip the pre-release test gate (e.g. re-uploading assets for a build that
+    # already passed). The full suite is still the expectation before a release.
+    [switch]$SkipTests
+)
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
@@ -27,6 +32,34 @@ if (-not $verLine) { throw "Could not find __version__ in $initPath" }
 $Version = $verLine.Matches[0].Groups[1].Value
 $Tag = "v$Version"
 Write-Host "Releasing $Tag" -ForegroundColor Cyan
+
+# --- 0. test gate --------------------------------------------------------
+# Same idea as the macOS CI: a quick, deterministic slice of the suite must be
+# green before anything is built or published. (-SkipTests to bypass.)
+if (-not $SkipTests) {
+    $gate = @(
+        "tests\smoke_test.py",
+        "tests\feature_audit_test.py",
+        "tests\cross_platform_test.py",
+        "tests\spec_parity_test.py",
+        "tests\icons_test.py",
+        "tests\responsive_dpi_test.py",
+        "tests\single_instance_test.py",
+        "tests\download_resume_test.py",
+        "tests\help_legal_test.py"
+    )
+    Write-Host "Running pre-release test gate ($($gate.Count) suites)..." -ForegroundColor Cyan
+    $env:QT_QPA_PLATFORM = "offscreen"
+    foreach ($t in $gate) {
+        Write-Host "  > $t" -ForegroundColor DarkGray
+        & python (Join-Path $Root $t)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Test gate failed: $t (exit $LASTEXITCODE). Fix it or re-run with -SkipTests."
+        }
+    }
+    Remove-Item Env:QT_QPA_PLATFORM -ErrorAction SilentlyContinue
+    Write-Host "Test gate passed." -ForegroundColor Green
+}
 
 # --- 1. build ------------------------------------------------------------
 Write-Host "Building app + installer..." -ForegroundColor Cyan

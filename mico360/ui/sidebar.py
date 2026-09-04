@@ -122,8 +122,9 @@ class Sidebar(QWidget):
         self._nav.addWidget(btn)
 
     def add_item(self, glyph: str, label: str, page_index: int,
-                 description: str = "", search_terms: str = "") -> NavItem:
-        item = NavItem(glyph, label, description)
+                 description: str = "", search_terms: str = "",
+                 icon_name: str = "") -> NavItem:
+        item = NavItem(glyph, label, description, icon_name=icon_name)
         item.clicked.connect(lambda: self.navigated.emit(page_index))
         item._page_index = page_index  # type: ignore[attr-defined]
         item._group = self._cur_group  # type: ignore[attr-defined]
@@ -240,9 +241,12 @@ class Sidebar(QWidget):
         self._on_search(self._search.text())
 
     def set_theme(self, theme: str) -> None:
-        """Use the white logo on the dark sidebar, the normal logo on the light."""
+        """Use the white logo on the dark sidebar, the normal logo on the light,
+        and re-tint the nav-item icons for the new theme."""
         self._pix = self._pix_dark if theme == "dark" else self._pix_light
         self._apply_logo()
+        for it in self._items:
+            it.refresh_icon()
 
     def _apply_logo(self) -> None:
         if self._pix.isNull():

@@ -367,13 +367,10 @@ class DropArea(QFrame):
         lay.setContentsMargins(20, 18, 20, 18)
         lay.setSpacing(8)
 
-        glyph = QLabel("⬇")
+        from mico360.ui.icons import IconLabel
+        glyph = IconLabel("inbox", 36, "primary")
         glyph.setObjectName("DropGlyph")
-        glyph.setAlignment(Qt.AlignCenter)
-        f = QFont()
-        f.setPointSize(30)
-        glyph.setFont(f)
-        lay.addWidget(glyph)
+        lay.addWidget(glyph, 0, Qt.AlignHCenter)
 
         title = QLabel("Drag & drop files or folders")
         title.setObjectName("DropTitle")
@@ -418,11 +415,9 @@ class DropArea(QFrame):
         lay.setContentsMargins(16, 8, 12, 8)
         lay.setSpacing(12)
 
-        glyph = QLabel("⬇")
+        from mico360.ui.icons import IconLabel
+        glyph = IconLabel("inbox", 22, "primary")
         glyph.setObjectName("DropGlyph")
-        gf = QFont()
-        gf.setPointSize(18)
-        glyph.setFont(gf)
         lay.addWidget(glyph, 0, Qt.AlignVCenter)
 
         title = QLabel("Drag & drop files or folders here")
@@ -474,11 +469,14 @@ class DropArea(QFrame):
 # Sidebar nav item
 # --------------------------------------------------------------------------
 class NavItem(QPushButton):
-    """A checkable sidebar entry that shows an icon + label, and collapses to
-    an icon-only button when the sidebar is collapsed."""
+    """A checkable sidebar entry that shows a tinted line icon + label, and
+    collapses to an icon-only button when the sidebar is collapsed. The icon
+    re-tints on check state (white on the active red pill) and on theme change."""
+
+    ICON_SIZE = 18
 
     def __init__(self, glyph: str, label: str, description: str = "",
-                 parent: QWidget | None = None):
+                 icon_name: str = "", parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("NavItem")
         self.setCheckable(True)
@@ -486,23 +484,52 @@ class NavItem(QPushButton):
         self._glyph = glyph
         self._label = label
         self._description = description
+        self._icon_name = icon_name
+        self._collapsed = False
         self.setMinimumHeight(40)
         # Keep a stable screen-reader name even when collapsed to an icon.
         self.setAccessibleName(label)
         if description:
             self.setAccessibleDescription(description)
+        if icon_name:
+            from PySide6.QtCore import QSize
+            self.setIconSize(QSize(self.ICON_SIZE, self.ICON_SIZE))
+            self.toggled.connect(self.refresh_icon)
         self.set_collapsed(False)
 
+    def refresh_icon(self) -> None:
+        if not self._icon_name:
+            return
+        from mico360.ui.icons import icon as make_icon, theme_color
+        color = theme_color("nav_active_text" if self.isChecked() else "nav_text")
+        self.setIcon(make_icon(self._icon_name, self.ICON_SIZE, color))
+
     def set_collapsed(self, collapsed: bool) -> None:
+        self._collapsed = collapsed
+        if self._icon_name:
+            self.refresh_icon()
+            if collapsed:
+                self.setText("")
+                text = (f"{self._label} — {self._description}"
+                        if self._description else self._label)
+                tip(self, text)
+                self.setStyleSheet("text-align: center; padding-left: 0;")
+            else:
+                self.setText(f"   {self._label}")
+                if self._description:
+                    tip(self, self._description)
+                else:
+                    self.setToolTip("")
+                self.setStyleSheet("text-align: left;")
+            return
+        # Fallback (no icon assigned): emoji glyph as before.
         if collapsed:
-            # Icon-only: the tooltip must carry the name (plus what it does).
             self.setText(self._glyph)
             text = (f"{self._label} — {self._description}" if self._description
                     else self._label)
             tip(self, text)
             self.setStyleSheet("text-align: center;")
         else:
-            # Label visible: only the description adds information.
             self.setText(f"  {self._glyph}   {self._label}")
             if self._description:
                 tip(self, self._description)
@@ -527,8 +554,11 @@ class Toast(QFrame):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 10, 16, 10)
         lay.setSpacing(8)
-        glyph = {"ok": "✓", "error": "✗", "info": "ℹ"}.get(kind, "✓")
-        text = QLabel(f"{glyph}  {message}")
+        from mico360.ui.icons import IconLabel
+        name, role = {"ok": ("check", "success"), "error": ("x", "error"),
+                      "info": ("info", "info")}.get(kind, ("check", "success"))
+        lay.addWidget(IconLabel(name, 16, role), 0, Qt.AlignVCenter)
+        text = QLabel(message)
         text.setObjectName("ToastText")
         text.setWordWrap(False)            # single line → consistent height
         lay.addWidget(text)

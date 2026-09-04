@@ -42,11 +42,6 @@ PREF_W, PREF_H = 1180, 760
 # scrolls inside rather than being clipped.
 MIN_W, MIN_H = 480, 420
 
-# Friendly section glyphs (fallback when a tool has none).
-_SECTION_GLYPH = {"Home": "🏠", "Convert": "🔁", "Optimize": "🗜️", "Edit": "✏️",
-                  "Organize": "🧩", "Secure": "🔒", "Recognize": "🔍",
-                  "Files": "🗂️", "System": "⚙"}
-
 
 def fit_window_size(pref_w: int, pref_h: int, min_w: int, min_h: int,
                     avail_w: int, avail_h: int, margin: int = 0) -> tuple[int, int]:
@@ -70,9 +65,13 @@ class MainWindow(QMainWindow):
         self._screen_hooked = False
         self._apply_initial_geometry()   # size + centre, clamped to the screen
 
-        logo_png = resource_path("logo.png")
-        if logo_png.exists():
-            self.setWindowIcon(QIcon(str(logo_png)))
+        # Square app icon (not the wide word-mark, which squashes to a sliver
+        # in the Dock / Alt-Tab). Falls back to the logo if it's missing.
+        for name in ("app.png", "logo.png"):
+            p = resource_path(name)
+            if p.exists():
+                self.setWindowIcon(QIcon(str(p)))
+                break
 
         self.setAcceptDrops(True)       # drag & drop anywhere routes to a tool
         self.stack = QStackedWidget()
@@ -234,11 +233,14 @@ class MainWindow(QMainWindow):
 
         self._tool_index: dict[str, int] = {}   # tool_id -> page index
 
+        from mico360.ui.icons import tool_icon_name
+
         # Home / Dashboard (the default landing page).
         self.sidebar.add_section("Home")
         self._factories[0] = self._build_dashboard
-        self.sidebar.add_item("🏠", "Home", 0,
-                              "Quick actions, favourites and recent files.")
+        self.sidebar.add_item("", "Home", 0,
+                              "Quick actions, favourites and recent files.",
+                              icon_name="home")
         self._titles[0] = "Home"
         page_index = 1
 
@@ -255,27 +257,31 @@ class MainWindow(QMainWindow):
                     + [o.hint for o in tool.options if getattr(o, "hint", "")])
                 # The tagline doubles as the nav tooltip / screen-reader hint.
                 self.sidebar.add_item(tool.icon, tool.name, page_index,
-                                      tool.tagline, search_terms=terms)
+                                      tool.tagline, search_terms=terms,
+                                      icon_name=tool_icon_name(tool.id))
                 self._titles[page_index] = tool.name
                 self._tool_index[tool.id] = page_index
                 page_index += 1
 
         self.sidebar.add_section("System")
         self._factories[page_index] = self._build_settings_page
-        self.sidebar.add_item("⚙", "Settings", page_index,
-                              "Theme, output folder, performance and updates.")
+        self.sidebar.add_item("", "Settings", page_index,
+                              "Theme, output folder, performance and updates.",
+                              icon_name="settings")
         self._titles[page_index] = "Settings"
         page_index += 1
 
         self._factories[page_index] = lambda: self.log_page
-        self.sidebar.add_item("📜", "Activity", page_index,
-                              "Everything the app has done this session.")
+        self.sidebar.add_item("", "Activity", page_index,
+                              "Everything the app has done this session.",
+                              icon_name="activity")
         self._titles[page_index] = "Activity log"
         page_index += 1
 
         self._factories[page_index] = self._build_help_page
-        self.sidebar.add_item("❔", "Help", page_index,
-                              "How each tool works, plus About and legal info. (F1)")
+        self.sidebar.add_item("", "Help", page_index,
+                              "How each tool works, plus About and legal info. (F1)",
+                              icon_name="help")
         self._titles[page_index] = "Help"
         page_index += 1
 
@@ -433,10 +439,12 @@ class MainWindow(QMainWindow):
         tl.addWidget(self.top_title)
         tl.addStretch(1)
 
-        self.btn_theme = QPushButton(self._theme_glyph())
+        from PySide6.QtCore import QSize
+        self.btn_theme = QPushButton()
         self.btn_theme.setObjectName("IconButton")
         self.btn_theme.setCursor(Qt.PointingHandCursor)
         self.btn_theme.setFixedSize(36, 36)
+        self.btn_theme.setIconSize(QSize(19, 19))
         self.btn_theme.setToolTip("Toggle light / dark theme")
         self.btn_theme.setAccessibleName("Toggle light or dark theme")
         self.btn_theme.clicked.connect(self._toggle_theme)
@@ -506,9 +514,6 @@ class MainWindow(QMainWindow):
         self.sidebar.set_collapsed(not self.sidebar.collapsed)
         self._pinned = self.sidebar.collapsed  # remember the explicit choice
 
-    def _theme_glyph(self) -> str:
-        return "☀" if settings.theme == "dark" else "🌙"
-
     def _toggle_theme(self) -> None:
         # The top-bar button pins an explicit light/dark (overriding 'system').
         self.apply_theme("light" if settings.theme == "dark" else "dark")
@@ -527,7 +532,13 @@ class MainWindow(QMainWindow):
             app.setStyleSheet(stylesheet(theme))
         self.sidebar.set_theme(theme)
         if hasattr(self, "btn_theme"):
-            self.btn_theme.setText(self._theme_glyph())
+            # Show the icon of the theme you'd switch TO (sun on dark, moon on light).
+            from mico360.ui.icons import icon as make_icon, theme_color
+            glyph = "sun" if theme == "dark" else "moon"
+            self.btn_theme.setIcon(make_icon(glyph, 19, theme_color("text_muted")))
+        # Re-tint every line icon (dashboard tiles, tool headers, …) for the theme.
+        from mico360.ui import icons as _icons
+        _icons.refresh_all(self)
 
     # --- responsive sidebar -------------------------------------------
     def resizeEvent(self, event):  # noqa: N802

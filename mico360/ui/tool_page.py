@@ -161,7 +161,8 @@ class ToolPage(QWidget):
     def _build_header(self) -> QHBoxLayout:
         header = QHBoxLayout()
         header.setSpacing(12)
-        icon = QLabel(self.tool.icon)
+        from mico360.ui.icons import IconButton, IconLabel, tool_icon_name
+        icon = IconLabel(tool_icon_name(self.tool.id), 30, "primary")
         icon.setObjectName("ToolIcon")
         title_box = QVBoxLayout()
         title_box.setSpacing(1)
@@ -174,14 +175,12 @@ class ToolPage(QWidget):
         title_box.addWidget(sub)
         header.addWidget(icon, 0, Qt.AlignTop)
         header.addLayout(title_box, 1)
-        from PySide6.QtGui import QFont
-        self.btn_fav = QPushButton()
+        # Favourite (pin) toggle: outline star → filled brand-red star when pinned.
+        self.btn_fav = IconButton("star", 20, "text_faint")
         self.btn_fav.setObjectName("FavStar")
         self.btn_fav.setCursor(Qt.PointingHandCursor)
         self.btn_fav.setFixedSize(34, 32)
-        _star_font = QFont("Segoe UI Symbol")
-        _star_font.setPointSize(14)
-        self.btn_fav.setFont(_star_font)
+        self.btn_fav.setAccessibleName("Favourite")
         self.btn_fav.clicked.connect(self._toggle_favorite)
         self._sync_fav()
         header.addWidget(self.btn_fav, 0, Qt.AlignTop)
@@ -191,7 +190,8 @@ class ToolPage(QWidget):
 
     def _sync_fav(self) -> None:
         on = self.tool.id in settings.favorite_tools
-        self.btn_fav.setText("★" if on else "☆")
+        self.btn_fav.set_icon(name="star-filled" if on else "star",
+                              role="primary" if on else "text_faint")
         self.btn_fav.setProperty("pinned", "true" if on else "false")
         self.btn_fav.style().unpolish(self.btn_fav)
         self.btn_fav.style().polish(self.btn_fav)

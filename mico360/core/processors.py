@@ -15,6 +15,7 @@ import threading
 from pathlib import Path
 from typing import Callable
 
+from mico360.logging_setup import get_logger
 from mico360.core.deps import find_ghostscript
 from mico360.core.engines import ensure_libreoffice
 from mico360.core.util import (
@@ -25,6 +26,8 @@ from mico360.core.util import (
     unique_dir,
     unique_path,
 )
+
+log = get_logger("mico360.processors")
 
 Report = Callable[[str], None]
 
@@ -279,7 +282,7 @@ def verify_pdf_integrity(src_path, out_path, mode: str = "strict", report=None,
             if sorted(a.embfile_names()) != sorted(b.embfile_names()):
                 diffs.append("embedded files / attachments changed")
         except Exception:
-            pass
+            log.debug("attachment comparison failed (integrity check continues)", exc_info=True)
         if strict:
             for k in ("title", "author", "subject", "keywords", "creator", "producer"):
                 if (a.metadata.get(k) or "") != (b.metadata.get(k) or ""):
@@ -840,7 +843,7 @@ def _pdf_watermark_image(src: Path, out_dir: Path, opt: dict, report: Report,
         try:
             os.remove(tmp)
         except OSError:
-            pass
+            log.debug("temp file cleanup failed", exc_info=True)
     report(f"Watermarked {pages} page(s) with {imgpath.name} → {out.name}")
     return [out]
 
@@ -981,7 +984,7 @@ def _patch_rapidocr_gpu() -> None:
                 sess_options.enable_mem_pattern = False
                 sess_options.execution_mode = ExecutionMode.ORT_SEQUENTIAL
             except Exception:
-                pass
+                log.debug("OCR session option not accepted by this onnxruntime", exc_info=True)
         gpu_eps = [("DmlExecutionProvider", {"device_id": 0}), "CPUExecutionProvider"]
         try:
             sess = _real_session(model_path, sess_options=sess_options,
@@ -995,7 +998,7 @@ def _patch_rapidocr_gpu() -> None:
             if "DmlExecutionProvider" in sess.get_providers():
                 _ocr_active_provider = "GPU (DirectML)"
         except Exception:
-            pass
+            log.debug("could not read OCR execution provider", exc_info=True)
         return sess
 
     _ru.InferenceSession = _make_session
@@ -1120,7 +1123,7 @@ def _ocr_image_lines(engine, img, dpi: int,
             if score is not None and float(score) < min_score:
                 continue
         except (TypeError, ValueError):
-            pass
+            log.debug("unreadable OCR confidence score", exc_info=True)
         xs = [float(p[0]) for p in box]
         ys = [float(p[1]) for p in box]
         lines.append((t, (min(xs) * scale, min(ys) * scale,
@@ -1483,7 +1486,7 @@ def _word_to_pdf_msword(src: Path, final: Path, report: Report) -> bool:
         pythoncom.CoInitialize()
         com_inited = True
     except Exception:
-        pass
+        log.debug("COM initialisation failed (Office automation)", exc_info=True)
     try:
         report("Microsoft Word converting to PDF…")
         with _office_lock:          # serialise COM Office automation
@@ -1493,7 +1496,7 @@ def _word_to_pdf_msword(src: Path, final: Path, report: Report) -> bool:
             try:
                 pythoncom.CoUninitialize()
             except Exception:
-                pass
+                log.debug("COM teardown failed", exc_info=True)
     if not final.exists():
         raise RuntimeError("Word produced no output")
     return True
@@ -2254,13 +2257,13 @@ def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
             try:
                 info.clear()
             except Exception:
-                pass
+                log.debug("could not clear PDF info dictionary", exc_info=True)
             for key in ("/Metadata", "/Lang"):
                 if key in root:
                     try:
                         del root[key]
                     except Exception:
-                        pass
+                        log.debug("could not remove PDF root key", exc_info=True)
             msg = "Removed all metadata"
         else:  # scrub: drop identifying fields, reset dates, drop XMP
             for k in ("/Author", "/Creator", "/Producer", "/Company",
@@ -2269,7 +2272,7 @@ def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
                     try:
                         del info[k]
                     except Exception:
-                        pass
+                        log.debug("could not remove PDF info key", exc_info=True)
             stamp = create_string_object(_pdf_date(datetime.datetime.now()))
             info[NameObject("/CreationDate")] = stamp
             info[NameObject("/ModDate")] = stamp
@@ -2277,7 +2280,7 @@ def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
                 try:
                     del root["/Metadata"]
                 except Exception:
-                    pass
+                    log.debug("could not remove XMP metadata stream", exc_info=True)
             msg = "Scrubbed identifying metadata (kept Title/Subject/Keywords)"
         with open(out, "wb") as fh:
             writer.write(fh)
@@ -2603,7 +2606,7 @@ def _office_com_to_pdf(app_name: str, src: Path, final: Path) -> bool:
                 try:
                     app.Visible = False
                 except Exception:
-                    pass
+                    log.debug("could not hide the Office window", exc_info=True)
                 app.DisplayAlerts = False
                 wb = app.Workbooks.Open(src_s, ReadOnly=True)
                 wb.ExportAsFixedFormat(0, final_s)   # 0 = xlTypePDF
@@ -2618,7 +2621,7 @@ def _office_com_to_pdf(app_name: str, src: Path, final: Path) -> bool:
             if app is not None:
                 app.Quit()
         except Exception:
-            pass
+            log.debug("Office application did not quit cleanly", exc_info=True)
         pythoncom.CoUninitialize()
 
 
@@ -3016,7 +3019,7 @@ def _pdf_to_markdown(src: Path, report: Report) -> str:
                     if md:
                         tables_md.append(md)
             except Exception:
-                pass
+                log.debug("table could not be rendered to Markdown", exc_info=True)
             text = (page.get_text("text") or "").strip()
             if text:
                 # Blank-line-separate the visual blocks for readable paragraphs.

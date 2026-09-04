@@ -92,7 +92,16 @@ def main() -> int:
           w.settings_page is not None and
           w.settings_page.theme_combo.currentData() == "light",
           str(w.settings_page and w.settings_page.theme_combo.currentData()))
-    check("theme glyph updates", w.btn_theme.text() in ("☀", "🌙"))
+    # The theme toggle now shows a tinted sun/moon line icon (not an emoji
+    # glyph): it must carry an icon, no leftover text, and flip when the theme
+    # changes.
+    w.apply_theme("dark")
+    img_dark = w.btn_theme.icon().pixmap(19, 19).toImage()
+    w.apply_theme("light")
+    img_light = w.btn_theme.icon().pixmap(19, 19).toImage()
+    check("theme icon updates (sun/moon)",
+          not w.btn_theme.icon().isNull() and w.btn_theme.text() == ""
+          and img_dark != img_light)
 
     # --- panel reflow (ResponsiveRow) ---------------------------------
     # The real page is built from a ResponsiveRow; test the reflow logic

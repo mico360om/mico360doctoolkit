@@ -86,12 +86,14 @@ def main() -> int:
           route_for(["x.svg"]) == "svg_to_image", str(route_for(["x.svg"])))
 
     # =====================================================================
-    # 3. Registry ↔ shell: groups, glyphs, nav, OCR languages
+    # 3. Registry ↔ shell: groups, icons, nav, OCR languages
     # =====================================================================
-    from mico360.ui.main_window import _SECTION_GLYPH, MainWindow
-    missing_glyphs = [g for g in list(GROUP_ORDER) + ["Home", "System"]
-                      if g not in _SECTION_GLYPH]
-    check("every nav section has a glyph", not missing_glyphs, str(missing_glyphs))
+    from mico360.ui.main_window import MainWindow
+    from mico360.ui import icons as _icons
+    missing_icons = [t.id for t in TOOLS if t.id not in _icons.TOOL_ICON
+                     or _icons.TOOL_ICON[t.id] not in _icons._SHAPES]
+    check("every registered tool has a line icon", not missing_icons,
+          str(missing_icons))
 
     win = MainWindow()
     win.resize(1180, 760)

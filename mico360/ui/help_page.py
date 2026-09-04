@@ -10,7 +10,7 @@ from mico360.ui.widgets import Card, section_label
 _HELP_HTML = """
 <h3>The Dashboard (Home)</h3>
 <p>The app opens on a <b>Dashboard</b>: <b>Quick actions</b> for common jobs,
-<b>Favourite tools</b> you've pinned (click the ☆ on any tool to pin it),
+<b>Favourite tools</b> you've pinned (click the star button on any tool to pin it),
 <b>Recent files</b> you've created, and your <b>Last activity</b>. You can
 <b>drag &amp; drop files anywhere</b> in the window — they're sent to a sensible
 tool automatically.</p>
@@ -215,14 +215,14 @@ and recovers the text.</p>
       for more actions; <b>Delete</b> removes the selected files.</li>
   <li><b>Tab / Shift+Tab</b> move between controls; <b>Space / Enter</b> activates the focused
       button or the drop zone (to browse); a checkbox toggles with <b>Space</b>.</li>
-  <li>Use the <b>☰</b> button to collapse the sidebar for more room, and <b>☀ / 🌙</b> to
-      switch light / dark.</li>
+  <li>Use the <b>☰</b> button to collapse the sidebar for more room, and the
+      <b>sun / moon</b> button to switch light / dark.</li>
 </ul>
 
 <h3>Settings</h3>
 <ul>
   <li><b>Appearance</b> — choose <b>Light</b> (the default), <b>Dark</b>, or <b>System</b>
-      (follow your Windows/macOS theme). The ☀/🌙 button in the top bar pins Light/Dark.</li>
+      (follow your Windows/macOS theme). The sun / moon button in the top bar pins Light/Dark.</li>
   <li><b>Output</b> — default output folder, “open the folder when a batch finishes”, and
       overwrite behaviour.</li>
   <li><b>Processing</b> — number of parallel workers (0 = automatic, uses CPU cores − 1), and

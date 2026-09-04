@@ -23,7 +23,11 @@ from PySide6.QtWidgets import (
 from mico360 import __app_name__, __version__
 from mico360 import updater
 from mico360.core.util import human_size
+from mico360.logging_setup import get_logger
+from mico360.ui.icons import IconLabel
 from mico360.updater import UpdateInfo
+
+log = get_logger("mico360.update")
 
 
 # --- background workers --------------------------------------------------
@@ -167,16 +171,22 @@ def _meta_label(caption: str, value: str) -> QWidget:
 
 
 def _notes_section(title: str, items: list, icon: str) -> QWidget | None:
-    """A labelled bullet list for one category (or None when empty)."""
+    """A labelled bullet list for one category (or None when empty).
+    ``icon`` is a line-icon name from mico360.ui.icons."""
     if not items:
         return None
     box = QWidget()
     v = QVBoxLayout(box)
     v.setContentsMargins(0, 4, 0, 4)
     v.setSpacing(3)
-    head = QLabel(f"{icon}  {title}")
+    head_row = QHBoxLayout()
+    head_row.setContentsMargins(0, 0, 0, 0)
+    head_row.setSpacing(8)
+    head_row.addWidget(IconLabel(icon, 16, "primary"), 0, Qt.AlignVCenter)
+    head = QLabel(title)
     head.setObjectName("UpdSectionHead")
-    v.addWidget(head)
+    head_row.addWidget(head, 1)
+    v.addLayout(head_row)
     for it in items[:20]:
         b = QLabel(f"•  {it}")
         b.setObjectName("UpdBullet")
@@ -207,7 +217,7 @@ class UpdateDialog(QDialog):
         # --- header: app name + status badge ---------------------------
         header = QHBoxLayout()
         header.setSpacing(10)
-        glyph = QLabel("🗂️")
+        glyph = IconLabel("folder", 30, "primary")
         glyph.setObjectName("ToolIcon")
         header.addWidget(glyph, 0, Qt.AlignVCenter)
         titles = QVBoxLayout()
@@ -277,10 +287,10 @@ class UpdateDialog(QDialog):
         cats = updater.categorize_notes(info.notes)
         added_any = False
         for key, title, icon in (
-                ("features", "New features", "✨"),
-                ("fixes", "Bugs fixed", "🐛"),
-                ("security", "Security improvements", "🔒"),
-                ("other", "Other changes", "•")):
+                ("features", "New features", "sparkles"),
+                ("fixes", "Bugs fixed", "bug"),
+                ("security", "Security improvements", "lock"),
+                ("other", "Other changes", "list-ordered")):
             sec = _notes_section(title, cats.get(key, []), icon)
             if sec is not None:
                 bv.addWidget(sec)
@@ -442,7 +452,7 @@ class UpdateDialog(QDialog):
             settings.pending_update = {"version": self._info.version,
                                        "started": time.time()}
         except Exception:
-            pass
+            log.warning("Could not record the pending update marker", exc_info=True)
         try:
             updater.apply_and_exit(path)
         except Exception as exc:
@@ -528,4 +538,4 @@ def maybe_show_update_completed(parent) -> None:
         try:
             UpdateCompletedDialog(target, when, parent).exec()
         except Exception:
-            pass
+            log.debug("Update-completed dialog could not be shown", exc_info=True)

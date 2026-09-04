@@ -22,7 +22,7 @@ def _set_windows_app_id() -> None:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
                 "MICO360.DocToolkit.1")
         except Exception:
-            pass
+            get_logger().debug("AppUserModelID not set", exc_info=True)
 
 
 def configure_high_dpi() -> None:
@@ -39,14 +39,14 @@ def configure_high_dpi() -> None:
         QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
             Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     except Exception:
-        pass
+        get_logger().debug("High-DPI rounding policy not applied", exc_info=True)
     # Harmless on Qt 6 (scaling is always on there); kept for safety/back-compat.
     for attr in ("AA_EnableHighDpiScaling", "AA_UseHighDpiPixmaps"):
         if hasattr(Qt, attr):
             try:
                 QApplication.setAttribute(getattr(Qt, attr), True)
             except Exception:
-                pass
+                get_logger().debug("Qt attribute %s not applied", attr, exc_info=True)
 
 
 def install_crash_guard(log) -> None:
@@ -64,7 +64,7 @@ def install_crash_guard(log) -> None:
             report = crash.format_report(exc_type, exc, tb)
             path = crash.write_report(report)
         except Exception:
-            pass
+            log.error("Could not write the crash report", exc_info=True)
         try:
             from PySide6.QtGui import QGuiApplication
             from PySide6.QtWidgets import QApplication, QMessageBox
@@ -99,7 +99,7 @@ def install_crash_guard(log) -> None:
                     url = crash.mailto_url(report)
                 QDesktopServices.openUrl(QUrl(url))
         except Exception:
-            pass
+            log.debug("Crash dialog could not be shown", exc_info=True)
     sys.excepthook = _hook
 
 
@@ -178,9 +178,13 @@ def main() -> int:
                  "forwarded a request to" if open_req else "signalled")
         return 0
 
-    logo = resource_path("logo.png")
-    if logo.exists():
-        app.setWindowIcon(QIcon(str(logo)))
+    # Square app icon — this is what the macOS Dock / Windows taskbar show when
+    # running from source. (The wide word-mark squashes to a sliver there.)
+    for name in ("app.png", "logo.png"):
+        p = resource_path(name)
+        if p.exists():
+            app.setWindowIcon(QIcon(str(p)))
+            break
 
     app.setStyleSheet(stylesheet(settings.theme))
 

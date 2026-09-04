@@ -38,7 +38,27 @@ REQUIRED = [
     ("rapidocr (OCR engine)", "rapidocr_onnxruntime"),
     ("onnxruntime", "onnxruntime"),
     ("cryptography (PDF encryption)", "cryptography"),
+    ("QtSvg (tintable line icons)", "PySide6.QtSvg"),
+    ("mico360.ui.icons (icon set)", "mico360.ui.icons"),
+    ("mico360.capabilities (Help gating)", "mico360.capabilities"),
+    ("AI metadata modules", "mico360.core.ai_metadata"),
+    ("AI suggest panel", "mico360.ui.ai_suggest"),
+    ("square app icon (app.png)", "app.png"),
 ]
+
+# Hidden imports that only make sense on Windows; the macOS spec may omit them.
+WIN_ONLY = {
+    "win32com", "win32com.client", "pythoncom", "pywintypes",
+    "win32file", "win32con", "win32security", "ntsecuritycon",
+    "docx2pdf",                  # drives Microsoft Word via COM
+    "mico360.shell_integration",  # Explorer right-click menu (registry)
+}
+
+
+def _hidden_imports(spec_text: str) -> set[str]:
+    import re
+    m = re.search(r"hiddenimports\s*=\s*\[(.*?)\n\]", spec_text, re.S)
+    return set(re.findall(r'"([^"]+)"', m.group(1))) if m else set()
 
 
 def main() -> int:
@@ -48,9 +68,20 @@ def main() -> int:
         check(f"Windows spec bundles {label}", token in WIN)
         check(f"macOS spec bundles {label}", token in MAC)
 
+    # Every explicit hidden import on Windows must be on macOS too, unless it is
+    # genuinely Windows-only. (This is the gap that lets lazily-imported modules
+    # — icons, AI panel — silently vanish from the .app.)
+    missing = sorted((_hidden_imports(WIN) - _hidden_imports(MAC)) - WIN_ONLY)
+    check("macOS spec lists every non-Windows hidden import the Windows spec has",
+          not missing, str(missing))
+
     # The bundled OCR dictionary file must actually exist on disk.
     keys = ROOT / "mico360" / "core" / "ocr_data" / "arabic_keys.txt"
     check("arabic_keys.txt is present in the tree", keys.exists(), str(keys))
+    res = ROOT / "mico360" / "resources"
+    check("app.png (square window icon) is present", (res / "app.png").exists())
+    check("app.icns (macOS bundle icon) is present", (res / "app.icns").exists())
+    check("app.ico (Windows icon) is present", (res / "app.ico").exists())
 
     print()
     if failures:
