@@ -54,7 +54,7 @@ hiddenimports = [
     "mico360.core.ai", "mico360.core.ai_metadata", "mico360.ui.ai_suggest",
     # Lazily imported inside functions — name them so PyInstaller collects them.
     # (mico360.shell_integration is Windows-only and deliberately omitted.)
-    "mico360.capabilities", "mico360.ui.icons",
+    "mico360.capabilities", "mico360.ui.icons", "mico360.ui.page_organizer",
 ]
 
 for pkg in ("pdf2docx", "fontTools", "pptx", "reportlab", "docx",

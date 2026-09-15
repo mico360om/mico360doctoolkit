@@ -157,34 +157,62 @@ def require_free_space(out_dir, need_bytes: int, label: str = "") -> None:
             f"Free up space or pick another output folder.")
 
 
-def available_memory_bytes() -> int | None:
-    """Best-effort available physical RAM in bytes (no third-party deps).
-    None if it can't be determined."""
+def _win_mem_status():
+    """The Win32 MEMORYSTATUSEX struct, or None off Windows / on failure."""
+    if not sys.platform.startswith("win"):
+        return None
     try:
-        if sys.platform.startswith("win"):
-            import ctypes
+        import ctypes
 
-            class _MemStatus(ctypes.Structure):
-                _fields_ = [
-                    ("dwLength", ctypes.c_ulong),
-                    ("dwMemoryLoad", ctypes.c_ulong),
-                    ("ullTotalPhys", ctypes.c_ulonglong),
-                    ("ullAvailPhys", ctypes.c_ulonglong),
-                    ("ullTotalPageFile", ctypes.c_ulonglong),
-                    ("ullAvailPageFile", ctypes.c_ulonglong),
-                    ("ullTotalVirtual", ctypes.c_ulonglong),
-                    ("ullAvailVirtual", ctypes.c_ulonglong),
-                    ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
-                ]
+        class _MemStatus(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
 
-            m = _MemStatus()
-            m.dwLength = ctypes.sizeof(_MemStatus)
-            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
-                return int(m.ullAvailPhys)
-        elif hasattr(os, "sysconf"):
-            names = getattr(os, "sysconf_names", {})
-            if "SC_AVPHYS_PAGES" in names and "SC_PAGE_SIZE" in names:
-                return int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+        m = _MemStatus()
+        m.dwLength = ctypes.sizeof(_MemStatus)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m)):
+            return m
+    except Exception:
+        return None
+    return None
+
+
+def available_memory_bytes() -> int | None:
+    """Best-effort *available* physical RAM in bytes (no third-party deps).
+    None if it can't be determined — notably on macOS, where the OS keeps most
+    RAM as reclaimable cache so a cheap "free" reading is misleading; callers
+    fall back to :func:`total_memory_bytes` there."""
+    try:
+        m = _win_mem_status()
+        if m is not None:
+            return int(m.ullAvailPhys)
+        names = getattr(os, "sysconf_names", {})
+        if "SC_AVPHYS_PAGES" in names and "SC_PAGE_SIZE" in names:   # Linux
+            return int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+    except Exception:
+        return None
+    return None
+
+
+def total_memory_bytes() -> int | None:
+    """Best-effort *total* physical RAM in bytes (no third-party deps). Works on
+    Windows, macOS and Linux. None if it can't be determined."""
+    try:
+        m = _win_mem_status()
+        if m is not None:
+            return int(m.ullTotalPhys)
+        names = getattr(os, "sysconf_names", {})
+        if "SC_PHYS_PAGES" in names and "SC_PAGE_SIZE" in names:     # macOS + Linux
+            return int(os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
     except Exception:
         return None
     return None
@@ -202,7 +230,12 @@ def auto_worker_count(cpu: int | None = None, avail_mem_bytes: int | None = -1,
     """
     cpu = cpu or os.cpu_count() or 4
     n = min(max(1, cpu - 1), hard_max)
-    mem = available_memory_bytes() if avail_mem_bytes == -1 else avail_mem_bytes
+    if avail_mem_bytes == -1:                       # auto-detect
+        mem = available_memory_bytes()
+        if mem is None:                             # macOS has no cheap "avail"
+            mem = total_memory_bytes()              # → scale by total RAM instead
+    else:
+        mem = avail_mem_bytes
     if mem is not None and mem > 0:
         n = min(n, max(1, int(mem // per_worker_bytes)))
     return max(1, n)

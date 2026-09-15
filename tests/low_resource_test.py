@@ -66,6 +66,19 @@ def main() -> int:
     check("available_memory_bytes: positive or None", live is None or live > 0, str(live))
     check("live auto_worker_count is sane (1..64)", 1 <= auto_worker_count() <= 64,
           str(auto_worker_count()))
+    # macOS has no cheap "available" reading → the auto path must fall back to
+    # total RAM so scaling still engages there (this is the Mac-readiness fix).
+    from mico360.core.util import total_memory_bytes
+    check("total_memory_bytes: positive or None",
+          total_memory_bytes() is None or total_memory_bytes() > 0, str(total_memory_bytes()))
+    _av, _tot = util.available_memory_bytes, util.total_memory_bytes
+    util.available_memory_bytes = lambda: None          # simulate macOS
+    util.total_memory_bytes = lambda: 2_000_000_000     # 2 GB total (small Mac)
+    try:
+        check("macOS-style (no avail; 2 GB total) still caps workers to 1",
+              auto_worker_count(cpu=8) == 1, str(auto_worker_count(cpu=8)))
+    finally:
+        util.available_memory_bytes, util.total_memory_bytes = _av, _tot
 
     # ================= disk-space guard (unit) =================
     print("--- disk guard (unit) ---")

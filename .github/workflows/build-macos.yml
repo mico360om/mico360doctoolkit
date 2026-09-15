@@ -47,6 +47,9 @@ jobs:
           python tests/responsive_dpi_test.py
           python tests/single_instance_test.py
           python tests/download_resume_test.py
+          python tests/page_organizer_test.py
+          python tests/low_resource_test.py
+          python tests/spec_parity_test.py
 
       - name: Build the app icon (.icns)
         run: |
