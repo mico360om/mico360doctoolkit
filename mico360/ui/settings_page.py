@@ -773,7 +773,8 @@ class SettingsPage(QWidget):
         row.addWidget(self.workers); row.addStretch(1)
         w = QWidget(); w.setLayout(row); card.add(w)
         hint = QLabel(f"Detected CPU cores: {os.cpu_count()}. "
-                      "Automatic uses cores − 1.")
+                      "Automatic uses cores − 1, scaled down when free memory is "
+                      "low so big jobs stay stable.")
         hint.setObjectName("Hint")
         card.add(hint)
 

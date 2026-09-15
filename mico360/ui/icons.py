@@ -92,6 +92,13 @@ _SHAPES: dict[str, str] = {
            'M12 9v11"/>',
     "sparkles": '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>'
                 '<path d="M19 16v4M17 18h4M5 3v3M3.5 4.5h3"/>',
+    "rotate-cw": '<path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v5h-5"/>',
+    "rotate-ccw": '<path d="M3 12a9 9 0 1 0 2.64-6.36"/><path d="M3 3v5h5"/>',
+    "trash": '<path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>'
+             '<path d="M6.5 7l.9 12a1 1 0 0 0 1 .9h7.2a1 1 0 0 0 1-.9L18.5 7"/>'
+             '<path d="M10 11v6M14 11v6"/>',
+    "rows": '<rect x="3" y="4" width="18" height="7" rx="1"/>'
+            '<rect x="3" y="13" width="18" height="7" rx="1"/>',
 }
 
 # --- tool_id -> icon name -------------------------------------------------

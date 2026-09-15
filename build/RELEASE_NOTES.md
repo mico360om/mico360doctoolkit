@@ -1,33 +1,30 @@
-## MICO360 Doc Toolkit v7.2.0
+## MICO360 Doc Toolkit v7.3.0
 
-**A cleaner, sharper look — and a Mac that finally shows its icon.**
+**Rearrange pages by eye — and rock-steady on modest hardware.**
 
-**New: a crisp, tintable icon set**
-- The emoji tool icons are gone. Every tool, the sidebar, the dashboard tiles and the
-  tool headers now use a hand-tuned **monochrome line-icon set** that renders sharply at
-  any screen scale (Retina and high-DPI included) and takes the **brand red**.
-- The same set now drives the favourite **star**, the password **show/hide (eye)**, the
-  drag-and-drop zones, toast messages and the update dialog — one consistent, professional
-  look instead of OS-dependent emoji.
+**New: a visual page organizer**
+- In **Organize PDF**, pick **Visual organizer** to open a thumbnail grid of the
+  selected file. **Drag** pages to reorder them, **rotate** or **delete** the pages
+  you select, and drop in **split points** to break one PDF into several — all by
+  eye, no page numbers to type.
+- Splitting produces one file per section; everything else saves as a single
+  reorganized PDF. Your original file is never changed.
 
-**Improvements**
-- **macOS app icon** — the Dock, Launchpad and app switcher now show the proper square
-  MICO360 tile instead of a squashed word-mark. It also shows correctly when running from
-  source. The build now produces a real `.icns`.
-- **Faster "System" theme on macOS** — the app remembers the current system appearance for
-  a moment instead of asking the OS on every repaint, so switching pages and theming icons
-  is snappier.
-- **Native-looking type on macOS** — text uses San Francisco / Helvetica Neue and code uses
-  SF Mono / Menlo where available.
-- **Sturdier macOS builds** — the macOS package now bundles the exact same icon and AI
-  components as Windows, so nothing renders blank on a Mac. A build check keeps the two in
-  step from now on.
+**New: built to run on low-resource PCs**
+- **Runs light on memory** — the app now scales how many files it processes at
+  once to the RAM that's actually free, so big jobs (OCR, large PDFs, image
+  batches) stay stable instead of thrashing on machines with limited memory.
+- **Handles a full disk gracefully** — if the output drive is nearly full, the
+  job stops up front with a clear "free up space" message instead of failing
+  halfway through or leaving a broken file behind.
+- **Stays responsive** — the visual organizer opens instantly even for very large
+  PDFs and fills in thumbnails in the background, so the window never freezes;
+  thumbnail memory is capped so a huge document can't overwhelm a small PC.
 
-**Fixes**
-- Better diagnostics — several previously-silent internal error paths now write to the log,
-  so real problems are easier to trace.
-- Housekeeping across the build scripts and a new pre-release test gate that runs the core
-  suites before anything is published.
+**Refinements**
+- The Settings → Performance note now explains that automatic worker count also
+  eases off when free memory is low.
+- Clearer diagnostics behind the scenes for easier troubleshooting.
 
 _Windows: the installer updates in place — your settings and favourites are kept.
 macOS: open the `.dmg` and drag the app to Applications._

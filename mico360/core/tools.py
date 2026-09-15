@@ -124,6 +124,7 @@ TOOLS: list[Tool] = [
                 ("delete", "Delete pages"),
                 ("extract", "Extract pages (keep only these)"),
                 ("reorder", "Reorder pages"),
+                ("visual", "Visual organizer — drag, rotate, delete, split"),
             ]),
             Option("angle", "Rotate by", "choice", 90, [
                 (90, "90° clockwise"), (180, "180°"), (270, "270° (90° anti-clockwise)"),
@@ -138,6 +139,13 @@ TOOLS: list[Tool] = [
             Option("order", "New page order", "text", "",
                    hint="every page, in the order you want, e.g. 3, 1, 2, 4-10",
                    visible_when=("operation", "reorder")),
+            # Visual organizer: opens a thumbnail grid for the selected file and
+            # hands the runner a page "plan" (order + rotations + split groups).
+            # Works on one file at a time.
+            Option("plan", "Pages", "page_plan", None,
+                   hint="Open the visual organizer to drag, rotate, delete pages "
+                        "and add split points. Applies to the selected file.",
+                   visible_when=("operation", "visual")),
         ],
     ),
     Tool(

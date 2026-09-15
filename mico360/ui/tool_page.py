@@ -309,6 +309,9 @@ class ToolPage(QWidget):
         card.add(section_label("Options"))
 
         self.options_widget = OptionsWidget(self.tool)
+        # The visual page organizer (Organize tool) needs to know which file to
+        # render — the selected row, else the first in the queue.
+        self.options_widget.set_file_getter(self._organizer_source)
         card.add(self.options_widget)
 
         # Optional AI assistance (Edit Metadata): suggestions are shown for
@@ -463,6 +466,13 @@ class ToolPage(QWidget):
         if 0 <= row < len(self.items):
             return self.items[row]
         return None
+
+    def _organizer_source(self):
+        """Path the visual page organizer should open: the selected row, else
+        the first queued file (None if the queue is empty)."""
+        sel = self._selected_items()
+        it = sel[0] if sel else (self.items[0] if self.items else None)
+        return it.path if it else None
 
     # -----------------------------------------------------------------
     # Thumbnail preview

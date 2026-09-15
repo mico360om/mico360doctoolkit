@@ -93,7 +93,8 @@ def audit_core_processing():
             assert t.group in tools.GROUP_ORDER, f"{t.id} group {t.group!r} not ordered"
             for o in t.options:
                 assert o.kind in ("text", "textarea", "choice", "int", "bool",
-                                  "file", "password", "posgrid"), f"{t.id}:{o.key} {o.kind}"
+                                  "file", "password", "posgrid", "page_plan"), \
+                    f"{t.id}:{o.key} {o.kind}"
                 if o.kind == "choice":
                     assert o.choices, f"{t.id}:{o.key} choice has no options"
         return True

@@ -73,7 +73,11 @@ tool automatically.</p>
       <i>custom ranges</i> like <i>1-3, 5, 8-10</i>. Each source gets its own output subfolder.</li>
   <li><b>Organize PDF</b> — <i>rotate</i> (all or chosen pages), <i>delete</i> pages,
       <i>extract</i> only the pages you want, or <i>reorder</i> the whole document. Pages
-      are given 1-based, e.g. <i>3, 1, 2, 5-8</i> (ranges may run backwards).</li>
+      are given 1-based, e.g. <i>3, 1, 2, 5-8</i> (ranges may run backwards). Prefer to
+      work by eye? Choose <b>Visual organizer</b> to open a thumbnail grid where you
+      <i>drag</i> pages to reorder, <i>rotate</i> or <i>delete</i> the selected ones, and add
+      <i>split points</i> to break the file into several PDFs — all on the file you've
+      selected in the queue.</li>
   <li><b>Protect PDF</b> — add a password (strong AES-256 encryption — you confirm it,
       with show/hide toggles) or remove one (enter the PDF's current password to unlock).
       Passwords are never saved.</li>

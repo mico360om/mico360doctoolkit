@@ -14,7 +14,11 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
 from mico360.core.tools import AGGREGATE, Tool
-from mico360.core.util import ProcessError
+from mico360.core.util import (
+    ProcessError,
+    auto_worker_count,
+    require_free_space,
+)
 from mico360.logging_setup import get_logger
 
 log = get_logger("mico360.engine")
@@ -79,6 +83,15 @@ class _Worker(QRunnable):
             return
         report = self._make_report()
         try:
+            # Low-storage guard: fail fast with a clear message instead of a
+            # cryptic mid-write error (or a corrupt half-written file) when the
+            # output volume is nearly full. Estimate need from the input size —
+            # most tools produce output no larger than their input plus margin.
+            try:
+                need = sum(s.stat().st_size for s in srcs if s.exists())
+            except OSError:
+                need = 0
+            require_free_space(self.out_dir, need, self.label)
             outputs = self.tool.runner(self.item, self.out_dir, self.options, report)
             self.signals.finished.emit(UnitResult(self.label, True, outputs or [],
                                                   sources=srcs, index=self.index))
@@ -112,8 +125,10 @@ class BatchController(QObject):
     def __init__(self, max_workers: int = 0, parent: QObject | None = None):
         super().__init__(parent)
         self.pool = QThreadPool(self)
-        cpu = os.cpu_count() or 4
-        self.pool.setMaxThreadCount(max_workers if max_workers > 0 else max(2, cpu - 1))
+        # Auto (0) scales with CPU *and* available RAM so heavy tools don't
+        # thrash or OOM a low-resource machine; an explicit setting wins.
+        self.pool.setMaxThreadCount(
+            max_workers if max_workers > 0 else auto_worker_count())
         self._cancel = threading.Event()
         self._total = 0
         self._done = 0

@@ -638,6 +638,8 @@ def pdf_organize(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
             writer.add_page(reader.pages[i])
             _progress(report, j + 1, len(order))
         suffix = "_extracted" if op == "extract" else "_reordered"
+    elif op == "visual":
+        return _organize_visual(src, out_dir, opt, report, n)
     else:
         raise ProcessError(f"Unknown operation: {op}")
 
@@ -648,6 +650,64 @@ def pdf_organize(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
         writer.write(fh)
     report(f"Saved {len(writer.pages)} page(s) → {out.name}")
     return [out]
+
+
+def _organize_visual(src: Path, out_dir: Path, opt: dict, report: Report,
+                     n: int) -> list[Path]:
+    """Apply a visual-organizer plan: reorder + per-page rotation + deletions,
+    with optional split points that produce several output files.
+
+    plan = {"n_src": int, "groups": [[{"src": int, "rotate": int}, ...], ...]}
+    One group per output file; pages absent from every group are dropped.
+    """
+    from pypdf import PdfReader, PdfWriter
+
+    plan = opt.get("plan") or {}
+    groups = [g for g in (plan.get("groups") or []) if g]
+    if not groups:
+        raise ProcessError("Open the visual organizer and arrange the pages first "
+                           "(Action → Visual organizer).")
+    n_src = plan.get("n_src")
+    if n_src is not None and int(n_src) != n:
+        raise ProcessError(
+            f"The visual layout was built for a {n_src}-page file, but "
+            f"'{src.name}' has {n} page(s). Re-open the visual organizer for this "
+            f"file. (The visual organizer works on one file at a time.)")
+    for g in groups:
+        for item in g:
+            i = int(item.get("src", -1))
+            if not (0 <= i < n):
+                raise ProcessError("The visual layout refers to a page that isn't "
+                                   "in this file — re-open the organizer.")
+
+    total = sum(len(g) for g in groups)
+    multi = len(groups) > 1
+    outputs: list[Path] = []
+    done = 0
+    for part, g in enumerate(groups, start=1):
+        # A fresh reader per output keeps per-page rotation from leaking across
+        # files when the same source page appears more than once.
+        rg = PdfReader(str(src))
+        writer = PdfWriter()
+        for item in g:
+            i = int(item["src"])
+            writer.add_page(rg.pages[i])
+            rot = int(item.get("rotate", 0)) % 360
+            if rot:
+                writer.pages[-1].rotate(rot)
+            done += 1
+            _progress(report, done, total)
+        suffix = f"_part{part}" if multi else "_organized"
+        out = build_output_path(src, out_dir, ".pdf", name_suffix=suffix,
+                                overwrite=opt.get("overwrite", False),
+                                numbered=opt.get("same_as_source", False))
+        with open(out, "wb") as fh:
+            writer.write(fh)
+        outputs.append(out)
+        report(f"Saved {len(writer.pages)} page(s) → {out.name}")
+    if multi:
+        report(f"Split into {len(outputs)} file(s).")
+    return outputs
 
 
 # =========================================================================

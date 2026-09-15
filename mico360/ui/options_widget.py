@@ -61,6 +61,63 @@ class _PosGrid(QWidget):
         return "center"
 
 
+class _PagePlanField(QWidget):
+    """Control for the visual page organizer: a button that opens the thumbnail
+    grid for the currently-selected file, plus a one-line summary. Its value is
+    the organizer's plan dict (or None until the user arranges pages)."""
+
+    def __init__(self, owner: "OptionsWidget", parent: QWidget | None = None):
+        super().__init__(parent)
+        self._owner = owner
+        self._plan: dict | None = None
+        self._target = None            # the path the plan was built for
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(6)
+        self.btn = QPushButton("Open visual organizer…")
+        self.btn.setObjectName("Ghost")
+        self.btn.setCursor(Qt.PointingHandCursor)
+        self.btn.clicked.connect(self._open)
+        lay.addWidget(self.btn)
+        self.summary = QLabel("No arrangement yet — click to open.")
+        self.summary.setObjectName("Hint")
+        self.summary.setWordWrap(True)
+        lay.addWidget(self.summary)
+
+    def _open(self, _=False) -> None:
+        from pathlib import Path
+        getter = getattr(self._owner, "_file_getter", None)
+        path = getter() if callable(getter) else None
+        if not path:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(
+                self, "Add a file first",
+                "Add a PDF to the queue and select it, then open the visual "
+                "organizer.")
+            return
+        path = Path(path)
+        from mico360.ui.page_organizer import PageOrganizerDialog
+        seed = self._plan if self._target == path else None
+        dlg = PageOrganizerDialog(path, self, seed)
+        if dlg.exec():
+            self._plan = dlg.plan()
+            self._target = path
+            self._update_summary(path.name)
+
+    def _update_summary(self, name: str) -> None:
+        groups = (self._plan or {}).get("groups", [])
+        kept = sum(len(g) for g in groups)
+        files = max(1, len(groups))
+        n = (self._plan or {}).get("n_src", kept)
+        txt = f"{kept} of {n} page(s) kept"
+        if files > 1:
+            txt += f" · {files} files"
+        self.summary.setText(f"{txt}  —  {name}")
+
+    def value(self) -> dict | None:
+        return self._plan
+
+
 class OptionsWidget(QWidget):
     def __init__(self, tool: Tool, parent: QWidget | None = None):
         super().__init__(parent)
@@ -68,6 +125,8 @@ class OptionsWidget(QWidget):
         self._controls: dict[str, QWidget] = {}
         self._rows: dict[str, tuple[QWidget, QWidget]] = {}  # key -> (label, field)
         self._password_keys: set[str] = set()   # never stripped, never saved
+        self._no_save_keys: set[str] = set()     # ephemeral (e.g. page plans)
+        self._file_getter = None                 # set by the tool page (page_plan)
         self._saved = settings.tool_options(tool.id)  # last-used values, if any
 
         root = QVBoxLayout(self)
@@ -145,6 +204,9 @@ class OptionsWidget(QWidget):
             read_widget = le
         elif opt.kind == "posgrid":
             field = _PosGrid(default if isinstance(default, str) else "center")
+        elif opt.kind == "page_plan":
+            self._no_save_keys.add(opt.key)   # file-specific; never persisted
+            field = _PagePlanField(self)
         elif opt.kind == "choice":
             cb = QComboBox()
             for value, label in opt.choices:
@@ -244,6 +306,8 @@ class OptionsWidget(QWidget):
                 out[opt.key] = ctrl.isChecked()
             elif isinstance(ctrl, _PosGrid):
                 out[opt.key] = ctrl.value()
+            elif isinstance(ctrl, _PagePlanField):
+                out[opt.key] = ctrl.value()
             elif isinstance(ctrl, QPlainTextEdit):
                 out[opt.key] = ctrl.toPlainText().strip()
             elif isinstance(ctrl, QLineEdit):
@@ -252,9 +316,14 @@ class OptionsWidget(QWidget):
                                 else ctrl.text().strip())
         return out
 
+    def set_file_getter(self, fn) -> None:
+        """Provide a callable returning the path the page_plan control should
+        operate on (the tool page's selected/first file)."""
+        self._file_getter = fn
+
     def save(self) -> None:
         """Remember the current option values for next time — but never persist
-        passwords to disk."""
-        vals = {k: v for k, v in self.values().items()
-                if k not in self._password_keys}
+        passwords or file-specific plans to disk."""
+        skip = self._password_keys | self._no_save_keys
+        vals = {k: v for k, v in self.values().items() if k not in skip}
         settings.set_tool_options(self.tool.id, vals)
