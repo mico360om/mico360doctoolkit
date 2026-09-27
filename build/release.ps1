@@ -52,7 +52,8 @@ if (-not $SkipTests) {
         "tests\responsive_dpi_test.py",
         "tests\single_instance_test.py",
         "tests\download_resume_test.py",
-        "tests\help_legal_test.py"
+        "tests\help_legal_test.py",
+        "tests\docs_sync_test.py"         # release notes / Help / Terms / Privacy in sync
     )
     Write-Host "Running pre-release test gate ($($gate.Count) suites)..." -ForegroundColor Cyan
     # run_suite.py gives each suite a timeout and a throw-away settings file,

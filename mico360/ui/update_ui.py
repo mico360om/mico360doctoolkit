@@ -299,7 +299,7 @@ class UpdateDialog(QDialog):
                 ("features", "New features", "sparkles"),
                 ("fixes", "Bugs fixed", "bug"),
                 ("security", "Security improvements", "lock"),
-                ("other", "Other changes", "list-ordered")):
+                ("other", "Improvements", "list-ordered")):
             sec = _notes_section(title, cats.get(key, []), icon)
             if sec is not None:
                 bv.addWidget(sec)

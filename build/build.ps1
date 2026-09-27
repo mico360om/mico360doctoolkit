@@ -83,7 +83,18 @@ if ($smokeExit -ne 0) { throw "Smoke test failed (exit $smokeExit)" }
 $DistApp = Join-Path $Root "dist\MICO360DocToolkit"
 if (Test-Path $DistApp) {
     Write-Host "Removing previous build at $DistApp" -ForegroundColor DarkGray
-    Remove-Item -LiteralPath $DistApp -Recurse -Force
+    # Dropbox/antivirus can hold a file for a moment while syncing/scanning the
+    # previous build: retry a few times instead of failing the whole build.
+    for ($try = 1; $try -le 6; $try++) {
+        try {
+            Remove-Item -LiteralPath $DistApp -Recurse -Force -ErrorAction Stop
+            break
+        } catch {
+            if ($try -eq 6) { throw "Couldn't remove the previous build at $DistApp (a file is locked): $_" }
+            Write-Host "  previous build is still locked (sync/scan) - retrying in 5 s..." -ForegroundColor DarkGray
+            Start-Sleep -Seconds 5
+        }
+    }
 }
 
 Write-Host "Building with PyInstaller..." -ForegroundColor Cyan

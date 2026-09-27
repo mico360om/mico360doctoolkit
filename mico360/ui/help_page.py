@@ -26,8 +26,8 @@ tool automatically.</p>
       only the file types that tool accepts are added.</li>
   <li><b>Set the options</b> on the right (quality, format, page ranges, OCR, target size…).
       The app remembers your last-used options for each tool.</li>
-  <li><b>Choose where outputs go</b> — a folder you pick, or tick <b>Save next to the original
-      files</b> to write each result beside its source (named “name (1).ext”, “name (2).ext”…).</li>
+  <li><b>Choose where outputs go</b> — a folder you pick, or tick <b>Save beside
+      originals</b> to write each result beside its source (named “name (1).ext”, “name (2).ext”…).</li>
   <li>Click <b>Start</b>. Your <b>original files are never modified</b>. Watch progress in the
       bar and the Activity log; double-click a finished file to open its output.</li>
 </ol>
@@ -47,9 +47,10 @@ tool automatically.</p>
       <b>Retry failed/done row(s)</b>, <b>Remove from queue</b>, and <b>Delete from disk</b>
       (sent to the Recycle Bin after a confirmation). <b>Double-click</b> a finished row to open
       its output.</li>
-  <li><b>Start</b> only processes rows that aren't done yet — finished rows are skipped until
-      you retry them. The same file can be queued more than once (Duplicate), each tracked
-      separately.</li>
+  <li><b>Start</b> processes the rows that aren't done yet. If every row is already done,
+      Start offers to <b>run them all again</b> (for example with different options), and
+      adding a file that was already processed queues it to run again. The same file can
+      be queued more than once (Duplicate), each tracked separately.</li>
   <li><b>Cancel</b> stops the batch: files in progress stop at the next safe point (their
       partial output is removed) and finished results are kept.</li>
   <li><b>Merge</b> and <b>Images → PDF</b> always combine <i>every</i> file in the queue,
@@ -131,7 +132,10 @@ tool automatically.</p>
       <b>recognised text of every page</b> to your AI to fix obvious recognition
       errors (only small character fixes are accepted — numbers are never changed)
       and to fill in an <i>empty</i> Title/Subject. It's on by default once AI is set
-      up; untick it to keep everything on your PC.</li>
+      up; untick it to keep everything on your PC. Pages that already have text are
+      skipped (you're told if there was nothing to OCR); tick <b>Redo OCR on pages that
+      already have text</b> to replace an earlier or poor OCR layer. Large text is read
+      correctly at every <b>Recognition quality</b> setting.</li>
   <li><b>PDF → …</b> — one tool to convert a PDF to <b>Word</b> (editable .docx; turn on
       <b>OCR</b> for scanned pages), <b>PowerPoint</b> (<i>Auto</i> keeps text editable and
       falls back to a page image so slides are never empty; OCR optional), <b>Excel</b>

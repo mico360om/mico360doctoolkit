@@ -3,6 +3,10 @@ from __future__ import annotations
 
 from mico360 import __app_name__, __publisher__, __version__
 
+# Bump whenever the Terms or Privacy Policy text changes (shown on both pages;
+# tests/docs_sync_test.py checks it is a real, current date).
+LEGAL_UPDATED = "27 September 2026"
+
 EMAIL = "info@mico360.com"
 WEBSITE = "www.mico360.com"
 WEBSITE_URL = "https://www.mico360.com"
@@ -53,7 +57,8 @@ All rights reserved.</p>
 def terms_and_conditions() -> str:
     return f"""
 <h2>Terms &amp; Conditions</h2>
-<p style="color:#888;">{__app_name__} v{__version__} &nbsp;·&nbsp; © {__publisher__}</p>
+<p style="color:#888;">{__app_name__} v{__version__} &nbsp;·&nbsp; © {__publisher__}
+&nbsp;·&nbsp; Last updated {LEGAL_UPDATED}</p>
 
 <p>By installing or using {__app_name__} (the "Software"), you agree to these terms.</p>
 
@@ -104,6 +109,9 @@ does not alter your default programs, stays off once you turn it off in Settings
 <p>The Software is provided "as is", without warranty of any kind, express or
 implied. Always keep backups of important files; {__publisher__} is not responsible
 for any data loss arising from use of the Software.</p>
+<p>Automated results — OCR text recognition, AI suggestions and AI clean-up,
+conversions between formats — can contain mistakes. Check important documents
+(contracts, invoices, records) before relying on them.</p>
 
 <h3>7. Limitation of liability</h3>
 <p>To the maximum extent permitted by law, {__publisher__} shall not be liable for
@@ -111,8 +119,9 @@ any indirect, incidental, or consequential damages arising from use of the
 Software.</p>
 
 <h3>8. Updates &amp; changes</h3>
-<p>These terms may be updated from time to time. Continued use of the Software
-constitutes acceptance of the current terms.</p>
+<p>Each update lists what changed before you install it. These terms may be
+updated from time to time; the date above shows the latest revision. Continued
+use of the Software constitutes acceptance of the current terms.</p>
 
 <h3>9. Contact</h3>
 <p>Questions about these terms? Email <a href="mailto:{EMAIL}">{EMAIL}</a> or visit
@@ -123,7 +132,8 @@ constitutes acceptance of the current terms.</p>
 def privacy_policy() -> str:
     return f"""
 <h2>Privacy Policy</h2>
-<p style="color:#888;">{__app_name__} v{__version__} &nbsp;·&nbsp; © {__publisher__}</p>
+<p style="color:#888;">{__app_name__} v{__version__} &nbsp;·&nbsp; © {__publisher__}
+&nbsp;·&nbsp; Last updated {LEGAL_UPDATED}</p>
 
 <p>Your privacy matters. This policy explains what {__app_name__} does — and does
 not — do with your data.</p>

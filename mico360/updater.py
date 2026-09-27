@@ -84,7 +84,8 @@ _NOTE_HEADER_KEYWORDS = (
     ("security", "security"),
     ("fix", "fixes"), ("bug", "fixes"),
     ("feature", "features"), ("new", "features"), ("added", "features"),
-    ("improvement", "features"), ("enhancement", "features"), ("change", "features"),
+    ("improvement", "other"), ("enhancement", "other"), ("reliab", "other"),
+    ("performance", "other"), ("accessib", "other"), ("change", "other"),
 )
 
 
@@ -95,10 +96,31 @@ def categorize_notes(notes: str) -> dict:
     'Bugs fixed' and 'Security improvements' separately."""
     buckets = {"features": [], "fixes": [], "security": [], "other": []}
     current = None
+    seen_version = False
+    last_bucket = None          # where the previous bullet went (for wrapped lines)
     for raw in (notes or "").splitlines():
         line = raw.strip()
         if not line:
+            last_bucket = None
             continue
+        # Only THIS release's notes: stop at a horizontal rule or at a second
+        # version heading (older releases appended below).
+        if line in ("---", "***", "___"):
+            break
+        if raw.lstrip().startswith("#") and re.search(r"\bv?\d+\.\d+(\.\d+)?\b", line):
+            if seen_version:
+                break
+            seen_version = True
+            continue
+        # A wrapped bullet: an indented line right after a bullet belongs to it.
+        if (last_bucket is not None and raw[:1] in (" ", "\t")
+                and not re.match(r"^\s*[-*•]\s+", raw)):
+            extra = re.sub(r"\*\*(.+?)\*\*", r"\1", line)
+            extra = re.sub(r"[*_`]", "", extra).strip()
+            if extra and buckets[last_bucket]:
+                buckets[last_bucket][-1] += " " + extra
+            continue
+        last_bucket = None
         is_header = (raw.lstrip().startswith("#")
                      or (line.startswith("**") and line.rstrip(":").endswith("**")))
         if is_header:
@@ -128,6 +150,7 @@ def categorize_notes(notes: str) -> dict:
             else:
                 bucket = "features"
         buckets[bucket].append(text)
+        last_bucket = bucket
     return buckets
 
 
