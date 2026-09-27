@@ -19,12 +19,50 @@ class ProcessError(Exception):
     """Raised when a processing operation fails for a user-actionable reason."""
 
 
+# Placeholders reserved by the current worker thread, so the engine can remove
+# the ones a failed / cancelled unit never filled (a 0-byte file with a real-
+# looking name is worse than no file at all).
+_tls = threading.local()
+
+
+def begin_reservations() -> None:
+    """Start tracking placeholders reserved on this thread (engine, per unit)."""
+    _tls.paths = []
+
+
+def discard_empty_reservations() -> int:
+    """Delete this thread's reserved placeholders that are still empty. Called
+    when a unit fails or is cancelled. Returns how many were removed."""
+    removed = 0
+    for p in getattr(_tls, "paths", None) or []:
+        try:
+            if p.exists() and p.stat().st_size == 0:
+                p.unlink()
+                removed += 1
+        except OSError:
+            pass
+    _tls.paths = []
+    return removed
+
+
+def is_nonempty(path) -> bool:
+    """True if *path* exists and has content (a reserved placeholder is 0 bytes,
+    so ``exists()`` alone can't tell "produced" from "never written")."""
+    try:
+        return Path(path).stat().st_size > 0
+    except OSError:
+        return False
+
+
 def _reserve(path: Path) -> bool:
     """Atomically create *path* as an empty placeholder. False if it exists."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
         os.close(fd)
+        tracked = getattr(_tls, "paths", None)
+        if tracked is not None:
+            tracked.append(path)
         return True
     except FileExistsError:
         return False
@@ -103,7 +141,20 @@ def build_output_path(
                     return cand
                 i += 1
     target = out_dir / f"{src.stem}{name_suffix}{new_suffix}"
+    if not name_suffix and _same_file(target, src):
+        # Never hand back the SOURCE itself as the output: e.g. converting a
+        # JPEG to JPEG into its own folder with Overwrite on would silently
+        # replace the original with the re-encoded copy.
+        target = out_dir / f"{src.stem}_new{new_suffix}"
     return unique_path(target, overwrite)
+
+
+def _same_file(a, b) -> bool:
+    try:
+        return (os.path.normcase(os.path.abspath(str(a)))
+                == os.path.normcase(os.path.abspath(str(b))))
+    except Exception:
+        return False
 
 
 def human_size(num_bytes: float) -> str:

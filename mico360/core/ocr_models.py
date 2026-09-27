@@ -21,6 +21,7 @@ from mico360.paths import app_root, user_data_dir
 log = get_logger("mico360.ocr_models")
 
 _provision_lock = threading.Lock()
+_verified: set = set()          # model files whose hash was checked this run
 
 
 class OcrLanguage:
@@ -49,9 +50,12 @@ LANGUAGES: dict[str, OcrLanguage] = {
         "latin", "English / Latin"),
     "arabic": OcrLanguage(
         "arabic", "Arabic",
-        # Official PaddlePaddle PP-OCRv5 mobile Arabic recogniser (ONNX).
+        # Official PaddlePaddle PP-OCRv5 mobile Arabic recogniser (ONNX),
+        # pinned to a repository commit so an upstream change can't swap the
+        # file (the SHA-256 below is checked on download AND before use).
         model_url="https://huggingface.co/PaddlePaddle/"
-                  "arabic_PP-OCRv5_mobile_rec_onnx/resolve/main/inference.onnx",
+                  "arabic_PP-OCRv5_mobile_rec_onnx/resolve/"
+                  "14aaedcd75825982689ecf5cd64ab33ee083215a/inference.onnx",
         model_sha256="799113ebf267fbe742deb99eb36e8d42c9ddc5291ceacf92add41b4d52a59110",
         model_size=7998947,
         keys_file="arabic_keys.txt",
@@ -127,6 +131,15 @@ def ensure_language(lang_id, report=None, is_cancelled=None) -> dict | None:
 
     dest = model_path(lang)
     with _provision_lock:
+        if (dest.exists() and lang.model_sha256 and str(dest) not in _verified
+                and _sha256(dest) != lang.model_sha256):
+            # A model damaged/replaced on disk after download would silently
+            # produce garbage text: drop it and fetch a fresh copy.
+            log.warning("OCR model %s failed its integrity check; re-downloading", dest)
+            try:
+                dest.unlink()
+            except OSError:
+                pass
         if not (dest.exists() and dest.stat().st_size == lang.model_size):
             from mico360.core.engines import _download
             if report:
@@ -150,4 +163,5 @@ def ensure_language(lang_id, report=None, is_cancelled=None) -> dict | None:
                     "check. Please try again.")
             if report:
                 report(f"{lang.label} OCR model ready ✓")
+        _verified.add(str(dest))
     return {"model_path": str(dest), "keys_path": str(keys), "rtl": lang.rtl}

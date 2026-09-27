@@ -211,7 +211,11 @@ def main() -> int:
     # simulate the dialog result being stored
     ctrl._plan = plan
     ctrl._target = src
-    check("stored plan is returned by values()", ow.values().get("plan") == plan)
+    got = ow.values().get("plan") or {}
+    check("stored plan is returned by values()",
+          {k: v for k, v in got.items() if k != "target"} == plan)
+    check("the plan names the file it was arranged for (H-3)",
+          got.get("target") == str(src), str(got.get("target")))
     saved = {k: v for k, v in ow.values().items() if k not in ow._no_save_keys}
     check("save() would not persist the plan", "plan" not in saved)
 

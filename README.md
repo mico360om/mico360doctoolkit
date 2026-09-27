@@ -1,10 +1,13 @@
-# MICO360 Doc Toolkit  ·  v7.3.1
+# MICO360 Doc Toolkit  ·  v7.4.0
 
-A modern Windows 10/11 desktop app for PDF & image management — a **Dashboard**
-home plus tools to compress, merge, split, organize, protect, watermark, sign,
-OCR, and convert between PDF, Office, image, and Markdown formats. Clean themed UI,
-drag-and-drop anywhere, bulk/folder processing, multi-threaded batches, toasts and
-activity logs.
+A modern desktop app for **Windows 10/11 and macOS** for PDF & image management —
+a **Dashboard** home plus tools to compress, merge, split, organize (including a
+drag-and-drop **visual page organizer**), protect, watermark, sign, number pages,
+edit metadata, OCR, and convert between PDF, Office, image, SVG and Markdown
+formats. Optional **AI** (metadata suggestions and OCR clean-up, with the System AI
+or your own OpenAI-compatible API), a Windows **Explorer right-click menu**, a real
+file queue, multi-threaded batches that adapt to low-memory machines, and
+automatic updates.
 
 ![brand: maroon / black / white]
 
@@ -18,6 +21,12 @@ specific version (and its `.sha256` checksum) from the
 [Releases page](https://github.com/mico360om/mico360doctoolkit/releases/latest).
 After installing, the app keeps itself up to date automatically.
 
+> **v7.x** — **Visual page organizer** (drag, rotate, delete, split pages by eye),
+> **low-resource resilience** (disk-space checks, memory-aware parallelism on Windows
+> and macOS), an **Explorer right-click menu** for files, multi-selections and folders,
+> optional **AI** metadata suggestions and OCR clean-up, and a round of reliability,
+> privacy and accessibility fixes (see `build/RELEASE_NOTES.md`).
+>
 > **v6.9** — **Smaller installer + Arabic OCR.** The installer drops from ~480 MB to
 > **~135 MB** (less than a third) — the LibreOffice engine is **downloaded once on first use** (and survives
 > updates), so auto-updates are ~4× smaller. OCR now has a **Language** selector:
@@ -111,17 +120,24 @@ After installing, the app keeps itself up to date automatically.
 | **Compress PDF** | Low / Medium / High, **target file size**, or custom DPI + JPEG quality |
 | **Merge PDF** | Combine many PDFs into one |
 | **Split PDF** | Per page, fixed page-count, or custom ranges (`1-3, 5, 8-10`) |
-| **Organize PDF** | Rotate, delete, extract, or reorder pages |
+| **Organize PDF** | Rotate, delete, extract, or reorder pages — or the **visual organizer** (drag / rotate / delete / split thumbnails) |
+| **Add Page Numbers** | Position, style (`1` · `1 / N` · `Page 1`) and start number |
+| **Sign PDF** | Stamp a signature image on the first / last / every page |
+| **Edit Metadata** | Every document property, custom fields, copyright (XMP), language; Privacy *Scrub* / *Remove all*; optional **AI suggestions** |
 | **Protect PDF** | Add an **AES-256** password, or unlock with the current one |
 | **Watermark PDF** | Text **or logo/image** stamp — size, opacity, angle, colour |
 | **PDF → …** | One tool: PDF to **Word** (editable, OCR optional), **PowerPoint**, **Excel** (tables), or **Images** |
 | **Office → PDF** | **Word / Excel / PowerPoint → PDF**, type auto-detected (LibreOffice → MS Office → built-in fallback) |
 | **Document → Markdown** | **Word / Excel / PowerPoint / PDF → `.md`** — headings, tables, slide sections, page text |
-| **Searchable PDF (OCR)** | Invisible text layer; **Recognition quality** 200/300/400 dpi |
+| **Searchable PDF (OCR)** | Invisible, searchable text layer (Latin built in, **Arabic** on demand; Unicode-safe); quality 200/300/400 dpi; GPU on Windows; optional **AI clean-up** |
 | **Image → PDF** | One PDF each, or combined |
-| **Compress Image** | Presets, **target file size**, or custom quality + resize / format change |
+| **Compress Image** | Lossless (verified), presets, **target file size**, or custom quality + resize / format change |
+| **Resize / Convert / Watermark Image** | Batch resize, format conversion (incl. **HEIC**), text or logo stamps |
+| **SVG → Image / Image → SVG** | Rasterise SVGs, or trace / embed images as SVG |
+| **Edit File Properties** | Bulk Date Created / Modified / Owner on any files |
 
-Supported image formats: **JPG, JPEG, PNG, WEBP, BMP, TIFF**.
+Supported image formats: **JPG, JPEG, PNG, WEBP, BMP, TIFF, HEIC/HEIF** (plus SVG
+for the SVG tools).
 
 ### Highlights
 - **Responsive UI** — collapsible sidebar (auto-collapses on narrow windows),
@@ -132,6 +148,9 @@ Supported image formats: **JPG, JPEG, PNG, WEBP, BMP, TIFF**.
 - **Originals preserved** — outputs go to a folder you choose, or next to the source.
 - **Light & dark** themes in the brand palette, switchable from the top bar.
 - **Activity log** + rotating file logs for troubleshooting.
+- **Privacy first** — everything runs locally; the only data that ever leaves your PC
+  is what the optional AI features send to the AI provider *you* configure (see the
+  in-app Privacy Policy).
 
 ## Run from source
 
@@ -168,14 +187,30 @@ powershell -ExecutionPolicy Bypass -File build\build.ps1
 
 This will:
 1. create a build venv (under `%LOCALAPPDATA%`),
-2. install deps + PyInstaller,
-3. generate the icon, run the smoke test,
+2. install deps + PyInstaller (and the DirectML GPU build of onnxruntime),
+3. generate the app and right-click-menu icons, run the smoke test,
 4. build `dist\MICO360DocToolkit\` (onedir),
-5. compile `dist\installer\MICO360-DocToolkit-Setup-1.0.0.exe` if
-   [Inno Setup 6](https://jrsoftware.org/isdl.php) (`iscc`) is on PATH.
+5. compile `dist\installer\MICO360-DocToolkit-Setup-<version>.exe` (+ `.sha256`
+   and a `-Latest` copy) with [Inno Setup 6](https://jrsoftware.org/isdl.php) —
+   found on PATH or in its standard per-user / per-machine install folder.
 
-Drop Ghostscript/LibreOffice into `vendor/` first if you want them bundled into
-the installer.
+**Test the compiled app** (not just the source) with its built-in self-test. It
+imports every bundled library, runs every major tool on generated samples
+(including OCR), and builds the whole UI offscreen. It never touches your
+settings or downloads anything:
+
+```powershell
+dist\MICO360DocToolkit\MICO360DocToolkit.exe --selftest selftest.json
+# exit code 0 = all passed; selftest.txt has a readable summary
+```
+
+The tested installer for the current version is also kept in the project's
+`Installer\` folder (older ones under `Installer\previous\`; the folder is not
+committed — releases are published on GitHub).
+
+LibreOffice is downloaded on first use rather than bundled (set
+`MICO360_BUNDLE_LIBREOFFICE=1` for a full offline build); drop Ghostscript into
+`vendor/` to bundle it.
 
 ## Releasing & auto-update (GitHub manifest)
 
@@ -212,11 +247,16 @@ mico360/
 ├── paths.py            # resource/user paths (source & frozen)
 ├── logging_setup.py    # rotating file log + Qt log bridge
 ├── core/
-│   ├── tools.py        # declarative registry of the 10 tools + options
-│   ├── processors.py   # the actual compress/convert/merge/split logic
+│   ├── tools.py        # declarative registry of every tool + its options
+│   ├── processors.py   # the actual compress/convert/merge/split/OCR logic
 │   ├── engine.py       # QThreadPool batch controller (multi-threaded)
+│   ├── engines.py      # on-demand LibreOffice download
+│   ├── ocr_models.py   # on-demand OCR language packs (pinned + verified)
+│   ├── ai.py, ai_metadata.py, ocr_ai.py   # optional AI client + features
+│   ├── crash.py        # local crash reports (redacted before sharing)
 │   ├── deps.py         # Ghostscript / LibreOffice discovery
-│   └── util.py         # output-path & subprocess helpers
+│   └── util.py         # output-path, disk/memory guards & subprocess helpers
+├── shell_integration.py, single_instance.py, updater.py
 └── ui/
     ├── main_window.py  # responsive shell: top bar + collapsible sidebar + pages
     ├── sidebar.py      # collapsible brand sidebar with grouped navigation
@@ -229,6 +269,17 @@ tests/                  # smoke, ui_construct, compression_levels, full_coverage
 ```
 
 ## Testing
+
+Run the whole suite (or named suites) with the runner. Each suite gets a timeout and
+a **throw-away settings file**, so tests never touch your real
+`%APPDATA%\MICO360\DocToolkit.ini`:
+
+```powershell
+python tests\run_suite.py                         # every tests\*_test.py
+python tests\run_suite.py smoke bugfix_2026_09    # just these
+```
+
+Individual suites can still be run directly:
 
 ```powershell
 $env:QT_QPA_PLATFORM = "offscreen"
@@ -266,10 +317,13 @@ python tests\ui_polish_test.py           # empty-state file list, no-truncation 
 python tests\download_resume_test.py     # resumable update download via HTTP Range + SHA-256 verify
 python tests\cross_platform_test.py      # per-OS installer pick (.dmg/.exe) + Finder/Explorer/xdg-open commands
 python tests\feature_audit_test.py       # every tool + every option, validating OUTPUT correctness (not just "it ran")
+python tests\bugfix_2026_09_test.py      # regressions for every fix in build\BUG_REPORT_2026-09-26.md
 ```
 
 ## Compatibility
-Windows 10 / 11, 64-bit. Python 3.10+.
+Windows 10 / 11, 64-bit, and macOS on Apple Silicon (M1 or later). Python 3.10+
+to run from source. The Explorer menu, GPU OCR and DPAPI key encryption are
+Windows-only.
 
 ## Licensing
 App © MICO360. Bundles/depends on Ghostscript (AGPL) and LibreOffice (MPL-2.0);

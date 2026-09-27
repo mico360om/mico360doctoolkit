@@ -1,6 +1,13 @@
 """Resumable update download: a partial .part file is resumed via HTTP Range
 (not re-downloaded), and the result still verifies its SHA-256.
 
+Also covers: the stable per-user download folder (a cancelled/failed attempt is
+resumed by the next one — what the dialog's Retry does), a .part left from a
+DIFFERENT build being discarded, an already-complete .part (HTTP 416), and a
+server that sends no Content-Length (the download must still complete).
+
+The updates folder is redirected to a temp dir — the real one is never touched.
+
 Run:  python tests/download_resume_test.py
 """
 from __future__ import annotations
@@ -26,14 +33,29 @@ def check(name, ok, detail=""):
 
 PAYLOAD = (b"MICO360-UPDATE-PAYLOAD-" * 5000)   # ~115 KB
 RANGE_REQUESTS = []
+REQUESTS = []
 
 
 class _RangeHandler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
+        REQUESTS.append(self.path)
+        if self.path.endswith("/nolength.bin"):
+            # No Content-Length, no Range support: the body simply ends when the
+            # server closes the connection (HTTP/1.0).
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(PAYLOAD)
+            return
         rng = self.headers.get("Range")
         if rng and rng.startswith("bytes="):
             start = int(rng.split("=", 1)[1].split("-", 1)[0])
             RANGE_REQUESTS.append(start)
+            if start >= len(PAYLOAD):
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{len(PAYLOAD)}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             body = PAYLOAD[start:]
             self.send_response(206)
             self.send_header("Content-Range",
@@ -53,6 +75,10 @@ class _RangeHandler(BaseHTTPRequestHandler):
 
 def main() -> int:
     from mico360 import updater
+
+    # Redirect the stable per-user updates folder to a temp dir.
+    stable = tempfile.mkdtemp(prefix="mico360_updates_")
+    updater.updates_dir = lambda: stable
 
     srv = HTTPServer(("127.0.0.1", 0), _RangeHandler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -97,6 +123,110 @@ def main() -> int:
         check("bad checksum is rejected", False, "no error raised")
     except RuntimeError as exc:
         check("bad checksum is rejected", "integrity" in str(exc).lower())
+
+    # 4) Stable folder + Retry: cancel mid-download, then download again with
+    #    NO dest_dir (what the dialog's Retry does) — it must resume, not restart.
+    for n in os.listdir(stable):
+        os.remove(os.path.join(stable, n))
+    polls = {"n": 0}
+
+    def cancel_after_first_chunk():
+        polls["n"] += 1
+        return polls["n"] > 1
+    try:
+        updater.download(info, is_cancelled=cancel_after_first_chunk)
+        check("cancel raises", False, "no error raised")
+    except RuntimeError as exc:
+        check("cancel raises", "cancel" in str(exc).lower(), str(exc))
+    spart = os.path.join(stable, "update.bin.part")
+    kept = os.path.getsize(spart) if os.path.exists(spart) else 0
+    check("cancel keeps the partial in the stable folder (so Retry can resume)",
+          kept > 0, f"kept={kept}")
+    RANGE_REQUESTS.clear()
+    REQUESTS.clear()
+    out4 = updater.download(info)            # Retry: default = stable folder
+    check("retry completes in the stable folder",
+          os.path.dirname(out4) == stable and os.path.getsize(out4) == len(PAYLOAD))
+    check("retry resumed from the kept bytes (Range at the partial's size)",
+          kept in RANGE_REQUESTS, f"kept={kept} ranges={RANGE_REQUESTS}")
+    check("retry result verifies", updater.is_verified(out4, sha))
+
+    # 4b) A mid-file partial of THIS build (matching marker) in the stable
+    #     folder is resumed by a plain download() — Range at its exact size.
+    os.remove(out4)
+    seed_b = len(PAYLOAD) // 3
+    with open(spart, "wb") as f:
+        f.write(PAYLOAD[:seed_b])
+    with open(spart + ".sha256", "w") as f:
+        f.write(sha)
+    RANGE_REQUESTS.clear()
+    out4b = updater.download(info)
+    check("stable-folder partial of the same build resumes via Range",
+          RANGE_REQUESTS == [seed_b] and os.path.getsize(out4b) == len(PAYLOAD),
+          str(RANGE_REQUESTS))
+    check("marker file is removed once the download completes",
+          not os.path.exists(spart + ".sha256"))
+    out4 = out4b
+
+    # 5) A .part left by a DIFFERENT build (its marker names another hash) is
+    #    discarded instead of being glued onto this download.
+    os.remove(out4)
+    with open(spart, "wb") as f:
+        f.write(b"X" * 1000)
+    with open(spart + ".sha256", "w") as f:
+        f.write("1" * 64)
+    RANGE_REQUESTS.clear()
+    out5 = updater.download(info)
+    check("a partial from another build is discarded (no Range resume)",
+          RANGE_REQUESTS == [] and os.path.getsize(out5) == len(PAYLOAD),
+          str(RANGE_REQUESTS))
+
+    # 6) An already-complete .part (app closed before verifying): the server
+    #    answers 416 — treat as done, verify, don't loop or re-download.
+    os.remove(out5)
+    with open(spart, "wb") as f:
+        f.write(PAYLOAD)
+    REQUESTS.clear()
+    out6 = updater.download(info)
+    check("complete partial + HTTP 416 finishes without re-downloading",
+          os.path.getsize(out6) == len(PAYLOAD) and len(REQUESTS) == 1,
+          f"requests={len(REQUESTS)}")
+
+    # 7) An over-long .part (416 with a smaller total) restarts cleanly.
+    os.remove(out6)
+    with open(spart, "wb") as f:
+        f.write(PAYLOAD + b"JUNK")
+    out7 = updater.download(info)
+    check("over-long partial is discarded and re-downloaded",
+          hashlib.sha256(Path(out7).read_bytes()).hexdigest() == sha)
+
+    # 8) No Content-Length: the download must complete at a clean EOF.
+    nolen = updater.UpdateInfo(version="9.9.9",
+                               url=f"http://127.0.0.1:{port}/nolength.bin",
+                               asset_name="nolength.bin", sha256=sha,
+                               notes="", page="")
+    d8 = tempfile.mkdtemp(prefix="mico360_dl8_")
+    seen = {"total": None, "done": 0}
+
+    def prog(done, total):
+        seen["done"], seen["total"] = done, total
+    res: dict = {}
+
+    def _run():
+        try:
+            res["out"] = updater.download(nolen, dest_dir=d8, progress=prog)
+        except Exception as exc:          # pragma: no cover
+            res["err"] = str(exc)
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(30)
+    check("download without Content-Length completes (no hang)",
+          not t.is_alive() and "out" in res, res.get("err", "timed out" if t.is_alive() else ""))
+    check("...with the full, verified payload",
+          "out" in res and os.path.getsize(res["out"]) == len(PAYLOAD)
+          and updater.is_verified(res["out"], sha))
+    check("...reporting progress with an unknown total",
+          seen["done"] == len(PAYLOAD) and seen["total"] == 0, str(seen))
 
     srv.shutdown()
 

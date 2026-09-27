@@ -40,12 +40,29 @@ _ROUTES = [
 
 
 def route_for(paths) -> str | None:
+    """The default tool for a drop. Folders are looked inside (a folder of
+    photos goes to Compress Image, not Compress PDF); the most common kind of
+    supported file wins. None when nothing in the drop is supported."""
+    import os
+    from mico360.ui.file_collector import collect_files_detailed
+    files = []
     for p in paths:
+        if os.path.isdir(str(p)):
+            files += collect_files_detailed([p], {"*"}, limit=2000)[0]
+        else:
+            files.append(Path(p))
+    counts: dict[str, int] = {}
+    first: dict[str, int] = {}
+    for n, p in enumerate(files):
         ext = Path(p).suffix.lower()
         for exts, tool in _ROUTES:
             if ext in exts:
-                return tool
-    return None
+                counts[tool] = counts.get(tool, 0) + 1
+                first.setdefault(tool, n)
+                break
+    if not counts:
+        return None
+    return max(counts, key=lambda t: (counts[t], -first[t]))
 
 
 class Tile(QPushButton):
@@ -102,6 +119,7 @@ class Tile(QPushButton):
 class DashboardPage(QWidget):
     openTool = Signal(str)              # tool_id
     openToolWithFiles = Signal(str, list)
+    toast = Signal(str, str)            # (message, kind)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -170,7 +188,7 @@ class DashboardPage(QWidget):
             "<b>New here?</b>&nbsp;&nbsp;•&nbsp; Drop files anywhere to start"
             "&nbsp;&nbsp;•&nbsp; Pin tools with the star button&nbsp;&nbsp;•&nbsp; "
             "AI suggestions live in <b>Edit Metadata</b> (set them up in "
-            "Settings → AI)")
+            "Settings → AI provider)")
         tips.setObjectName("Hint")
         tips.setTextFormat(Qt.RichText)
         tips.setWordWrap(True)
@@ -262,8 +280,9 @@ class DashboardPage(QWidget):
             it.setToolTip(f"{p}\nDouble-click to show this file in its folder.")
             it.setData(Qt.UserRole, p)
             lst.addItem(it)
+        # itemActivated already fires on double-click (and Enter); wiring
+        # itemDoubleClicked too opened two Explorer windows.
         lst.itemActivated.connect(self._open_recent)
-        lst.itemDoubleClicked.connect(self._open_recent)
         lst.setContextMenuPolicy(Qt.CustomContextMenu)
         lst.customContextMenuRequested.connect(
             lambda pos, w=lst: self._recent_menu(w, pos))
@@ -326,6 +345,9 @@ class DashboardPage(QWidget):
         paths = [u.toLocalFile() for u in event.mimeData().urls() if u.toLocalFile()]
         if not paths:
             return
-        tool = route_for(paths) or "pdf_compress"
+        tool = route_for(paths)
+        if not tool:
+            self.toast.emit("None of those files can be opened by a tool here", "info")
+            return
         self.openToolWithFiles.emit(tool, paths)
         event.acceptProposedAction()

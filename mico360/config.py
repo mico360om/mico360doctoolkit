@@ -27,7 +27,13 @@ class Settings:
     """Thin typed wrapper around QSettings."""
 
     def __init__(self) -> None:
-        self._s = QSettings(QSettings.IniFormat, QSettings.UserScope, ORG, APP)
+        # MICO360_SETTINGS_FILE points the app at another INI (the test runner
+        # uses a throw-away one so tests never rewrite the user's real settings).
+        alt = os.environ.get("MICO360_SETTINGS_FILE", "").strip()
+        if alt:
+            self._s = QSettings(alt, QSettings.IniFormat)
+        else:
+            self._s = QSettings(QSettings.IniFormat, QSettings.UserScope, ORG, APP)
 
     # --- generic helpers -------------------------------------------------
     def _get(self, key: str, default, cast):
@@ -283,6 +289,25 @@ class Settings:
     @ai_api_key_sealed.setter
     def ai_api_key_sealed(self, value: str) -> None:
         self._set("ai/api_key", str(value or ""))
+
+    @property
+    def shell_menu_opt_out(self) -> bool:
+        """The user turned the Explorer right-click menu off (Settings or the
+        installer). Installs and auto-updates must then not add it back."""
+        return self._get("shell/opt_out", False, bool)
+
+    @shell_menu_opt_out.setter
+    def shell_menu_opt_out(self, value: bool) -> None:
+        self._set("shell/opt_out", bool(value))
+
+    @property
+    def ai_key_origin(self) -> str:
+        """scheme://host:port the saved API key belongs to (never sent elsewhere)."""
+        return self._get("ai/key_origin", "", str)
+
+    @ai_key_origin.setter
+    def ai_key_origin(self, value: str) -> None:
+        self._set("ai/key_origin", str(value or ""))
 
     @property
     def open_output_when_done(self) -> bool:

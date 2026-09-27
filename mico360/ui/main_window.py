@@ -87,6 +87,16 @@ class MainWindow(QMainWindow):
         self._widgets: dict[int, QWidget] = {}    # page_index -> built widget
         self._pinned: bool | None = None  # None=follow width; True/False=user pinned
 
+        # Explorer runs a right-click verb once per selected file, so a multi-file
+        # selection arrives as a burst of separate open-requests. Buffer them and
+        # flush as one batch, so 10 files land in a single queue with one
+        # navigation instead of ten.
+        self._pending_open: dict[str, list[str]] = {}   # tool_id -> files
+        self._open_timer = QTimer(self)
+        self._open_timer.setSingleShot(True)
+        self._open_timer.setInterval(300)
+        self._open_timer.timeout.connect(self._flush_pending_open)
+
         self._build_pages()
         self._build_layout()
         self._install_shortcuts()
@@ -163,16 +173,40 @@ class MainWindow(QMainWindow):
             self.handle_open_request(req)
 
     def handle_open_request(self, req: dict) -> None:
-        """Open the requested tool with the given file(s) already loaded. If no
-        tool is named, route by file type (same rules as drag-and-drop)."""
+        """Queue a request to open a tool with the given file(s). Requests are
+        coalesced (see ``_open_timer``) so a multi-file right-click — which
+        Explorer delivers as one request per file — becomes a single batch. If
+        no tool is named, the files are routed by type (same rules as drop)."""
         files = [f for f in (req.get("files") or []) if f]
         if not files:
             return
         tool = req.get("tool")
         if not tool or tool not in self._tool_index:
+            # "Open with MICO360 Toolkit" (no tool): auto-route by file type. If
+            # a folder was passed, route by what's actually inside it.
+            from pathlib import Path as _P
             from mico360.ui.dashboard_page import route_for
-            tool = route_for(files) or "pdf_compress"
-        self.open_tool(tool, files)
+            probe = files
+            if any(_P(f).is_dir() for f in files):
+                from mico360.core.tools import all_accept_exts
+                from mico360.ui.file_collector import collect_files
+                inside = collect_files(files, all_accept_exts())
+                probe = [str(p) for p in inside] or files
+            tool = route_for(probe) or "pdf_compress"
+        self._pending_open.setdefault(tool, []).extend(files)
+        self._open_timer.start()          # (re)start the debounce window
+
+    def _flush_pending_open(self) -> None:
+        """Apply all buffered open-requests: one navigation + one batch per tool,
+        with files de-duplicated in arrival order."""
+        pending, self._pending_open = self._pending_open, {}
+        if not pending:
+            return
+        for tool, files in pending.items():
+            seen: set[str] = set()
+            uniq = [f for f in files if not (f in seen or seen.add(f))]
+            self.open_tool(tool, uniq)
+        self.bring_to_front()
 
     def bring_to_front(self) -> None:
         """Restore, raise and focus the window — called when the user tries to
@@ -292,6 +326,7 @@ class MainWindow(QMainWindow):
         self.dashboard = DashboardPage()
         self.dashboard.openTool.connect(lambda tid: self.open_tool(tid))
         self.dashboard.openToolWithFiles.connect(self.open_tool)
+        self.dashboard.toast.connect(self.show_toast)
         return self.dashboard
 
     def _build_tool_page(self, tool) -> QWidget:
@@ -322,10 +357,24 @@ class MainWindow(QMainWindow):
         sc("Ctrl+Return", lambda: self._on_tool_page(lambda p: p.start()))
         sc("Ctrl+Enter", lambda: self._on_tool_page(lambda p: p.start()))
         sc("Ctrl+V", lambda: self._on_tool_page(lambda p: p.paste_from_clipboard()))
-        sc("Esc", lambda: self._on_tool_page(lambda p: p.cancel_if_running()))
+        sc("Esc", self._on_escape)
         # Ctrl+1..9 jump to the Nth pinned (favourite) tool.
         for n in range(1, 10):
             sc(f"Ctrl+{n}", lambda i=n: self._open_favorite(i))
+
+    def _on_escape(self) -> None:
+        """Esc cancels a run only when focus is on the tool page. In the sidebar
+        search (or any other text box outside the page) it clears that box —
+        typing a search and pressing Esc used to cancel the running batch."""
+        from PySide6.QtWidgets import QApplication, QLineEdit
+        fw = QApplication.focusWidget()
+        page = self._current_tool_page()
+        if (isinstance(fw, QLineEdit) and not fw.isReadOnly()
+                and (page is None or not page.isAncestorOf(fw))):
+            fw.clear()
+            return
+        if page is not None:
+            page.cancel_if_running()
 
     def _current_tool_page(self):
         cur = self.stack.currentWidget()
@@ -379,7 +428,8 @@ class MainWindow(QMainWindow):
         from mico360.ui.widgets import Toast
         if not hasattr(self, "_toasts"):
             self._toasts = []
-        self._toasts = [t for t in self._toasts if t.isVisible()]
+        from shiboken6 import isValid
+        self._toasts = [t for t in self._toasts if isValid(t) and t.isVisible()]
         toast = Toast(self, message, kind, action_text=action_text,
                       on_action=on_action)
         # Stack above any existing toasts using their real heights (+ a gap).
@@ -495,20 +545,25 @@ class MainWindow(QMainWindow):
         paths = [u.toLocalFile() for u in event.mimeData().urls() if u.toLocalFile()]
         if not paths:
             return
-        # If we're already on a tool page that accepts these files, add them
-        # there instead of jumping to a different default tool.
+        # On a tool page, anything that page can use (files, or folders that
+        # contain such files — File Properties takes any file) is added right
+        # there; add_paths reports what it skipped. Only a drop the page can't
+        # use at all switches to a more suitable tool.
         cur = self.stack.currentWidget()
         page = cur.widget() if isinstance(cur, QScrollArea) else cur
         if isinstance(page, ToolPage):
-            accepted = [p for p in paths if Path(p).suffix.lower() in page.tool.accept]
-            if accepted:
-                page.add_paths([Path(p) for p in accepted])
+            from mico360.ui.file_collector import collect_files_detailed
+            usable, _st = collect_files_detailed(paths, page.tool.accept, limit=1)
+            if usable:
+                page.add_paths([Path(p) for p in paths])
                 event.acceptProposedAction()
                 return
         tool = route_for(paths)
         if tool:
             self.open_tool(tool, paths)
             event.acceptProposedAction()
+        else:
+            self.show_toast("None of those files can be opened by a tool here", "info")
 
     def _toggle_sidebar(self) -> None:
         self.sidebar.set_collapsed(not self.sidebar.collapsed)
@@ -525,8 +580,37 @@ class MainWindow(QMainWindow):
         settings.theme_mode = mode
         self._apply_visuals()
 
+    def _watch_system_theme(self) -> None:
+        """Follow OS light/dark switches while 'System' is selected. Without
+        this the stylesheet stayed on the old palette while custom-painted
+        parts (queue rows, icons) switched — near-unreadable text."""
+        if getattr(self, "_theme_watch", False):
+            return
+        self._theme_watch = True
+        try:
+            hints = QApplication.styleHints()
+            hints.colorSchemeChanged.connect(lambda *_: self._on_os_theme_changed())
+        except Exception:                   # Qt < 6.5: changeEvent covers it
+            pass
+
+    def _on_os_theme_changed(self) -> None:
+        from mico360.theme import invalidate_system_theme_cache
+        if getattr(settings, "theme_mode", "") != "system":
+            return
+        invalidate_system_theme_cache()
+        if settings.theme != getattr(self, "_applied_theme", None):
+            self._apply_visuals()
+
+    def changeEvent(self, event):  # noqa: N802
+        from PySide6.QtCore import QEvent
+        super().changeEvent(event)
+        if event.type() in (QEvent.ThemeChange, QEvent.ApplicationPaletteChange):
+            self._on_os_theme_changed()
+
     def _apply_visuals(self) -> None:
+        self._watch_system_theme()
         theme = settings.theme  # effective light/dark (resolves 'system')
+        self._applied_theme = theme
         app = QApplication.instance()
         if app:
             app.setStyleSheet(stylesheet(theme))

@@ -115,6 +115,11 @@ def main() -> int:
         settings.ai_source = ai_core.SOURCE_CUSTOM
         settings.ai_base_url = "http://ai.example.com:5310/v1"
         settings.ai_model = "qwen2.5:0.5b"
+        # A key is bound to the server it was saved for — save one for this one.
+        ai_core.save_config(ai_core.AiConfig(
+            enabled=True, source=ai_core.SOURCE_CUSTOM,
+            base_url="http://ai.example.com:5310/v1", model="qwen2.5:0.5b"),
+            api_key="mico_key_abcdefghij")
         s = cap.capability_state()
         check("AI shows your own endpoint host + model when custom",
               s["ai_state"] == "custom" and "ai.example.com:5310" in s["ai"]
@@ -123,7 +128,14 @@ def main() -> int:
         htmlp = cap.capabilities_html()
         check("capabilities_html renders the live summary",
               "Your platform" in htmlp and "Explorer right-click menu" in htmlp
-              and "AI suggestions" in htmlp)
+              and "AI features" in htmlp)
+        # H-11: the disclosures must say OCR "Use AI" sends the text of every page.
+        from mico360 import legal as _legal
+        check("H-11: Privacy Policy discloses OCR AI sends every page's text",
+              "every page" in _legal.privacy_policy()
+              and "short excerpt of that one document (not the whole file" not in _legal.privacy_policy())
+        check("H-11: Terms describe the automatic OCR AI clean-up",
+              "OCR clean-up" in _legal.terms_and_conditions())
     finally:
         (settings.ai_enabled, settings.ai_source, settings.ai_base_url,
          settings.ai_model, settings.ai_api_key_sealed) = saved
@@ -141,7 +153,7 @@ def main() -> int:
     labels = " ".join(lbl.text() for lbl in hp.findChildren(QLabel)).lower()
     # section_label() upper-cases its text, so match case-insensitively.
     check("Help page shows the 'Your setup & permissions' card",
-          "your setup" in labels and "ai suggestions" in labels)
+          "your setup" in labels and "ai features" in labels)
     hp.close()
 
     print()

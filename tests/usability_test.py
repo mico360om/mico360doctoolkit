@@ -133,12 +133,18 @@ def main() -> int:
           and "2 failed" in page.btn_retry_failed.text(),
           page.btn_retry_failed.text())
     # clicking it resets the failed rows to pending and starts
-    started = {"n": 0}
-    page.start = lambda: started.__setitem__("n", started["n"] + 1)
+    started = {"n": 0, "rows": None}
+
+    def _fake_run(todo):
+        started["n"] += 1
+        started["rows"] = [it.path.name for it in todo]
+    page._run = _fake_run
     page._retry_failed()
     check("Retry-failed resets failed rows to pending and runs",
           started["n"] == 1
           and all(it.state != "failed" for it in page.items[:2]))
+    check("Retry-failed runs ONLY the failed rows (not other pending/done ones)",
+          started["rows"] == ["a.pdf", "b.pdf"], str(started["rows"]))
 
     # ================= 4. first-run hints ==========================
     print("--- first-run hints ---")

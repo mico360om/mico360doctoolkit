@@ -61,7 +61,13 @@ def main() -> int:
 
     # --- page-spec parser -----------------------------------------------
     check("_page_list ordered + ranges", P._page_list("3,1,2-4", 10) == [2, 0, 1, 2, 3])
-    check("_page_list clamps out-of-range", P._page_list("0,5,99", 5) == [4])
+    # Out-of-range entries are an error naming them (they used to be dropped
+    # silently, so "Extract 2, 50" quietly produced one page).
+    try:
+        P._page_list("0,5,99", 5)
+        check("_page_list rejects out-of-range", False)
+    except P.ProcessError as exc:
+        check("_page_list rejects out-of-range", "0, 99" in str(exc), str(exc))
     check("_page_list reverse range", P._page_list("3-1", 5) == [2, 1, 0])
     check("_page_list all", P._page_list("all", 3, default_all=True) == [0, 1, 2])
     check("_page_list empty -> none", P._page_list("", 3) == [])

@@ -2,11 +2,16 @@
 
 The "manifest" is simply the repo's *latest release*: its tag is the version, its
 body is the release notes, and its assets contain the installer (Setup .exe) plus
-an optional ``<setup>.sha256`` sidecar for integrity verification.
+a ``<setup>.sha256`` sidecar for integrity verification. The sidecar is REQUIRED:
+an installer whose checksum can't be fetched is never downloaded or launched.
 
 Flow: check_for_update() -> (if newer) download() the installer with progress and
 SHA-256 verification -> apply_and_exit() runs the installer silently, which closes
 the running app and upgrades it in place (the Inno Setup AppId is stable).
+
+Downloads go to a stable per-user folder (``updates_dir()``) so an interrupted or
+retried download resumes its ``.part`` file; cleanup_downloads() removes stale
+installers/partials from it after a later successful check.
 
 Uses only the Python standard library (no extra dependency).
 """
@@ -18,8 +23,9 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
@@ -39,6 +45,9 @@ REPO_SHORT = f"github.com/{GITHUB_OWNER}/{GITHUB_REPO}"
 # still allow github.com). The Atom feed and the download host are on github.com.
 ATOM_FEED = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases.atom"
 DOWNLOAD_BASE = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest/download/"
+# Per-tag asset host: releases/download/<tag>/<asset>. The Atom fallback uses this
+# so the installer it downloads is exactly the version it announced.
+DOWNLOAD_TAG_BASE = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/download/"
 _HEADERS = {"User-Agent": f"MICO360-Doc-Toolkit/{__version__}",
             "Accept": "application/vnd.github+json"}
 _CHUNK = 1 << 20          # 1 MB reads — fewer loop iterations on a fast link
@@ -49,11 +58,13 @@ class UpdateInfo:
     version: str          # clean, e.g. "5.1.0"
     url: str              # installer download URL
     asset_name: str       # installer file name
-    sha256: str | None    # expected hash (None if no sidecar)
+    sha256: str | None    # expected hash (None = not fetched yet / no sidecar)
     notes: str            # release notes (markdown)
     page: str             # human release page
     size: int = 0         # installer size in bytes (0 = unknown)
     published_at: str = ""  # ISO release date (may be "" via the Atom fallback)
+    sha256_url: str = ""  # where the checksum sidecar lives (re-fetched by
+                          # download() if the check couldn't read it)
 
 
 def format_release_date(iso: str) -> str:
@@ -125,18 +136,51 @@ def clean_version(tag: str) -> str:
     return (tag or "").strip().lstrip("vV").strip()
 
 
+# major[.minor[.patch]] followed by an optional suffix: "-rc2", "beta1", "+build".
+_VERSION_RE = re.compile(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?(.*)$")
+
+
+def _split_version(s: str) -> tuple[tuple[int, int, int], str]:
+    """-> ((major, minor, patch), pre-release suffix or '')."""
+    m = _VERSION_RE.match(clean_version(s))
+    if not m:
+        return (0, 0, 0), ""
+    nums = tuple(int(g) if g else 0 for g in m.group(1, 2, 3))
+    rest = m.group(4).strip()
+    # "+build" metadata doesn't change precedence (SemVer); a further ".N"
+    # component isn't a pre-release either. Anything else ("-rc2", "beta",
+    # "a1") marks a pre-release of that version.
+    rest = rest.split("+", 1)[0]
+    if not rest or rest.startswith("."):
+        return nums, ""  # type: ignore[return-value]
+    return nums, rest.lstrip("-_. ").lower()  # type: ignore[return-value]
+
+
 def parse_version(s: str) -> tuple[int, int, int]:
-    parts: list[int] = []
-    for chunk in clean_version(s).split("."):
-        digits = "".join(ch for ch in chunk if ch.isdigit())
-        parts.append(int(digits) if digits else 0)
-    while len(parts) < 3:
-        parts.append(0)
-    return tuple(parts[:3])  # type: ignore[return-value]
+    """(major, minor, patch) — the numeric part only, so "7.4.0-rc2" gives
+    (7, 4, 0), never (7, 4, 2). Use version_key()/is_newer() to ORDER versions:
+    they also rank a pre-release below its final release."""
+    return _split_version(s)[0]
+
+
+def is_prerelease(s: str) -> bool:
+    """True for tags like v7.4.0-rc1 / 7.4.0-beta / 7.4.0a1."""
+    return bool(_split_version(s)[1])
+
+
+def version_key(s: str) -> tuple:
+    """Sort key: 7.4.0-alpha < 7.4.0-beta < 7.4.0-rc2 < 7.4.0-rc10 < 7.4.0 < 7.4.1
+    (and 7.10.0 > 7.9.0)."""
+    nums, pre = _split_version(s)
+    if not pre:
+        return (*nums, 1, ())
+    ids = tuple((0, int(tok), "") if tok.isdigit() else (1, 0, tok)
+                for tok in re.findall(r"\d+|[a-z]+", pre))
+    return (*nums, 0, ids)
 
 
 def is_newer(remote: str, local: str = __version__) -> bool:
-    return parse_version(remote) > parse_version(local)
+    return version_key(remote) > version_key(local)
 
 
 # --- network -------------------------------------------------------------
@@ -169,57 +213,96 @@ def _pick_installer(assets: list[dict]) -> dict | None:
     return (versioned or pref or [None])[0]
 
 
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _is_sha256(value: str | None) -> bool:
+    return bool(value) and bool(_SHA256_RE.match(str(value).strip().lower()))
+
+
+def _fetch_sha256(url: str, attempts: int = 2) -> str | None:
+    """Read a ``<hash>  <file>`` checksum sidecar; retry once on a transient
+    failure. Returns the lower-case hex digest, or None if it can't be had."""
+    if not url:
+        return None
+    for i in range(max(1, attempts)):
+        try:
+            tokens = _get(url).decode("utf-8", "replace").split()
+            token = tokens[0].strip().lower() if tokens else ""
+            if _is_sha256(token):
+                return token
+            return None            # fetched but malformed — retrying won't help
+        except Exception:
+            if i + 1 < attempts:
+                time.sleep(0.5)
+    return None
+
+
 def _latest_tag_via_atom(timeout: int = 20) -> str | None:
-    """Read the newest release tag from the repo's Atom feed (github.com, not the
-    rate-limited api.github.com). The first entry is the latest release."""
+    """Read the newest STABLE release tag from the repo's Atom feed (github.com,
+    not the rate-limited api.github.com).
+
+    The feed lists pre-releases too (v7.4.0-rc1, …), which the stable channel
+    must never offer, so those are skipped; of the remaining tags the highest
+    version wins (not merely the first entry)."""
     raw = _get(ATOM_FEED, timeout).decode("utf-8", "replace")
-    # Each entry links to …/releases/tag/<tag>; the first is the newest.
-    m = re.search(r"/releases/tag/([^\"'<>\s]+)", raw)
-    return m.group(1) if m else None
+    # Each entry links to …/releases/tag/<tag>.
+    tags: list[str] = []
+    for tag in re.findall(r"/releases/tag/([^\"'<>\s]+)", raw):
+        tag = urllib.parse.unquote(tag)
+        if tag not in tags:
+            tags.append(tag)
+    stable = [t for t in tags
+              if _VERSION_RE.match(clean_version(t)) and not is_prerelease(t)]
+    if not stable:
+        return None
+    return max(stable, key=version_key)
 
 
-def _stable_asset_names() -> tuple[str, str]:
-    """The stable (version-less) installer + checksum names for this OS — these
-    are always reachable at releases/latest/download/ without the API."""
+def _versioned_asset_names(version: str) -> tuple[str, str]:
+    """The installer + checksum names a release ``version`` ships for this OS
+    (build/installer.iss and .github/workflows/build-macos.yml produce these)."""
     if _installer_ext() == ".dmg":
-        name = "MICO360-DocToolkit-macos-Latest.dmg"
+        name = f"MICO360-DocToolkit-macos-{version}.dmg"
         return name, name + ".sha256.txt"
-    name = "MICO360-DocToolkit-Setup-Latest.exe"
+    name = f"MICO360-DocToolkit-Setup-{version}.exe"
     return name, name + ".sha256"
 
 
+def _head_size(url: str) -> int:
+    """The API gave us nothing, so the size is unknown on the Atom path — fetch
+    it cheaply with a HEAD request so the UI can still show it (0 = unknown)."""
+    try:
+        req = urllib.request.Request(url, headers=_HEADERS, method="HEAD")
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
+            return int(resp.headers.get("Content-Length") or 0)
+    except Exception:
+        return 0
+
+
 def _check_via_atom() -> UpdateInfo | None:
-    """API-free update check: get the latest tag from the Atom feed and build the
-    install info from the stable releases/latest/download URLs. Used when the API
-    is unreachable (rate-limited / firewalled)."""
+    """API-free update check: get the latest stable tag from the Atom feed and
+    build the install info from that tag's own releases/download/<tag>/ URLs —
+    so the installer (and its checksum) is exactly the announced version. Used
+    when the API is unreachable (rate-limited / firewalled)."""
     tag = _latest_tag_via_atom()
     if not tag or not is_newer(tag):
         return None
-    name, sidecar_name = _stable_asset_names()
-    sha = None
-    try:
-        sha = _get(DOWNLOAD_BASE + sidecar_name).decode("utf-8").split()[0].strip()
-    except Exception:
-        sha = None
-    # The API gave us nothing, so size/notes are unknown here — fetch the size
-    # cheaply with a HEAD request so the UI can still show it.
-    size = 0
-    try:
-        req = urllib.request.Request(DOWNLOAD_BASE + name, headers=_HEADERS,
-                                     method="HEAD")
-        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310
-            size = int(resp.headers.get("Content-Length") or 0)
-    except Exception:
-        size = 0
+    version = clean_version(tag)
+    name, sidecar_name = _versioned_asset_names(version)
+    base = DOWNLOAD_TAG_BASE + urllib.parse.quote(tag, safe="") + "/"
+    sha_url = base + sidecar_name
+    sha = _fetch_sha256(sha_url)
     return UpdateInfo(
-        version=clean_version(tag),
-        url=DOWNLOAD_BASE + name,
+        version=version,
+        url=base + name,
         asset_name=name,
         sha256=sha,
         notes="",
-        page=RELEASES_PAGE,
-        size=size,
+        page=f"{REPO_URL}/releases/tag/{urllib.parse.quote(tag, safe='')}",
+        size=_head_size(base + name),
         published_at="",
+        sha256_url=sha_url,
     )
 
 
@@ -227,7 +310,7 @@ def check_for_update(json_fetcher=_get_json) -> UpdateInfo | None:
     """Return UpdateInfo if the latest GitHub release is newer, else None.
 
     Tries the GitHub API first; if that fails (rate limit / firewall / TLS), falls
-    back to the Atom feed + stable download URLs so the check still works on PCs
+    back to the Atom feed + per-tag download URLs so the check still works on PCs
     where api.github.com is unreachable. ``json_fetcher`` is injectable for tests;
     the Atom fallback only runs for the default (real-network) fetcher."""
     try:
@@ -245,7 +328,6 @@ def check_for_update(json_fetcher=_get_json) -> UpdateInfo | None:
     if not installer:
         return None
     name = installer["name"]
-    sha = None
     # Match the checksum sidecar to THIS installer only. A blanket
     # "any .sha256" match would grab the wrong file's hash on a release that
     # ships both a .exe and a .dmg (each with its own sidecar) — which would
@@ -253,11 +335,10 @@ def check_for_update(json_fetcher=_get_json) -> UpdateInfo | None:
     want = (name.lower() + ".sha256", name.lower() + ".sha256.txt")
     sidecar = next((a for a in assets
                     if str(a.get("name", "")).lower() in want), None)
-    if sidecar:
-        try:
-            sha = _get(sidecar["browser_download_url"]).decode("utf-8").split()[0].strip()
-        except Exception:
-            sha = None
+    sha_url = str(sidecar.get("browser_download_url") or "") if sidecar else ""
+    # No sidecar / unreadable sidecar leaves sha256 None: the update is still
+    # reported, but download() refuses to fetch or run it unverified.
+    sha = _fetch_sha256(sha_url) if sha_url else None
     return UpdateInfo(
         version=clean_version(tag),
         url=installer["browser_download_url"],
@@ -267,6 +348,7 @@ def check_for_update(json_fetcher=_get_json) -> UpdateInfo | None:
         page=data.get("html_url") or RELEASES_PAGE,
         size=int(installer.get("size") or 0),
         published_at=str(data.get("published_at") or ""),
+        sha256_url=sha_url,
     )
 
 
@@ -311,21 +393,177 @@ def _safe_remove(path: str) -> None:
         pass
 
 
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest().lower()
+
+
+def _read_token(path: str) -> str:
+    try:
+        with open(path, "r", encoding="ascii", errors="replace") as fh:
+            tokens = fh.read().split()
+        return tokens[0].strip().lower() if tokens else ""
+    except OSError:
+        return ""
+
+
+# --- stable download folder ------------------------------------------------
+# A fixed per-user folder (not a fresh temp dir per attempt) so Retry — or the
+# next launch — resumes the ``.part`` file instead of starting from zero, and so
+# old installers don't pile up in %TEMP%.
+_KEEP_RECENT_SECS = 15 * 60   # never delete a finished installer younger than this
+                              # (it may be the one being installed right now)
+
+
+def updates_dir() -> str:
+    """The per-user folder update downloads live in (created on demand)."""
+    from mico360.paths import user_data_dir
+    d = os.path.join(str(user_data_dir()), "updates")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def cleanup_downloads(keep_asset: str | None = None, dest_dir: str | None = None,
+                      min_age: float = _KEEP_RECENT_SECS) -> int:
+    """Delete stale installers / partial downloads from the updates folder.
+
+    ``keep_asset`` (the installer currently on offer) and its ``.part`` companions
+    are kept so a pending download can still resume. Finished installers touched
+    within ``min_age`` seconds are kept too — one may be running right now (a
+    file that's locked by a running installer simply fails to delete). Returns
+    the number of files removed; never raises."""
+    removed = 0
+    try:
+        d = dest_dir or updates_dir()
+        names = os.listdir(d)
+    except OSError:
+        return 0
+    keep = (keep_asset or "").lower()
+    now = time.time()
+    for name in names:
+        low = name.lower()
+        if keep and (low == keep or low.startswith(keep + ".")):
+            continue
+        full = os.path.join(d, name)
+        try:
+            if not os.path.isfile(full):
+                continue
+            partial = low.endswith(".part") or low.endswith(".part.sha256")
+            if not partial and now - os.path.getmtime(full) < min_age:
+                continue
+            os.remove(full)
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+# Installers download() has verified in this process: normcase(path) ->
+# (sha256, size, mtime_ns). apply_and_exit() refuses anything not in here (or
+# not matching an explicitly supplied hash).
+_VERIFIED: dict[str, tuple[str, int, int]] = {}
+
+
+def _mark_verified(path: str, sha: str) -> None:
+    st = os.stat(path)
+    _VERIFIED[os.path.normcase(os.path.abspath(path))] = (sha.lower(), st.st_size,
+                                                          st.st_mtime_ns)
+
+
+def is_verified(path: str, sha256: str | None = None) -> bool:
+    """True if ``path`` is an installer whose SHA-256 has been checked — by
+    download() in this session (and unchanged since), or against ``sha256``."""
+    try:
+        st = os.stat(path)
+    except OSError:
+        return False
+    rec = _VERIFIED.get(os.path.normcase(os.path.abspath(path)))
+    want = (sha256 or "").strip().lower()
+    if (rec and rec[1] == st.st_size and rec[2] == st.st_mtime_ns
+            and (not want or rec[0] == want)):
+        return True
+    if _is_sha256(want):
+        try:
+            return _sha256_file(path) == want
+        except OSError:
+            return False
+    return False
+
+
+_NO_CHECKSUM_MSG = (
+    "The update's checksum file couldn't be retrieved, so its integrity can't be "
+    "verified and it won't be installed. Please try again later, or download it "
+    "from the Releases page.")
+
+
+def _require_sha256(info: UpdateInfo) -> str:
+    """The expected hash for ``info`` — re-fetching the sidecar if the update
+    check couldn't read it. Raises if there's no usable checksum: an installer is
+    never downloaded as "verified", or run, without one."""
+    sha = (info.sha256 or "").strip().lower()
+    if not _is_sha256(sha) and info.sha256_url:
+        sha = _fetch_sha256(info.sha256_url) or ""
+        if sha:
+            info.sha256 = sha
+    if not _is_sha256(sha):
+        raise RuntimeError(_NO_CHECKSUM_MSG)
+    return sha
+
+
+def _total_from_content_range(value: str | None) -> int | None:
+    """'bytes 0-99/1234' or 'bytes */1234' -> 1234 (None if unknown)."""
+    if value and "/" in value:
+        tail = value.rsplit("/", 1)[-1].strip()
+        if tail.isdigit():
+            return int(tail)
+    return None
+
+
 def download(info: UpdateInfo, dest_dir: str | None = None,
              progress=None, is_cancelled=None) -> str:
-    """Download the installer (resumable), verifying its SHA-256 if known.
+    """Download the installer (resumable) and verify its SHA-256.
 
-    The download survives a flaky/variable connection: it writes to a ``.part``
-    file and, on a stall, drop, or a sustained-slow window, reconnects with an
-    HTTP ``Range`` request to resume from where it left off (and to grab a faster
-    CDN edge). ``progress(done, total)`` and ``is_cancelled() -> bool`` are
-    optional. Returns the final file path; raises on cancellation or checksum
-    failure.
+    The checksum is mandatory: if it is unknown and can't be (re)fetched this
+    raises before downloading anything. The download survives a flaky/variable
+    connection: it writes to a ``.part`` file in ``dest_dir`` (default: the stable
+    updates_dir(), so a Retry resumes) and, on a stall, drop, or a sustained-slow
+    window, reconnects with an HTTP ``Range`` request to resume from where it left
+    off (and to grab a faster CDN edge). ``progress(done, total)`` and
+    ``is_cancelled() -> bool`` are optional. Returns the final, verified file
+    path; raises on cancellation, missing checksum or checksum failure.
     """
-    dest_dir = dest_dir or tempfile.mkdtemp(prefix="mico360_update_")
+    expected = _require_sha256(info)
+    dest_dir = dest_dir or updates_dir()
     os.makedirs(dest_dir, exist_ok=True)
     path = os.path.join(dest_dir, info.asset_name)
     part = path + ".part"
+    meta = part + ".sha256"      # which file the .part belongs to
+
+    # Already downloaded and intact (e.g. the installer didn't get to run)?
+    if os.path.exists(path):
+        try:
+            if _sha256_file(path) == expected:
+                _mark_verified(path, expected)
+                if progress:
+                    size = os.path.getsize(path)
+                    progress(size, size)
+                return path
+        except OSError:
+            pass
+        _safe_remove(path)
+    # Only resume a .part of the SAME file; one from another build is discarded.
+    if os.path.exists(part):
+        prev = _read_token(meta)
+        if prev and prev != expected:
+            _safe_remove(part)
+    try:
+        with open(meta, "w", encoding="ascii") as fh:
+            fh.write(expected)
+    except OSError:
+        pass
 
     total: int | None = None
     stuck = 0
@@ -338,18 +576,18 @@ def download(info: UpdateInfo, dest_dir: str | None = None,
         headers["Accept"] = "application/octet-stream"   # we want the raw asset
         if existing:
             headers["Range"] = f"bytes={existing}-"
+        eof = False           # this round's body ended cleanly (server closed it)
         try:
             req = urllib.request.Request(info.url, headers=headers)
             with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
                 ranged = getattr(resp, "status", 200) == 206
-                if total is None:
-                    crange = resp.headers.get("Content-Range") or ""
-                    if "/" in crange:
-                        total = int(crange.rsplit("/", 1)[-1])
-                    else:
-                        total = int(resp.headers.get("Content-Length") or 0) or None
                 if existing and not ranged:      # server ignored Range → restart
                     existing = 0
+                if total is None:
+                    total = _total_from_content_range(resp.headers.get("Content-Range"))
+                    if total is None:
+                        length = int(resp.headers.get("Content-Length") or 0)
+                        total = (existing + length) if length else None
                 done = existing
                 with open(part, "ab" if existing else "wb") as fh:
                     win_t = time.monotonic()
@@ -361,6 +599,7 @@ def download(info: UpdateInfo, dest_dir: str | None = None,
                             raise _Cancelled()
                         chunk = resp.read(_CHUNK)
                         if not chunk:
+                            eof = True
                             break
                         fh.write(chunk)
                         done += len(chunk)
@@ -385,13 +624,34 @@ def download(info: UpdateInfo, dest_dir: str | None = None,
                     if progress:                 # final position for this round
                         progress(done, total or 0)
         except _Cancelled:
-            _safe_remove(part)
+            # Keep the .part (and its marker) so Retry resumes; stale partials
+            # are swept by cleanup_downloads() after a later check.
             raise RuntimeError("Update cancelled.")
+        except urllib.error.HTTPError as exc:
+            eof = False
+            if exc.code == 416 and existing:
+                # Range not satisfiable: the .part is already complete (the app
+                # stopped before verifying it) — or it's longer than the file.
+                full = _total_from_content_range(
+                    exc.headers.get("Content-Range") if exc.headers else None)
+                if full and existing == full:
+                    total = full
+                    break
+                _safe_remove(part)               # bogus partial → start clean
+                continue
+            if exc.code in (404, 410):           # the asset isn't there — no retry
+                raise RuntimeError(
+                    "The update file wasn't found on the server. Please download "
+                    "it from the Releases page.")
         except Exception:                        # network blip → resume & retry
-            pass
+            eof = False
 
         new_size = os.path.getsize(part) if os.path.exists(part) else 0
         if total and new_size >= total:
+            break
+        if total is None and eof and new_size > 0:
+            # No Content-Length: the only end-of-file signal is the server
+            # closing the body cleanly. The checksum below still guards it.
             break
         if new_size <= existing:                 # made no progress this round
             stuck += 1
@@ -403,27 +663,33 @@ def download(info: UpdateInfo, dest_dir: str | None = None,
         else:
             stuck = 0
 
-    if info.sha256:
-        h = hashlib.sha256()
-        with open(part, "rb") as fh:
-            for block in iter(lambda: fh.read(1 << 20), b""):
-                h.update(block)
-        if h.hexdigest().lower() != info.sha256.lower():
-            _safe_remove(part)
-            raise RuntimeError("The downloaded update failed its integrity check "
-                               "and was discarded. Please try again later.")
+    if _sha256_file(part) != expected:
+        _safe_remove(part)
+        _safe_remove(meta)
+        raise RuntimeError("The downloaded update failed its integrity check "
+                           "and was discarded. Please try again later.")
     os.replace(part, path)
+    _safe_remove(meta)
+    _mark_verified(path, expected)
     return path
 
 
-def apply_and_exit(setup_path: str) -> None:
+def apply_and_exit(setup_path: str, sha256: str | None = None) -> None:
     """Start installing the downloaded update, then let the app quit.
 
+    Refuses (raises) unless ``setup_path`` passed its SHA-256 check — verified by
+    download() in this session, or against ``sha256`` — so an unverified
+    installer is never launched.
+
     * Windows — run the Inno Setup installer silently; it closes the running app,
-      upgrades in place, and relaunches. The user approves the standard UAC prompt.
+      upgrades in place, and relaunches it. The user approves the standard UAC
+      prompt.
     * macOS — open the downloaded ``.dmg`` so the user can drag the new app into
       Applications (the standard, signing-free update flow).
     """
+    if not is_verified(setup_path, sha256):
+        raise RuntimeError("The installer hasn't passed its checksum check, so it "
+                           "won't be started. Please download the update again.")
     if sys.platform == "darwin":
         subprocess.Popen(["open", setup_path], close_fds=True)
         return

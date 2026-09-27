@@ -15,6 +15,16 @@ from pathlib import Path
 # dropping a huge tree (or C:\ by accident) can't hang the UI or exhaust memory.
 MAX_FILES = 20000
 
+# System / temp clutter that lives inside folders but is never a real document:
+# Office lock files ("~$report.docx" — tiny, unreadable while Word has the file
+# open), Explorer/macOS metadata. Skipped silently when walking a folder.
+_JUNK_NAMES = {"desktop.ini", "thumbs.db", "ehthumbs.db", ".ds_store"}
+
+
+def _is_junk(name: str) -> bool:
+    low = name.lower()
+    return low in _JUNK_NAMES or name.startswith("~$") or name.startswith("._")
+
 
 class CollectStats:
     """What happened during a collect: how many files were unsupported, how many
@@ -91,9 +101,14 @@ def collect_files_detailed(paths, accept: set[str],
                                              followlinks=False):
                 dirs.sort()
                 for name in sorted(files):
+                    if _is_junk(name):
+                        continue
                     if not add(Path(root) / name):
                         return result, stats
         elif is_file:
+            if p.name.startswith("~$"):       # an Office lock file, not the doc
+                stats.unsupported += 1
+                continue
             if not add(p):
                 return result, stats
         else:

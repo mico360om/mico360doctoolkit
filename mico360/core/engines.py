@@ -117,23 +117,29 @@ def _extract_msi(msi: Path, report=None) -> None:
     extract = Path(tempfile.mkdtemp(prefix="mico360_lo_x"))
     if report:
         report("Installing the conversion engine (one-time)…")
-    p = subprocess.run(
-        ["msiexec.exe", "/a", str(msi), "/qn", f"TARGETDIR={extract}"],
-        capture_output=True)
-    if p.returncode != 0:
-        raise RuntimeError(f"engine install failed (msiexec {p.returncode})")
-    found = next((f for f in extract.rglob("soffice.exe")), None)
-    if not found:
-        raise RuntimeError("engine files were not found after install")
-    lo_root = found.parent.parent          # the dir that contains program/ + share/
-    target = engine_root()
-    if target.exists():
-        shutil.rmtree(target, ignore_errors=True)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(lo_root), str(target))
-    shutil.rmtree(extract, ignore_errors=True)
-    if not engine_soffice().exists():
-        raise RuntimeError("engine staging failed")
+    try:        # the ~1 GB extraction folder is removed on success AND failure
+        try:
+            p = subprocess.run(
+                ["msiexec.exe", "/a", str(msi), "/qn", f"TARGETDIR={extract}"],
+                capture_output=True, timeout=1800)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("engine install timed out")
+        if p.returncode != 0:
+            raise RuntimeError(f"engine install failed (msiexec {p.returncode})")
+        found = next((f for f in extract.rglob("soffice.exe")), None)
+        if not found:
+            raise RuntimeError("engine files were not found after install")
+        lo_root = found.parent.parent      # the dir that contains program/ + share/
+        target = engine_root()
+        if target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(lo_root), str(target))
+        if not engine_soffice().exists():
+            shutil.rmtree(target, ignore_errors=True)   # no half-staged engine
+            raise RuntimeError("engine staging failed")
+    finally:
+        shutil.rmtree(extract, ignore_errors=True)
 
 
 def download_engine(report=None, is_cancelled=None) -> str:
@@ -150,11 +156,15 @@ def download_engine(report=None, is_cancelled=None) -> str:
                    "(~340 MB, one time)…")
         if not (tmp.exists() and tmp.stat().st_size > 200 * 1024 * 1024):
             _download(LO_MSI_URL, tmp, report, is_cancelled)
-        _extract_msi(tmp, report)
         try:
-            tmp.unlink()
-        except OSError:
-            pass
+            _extract_msi(tmp, report)
+        finally:
+            # Always drop the cached MSI: after success it's dead weight, and a
+            # corrupt/truncated one would otherwise be reused (and fail) forever.
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
         if report:
             report("Conversion engine ready ✓")
         return str(engine_soffice())

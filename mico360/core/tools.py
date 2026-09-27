@@ -30,6 +30,10 @@ class Option:
     suffix: str = ""
     hint: str = ""
     visible_when: tuple | None = None  # (other_key, value) -> show only when equal
+    # False for per-document values (a title, an author, a date): they're not
+    # remembered as next session's defaults, where they'd silently be written
+    # into unrelated files.
+    persist: bool = True
 
 
 @dataclass
@@ -237,17 +241,18 @@ TOOLS: list[Tool] = [
                 ("", "Off — edit the fields below"),
                 ("scrub", "Scrub identifying info (keep Title / Subject / Keywords)"),
                 ("all", "Remove ALL metadata"),
-            ], hint="Scrub clears Author, Creator, Producer, Company, Manager and "
-                    "Comments and resets the dates; Remove all also strips XMP. "
-                    "Ideal before sharing a file."),
+            ], hint="Scrub keeps only Title, Subject and Keywords: it removes every "
+                    "other property, comment author names, embedded files and XMP, "
+                    "resets the dates and gives the file a new identifier. Remove "
+                    "all also clears the Title/Subject/Keywords and language."),
             # Each editable field is blank-by-default and only changes what you fill
             # in; everything else is preserved. They hide when a privacy preset is on.
             Option("title", "Title", "text", "", hint="Leave blank to keep existing.",
-                   visible_when=("privacy", "")),
-            Option("author", "Author", "text", "", visible_when=("privacy", "")),
-            Option("subject", "Subject", "text", "", visible_when=("privacy", "")),
+                   visible_when=("privacy", ""), persist=False),
+            Option("author", "Author", "text", "", visible_when=("privacy", ""), persist=False),
+            Option("subject", "Subject", "text", "", visible_when=("privacy", ""), persist=False),
             Option("keywords", "Keywords", "text", "", hint="comma,separated",
-                   visible_when=("privacy", "")),
+                   visible_when=("privacy", ""), persist=False),
             Option("creator", "Creator (authoring app)", "text", "",
                    hint="The program the document was originally created in.",
                    visible_when=("privacy", "")),
@@ -256,19 +261,19 @@ TOOLS: list[Tool] = [
                    visible_when=("privacy", "")),
             Option("creation_date", "Creation date", "text", "",
                    hint="e.g. 2026-06-07 14:30, or 'now' — blank keeps existing.",
-                   visible_when=("privacy", "")),
+                   visible_when=("privacy", ""), persist=False),
             Option("mod_date", "Modification date", "text", "",
-                   hint="e.g. 2026-06-07, or 'now'.", visible_when=("privacy", "")),
+                   hint="e.g. 2026-06-07, or 'now'.", visible_when=("privacy", ""), persist=False),
             Option("company", "Company", "text", "",
                    hint="Custom property (shown in Acrobat's Custom tab).",
                    visible_when=("privacy", "")),
             Option("manager", "Manager", "text", "", visible_when=("privacy", "")),
-            Option("category", "Category", "text", "", visible_when=("privacy", "")),
-            Option("comments", "Comments", "text", "", visible_when=("privacy", "")),
+            Option("category", "Category", "text", "", visible_when=("privacy", ""), persist=False),
+            Option("comments", "Comments", "text", "", visible_when=("privacy", ""), persist=False),
             Option("custom", "Custom properties", "textarea", "",
                    hint="Your own fields, one per line as  Key = Value  "
                         "(e.g. Department = Finance). Shown in Acrobat's Custom tab.",
-                   visible_when=("privacy", "")),
+                   visible_when=("privacy", ""), persist=False),
             Option("copyright", "Copyright", "text", "",
                    hint="Stored in XMP rights metadata; marks the file as copyrighted.",
                    visible_when=("privacy", "")),
@@ -298,6 +303,19 @@ TOOLS: list[Tool] = [
                 ("balanced", "Balanced — 300 dpi (recommended)"),
                 ("high", "High — 400 dpi (best on small text)"),
             ], hint="Higher quality reads small or faint text better, but is slower."),
+            # Optional AI polish. Recognition always runs locally; when this is on
+            # (and AI is set up in Settings → AI provider) an AI additionally fixes obvious
+            # OCR errors and fills in the document's title/subject from the text.
+            # Defaults on when AI is configured, off/disabled otherwise (the UI
+            # sets this) — so OCR still works fully offline.
+            Option("ocr_use_ai", "Use AI to clean up text & fill title/subject",
+                   "bool", False,
+                   hint="Sends the recognised text of EVERY page to your AI "
+                        "provider, which fixes obvious OCR mistakes (small fixes "
+                        "only — numbers are never changed) and fills in an empty "
+                        "title/subject. Needs AI set up in Settings → AI provider. "
+                        "Untick to keep everything on your PC; recognition itself "
+                        "always stays local."),
         ],
     ),
     Tool(
@@ -471,9 +489,9 @@ TOOLS: list[Tool] = [
         options=[
             Option("date_created", "Date Created", "text", "",
                    hint="e.g. 2026-06-07 or 2026-06-07 14:30 — leave blank to keep. "
-                        "(Windows)"),
+                        "(Windows)", persist=False),
             Option("date_modified", "Date Modified", "text", "",
-                   hint="e.g. 2026-06-07 14:30, or 'now' — leave blank to keep."),
+                   hint="e.g. 2026-06-07 14:30, or 'now' — leave blank to keep.", persist=False),
             Option("owner", "Owner", "text", "",
                    hint=r"Windows account, e.g. PC\\Name — needs admin; blank to keep."),
         ],

@@ -26,7 +26,27 @@ jobs:
     env:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
+      # On a manual run for a tag, build THAT tag's source — not the default
+      # branch — so the .dmg attached to the release matches its version.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Verify the release tag matches __version__
+        env:
+          TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: |
+          VER=$(python3 -c "import re;print(re.search(r'__version__\s*=\s*\"([^\"]+)\"', open('mico360/__init__.py').read()).group(1))")
+          echo "Source version: $VER"
+          if [ -n "$TAG" ]; then
+            if [ "$TAG" != "v$VER" ]; then
+              echo "::error::Tag '$TAG' does not match v$VER from mico360/__init__.py"
+              exit 1
+            fi
+            echo "Tag $TAG matches v$VER"
+          else
+            echo "No release tag given - artifact-only build."
+          fi
 
       - uses: actions/setup-python@v5
         with:

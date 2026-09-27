@@ -7,8 +7,10 @@
         powershell -ExecutionPolicy Bypass -File build\publish.ps1
 
     It authenticates the GitHub CLI in your browser if needed, then creates the
-    release tagged vX.Y.Z and uploads the Setup .exe, its .sha256 sidecar, and
-    the portable one-file .exe.
+    release tagged vX.Y.Z and uploads the Setup .exe, its .sha256 sidecar, the
+    stable MICO360-DocToolkit-Setup-Latest.exe + its .sha256 (used by the README
+    direct-download link and the updater's API-free fallback), and the portable
+    one-file .exe.
 #>
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
@@ -23,6 +25,7 @@ if (-not (Test-Path $Gh)) {
 
 # Version from mico360/__init__.py
 $verLine = Select-String -Path (Join-Path $Root "mico360\__init__.py") -Pattern '__version__\s*=\s*"([^"]+)"' | Select-Object -First 1
+if (-not $verLine) { throw "Could not find __version__ in mico360\__init__.py" }
 $Version = $verLine.Matches[0].Groups[1].Value
 $Tag = "v$Version"
 
@@ -31,10 +34,18 @@ $Sidecar   = "$Installer.sha256"
 $Onefile   = Join-Path $Root "dist\onefile\MICO360DocToolkit.exe"
 $Notes     = Join-Path $Root "build\RELEASE_NOTES.md"
 if (-not (Test-Path $Installer)) { throw "Installer not found: $Installer. Run build\build.ps1 first." }
-if (-not (Test-Path $Sidecar)) {
-    (Get-FileHash -Algorithm SHA256 $Installer).Hash.ToLower() + "  " + (Split-Path -Leaf $Installer) |
-        Out-File -FilePath $Sidecar -Encoding ascii -NoNewline
-}
+$Hash = (Get-FileHash -Algorithm SHA256 $Installer).Hash.ToLower()
+# Always (re)write the sidecar from the installer on disk so it can't be stale.
+"$Hash  $(Split-Path -Leaf $Installer)" | Out-File -FilePath $Sidecar -Encoding ascii -NoNewline
+
+# Stable, version-less copy (+ sidecar), re-derived from THIS version's installer.
+$LatestName    = "MICO360-DocToolkit-Setup-Latest.exe"
+$Latest        = Join-Path (Split-Path -Parent $Installer) $LatestName
+$LatestSidecar = "$Latest.sha256"
+Copy-Item -LiteralPath $Installer -Destination $Latest -Force
+$LatestHash = (Get-FileHash -Algorithm SHA256 $Latest).Hash.ToLower()
+if ($LatestHash -ne $Hash) { throw "Setup-Latest.exe does not match the $Version installer" }
+"$LatestHash  $LatestName" | Out-File -FilePath $LatestSidecar -Encoding ascii -NoNewline
 
 # Authenticate if needed (opens your browser).
 & $Gh auth status 2>$null
@@ -44,7 +55,7 @@ if ($LASTEXITCODE -ne 0) {
     if ($LASTEXITCODE -ne 0) { throw "gh auth login failed/cancelled." }
 }
 
-$assets = @($Installer, $Sidecar)
+$assets = @($Installer, $Sidecar, $Latest, $LatestSidecar)
 if (Test-Path $Onefile) { $assets += $Onefile }
 
 & $Gh release view $Tag *> $null
@@ -58,5 +69,5 @@ if ($LASTEXITCODE -ne 0) {
 }
 if ($LASTEXITCODE -ne 0) { throw "gh release failed (exit $LASTEXITCODE)" }
 
-Write-Host "Published $Tag:" -ForegroundColor Green
+Write-Host "Published ${Tag}:" -ForegroundColor Green
 & $Gh release view $Tag --web

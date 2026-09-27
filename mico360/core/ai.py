@@ -19,6 +19,7 @@ import json
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
@@ -50,6 +51,52 @@ SOURCE_CUSTOM = "custom"
 
 class AiError(Exception):
     """A user-facing AI failure — the message is safe to show as-is."""
+
+
+def sanitize_key(key: str) -> str:
+    """An API key as it may be sent: every whitespace and control character
+    removed. A pasted key with an embedded line break otherwise made
+    http.client raise an error whose text contained the full key — which then
+    reached the UI, the log file and crash reports."""
+    return "".join(ch for ch in str(key or "")
+                   if ch.isprintable() and not ch.isspace())
+
+
+def _origin(url: str) -> str:
+    """scheme://host:port of a URL (lower-case), '' if it has none."""
+    try:
+        u = urllib.parse.urlsplit(url or "")
+        if not u.scheme or not u.hostname:
+            return ""
+        port = u.port or (443 if u.scheme == "https" else 80)
+        return f"{u.scheme.lower()}://{u.hostname.lower()}:{port}"
+    except ValueError:
+        return ""
+
+
+class _SafeRedirect(urllib.request.HTTPRedirectHandler):
+    """Follow redirects without leaking the API key: the Authorization header
+    is dropped when a redirect leaves the original scheme/host/port, and an
+    HTTPS → HTTP downgrade is refused outright."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        old, new = urllib.parse.urlsplit(req.full_url), urllib.parse.urlsplit(newurl)
+        if old.scheme == "https" and new.scheme != "https":
+            raise urllib.error.HTTPError(
+                req.full_url, code, "Refusing to follow an HTTPS → HTTP redirect",
+                headers, fp)
+        new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new_req is not None and _origin(req.full_url) != _origin(newurl):
+            for k in list(new_req.headers):
+                if k.lower() == "authorization":
+                    del new_req.headers[k]
+            for k in list(new_req.unredirected_hdrs):
+                if k.lower() == "authorization":
+                    del new_req.unredirected_hdrs[k]
+        return new_req
+
+
+_opener = urllib.request.build_opener(_SafeRedirect)
 
 
 # =====================================================================
@@ -177,21 +224,42 @@ def normalize_base_url(url: str) -> str:
     The server repairs some of this, but fixing it here means *Test connection*
     reports the truth about what will actually be called.
     """
+    import re
     u = (url or "").strip()
     if not u:
         return ""
     if "://" not in u:
-        u = "http://" + u
-    u = u.rstrip("/")
+        # A bare host: HTTPS unless it's clearly a local/LAN server (Ollama,
+        # LM Studio…) or the MICO360 platform host, which speak plain HTTP.
+        host = u.split("/")[0].split(":")[0].lower()
+        local = (host in ("localhost", urllib.parse.urlsplit(SYSTEM_BASE_URL).hostname)
+                 or host.endswith(".local") or host.startswith("127.")
+                 or host.startswith("10.") or host.startswith("192.168.")
+                 or re.match(r"^172\.(1[6-9]|2\d|3[01])\.", host) is not None)
+        u = ("http://" if local else "https://") + u
+    parts = urllib.parse.urlsplit(u)
+    path = parts.path.rstrip("/")
     # Strip an accidentally-pasted endpoint path.
     for tail in ("/chat/completions", "/models"):
-        if u.endswith(tail):
-            u = u[: -len(tail)]
-    u = u.rstrip("/")
-    # Ensure the OpenAI-compatible prefix exactly once.
-    if not (u.endswith("/v1") or u.endswith("/openai/v1")):
-        u = u + "/v1"
-    return u
+        if path.endswith(tail):
+            path = path[: -len(tail)]
+    path = path.rstrip("/")
+    # Add the OpenAI-compatible /v1 only when the URL has no API version of its
+    # own — Gemini (/v1beta/openai), Azure (/openai/deployments/…) and other
+    # providers are left exactly as given.
+    if not (re.search(r"/v\d+[a-z0-9]*(/|$)", path) or "/openai" in path
+            or "/deployments/" in path):
+        path += "/v1"
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, path,
+                                    parts.query, ""))
+
+
+def _join_url(base: str, path: str) -> str:
+    """base + endpoint path, keeping a query string (e.g. Azure's
+    ?api-version=…) at the end where it belongs."""
+    parts = urllib.parse.urlsplit(base)
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc,
+                                    parts.path.rstrip("/") + path, parts.query, ""))
 
 
 # =====================================================================
@@ -224,10 +292,10 @@ def _request(cfg: AiConfig, path: str, payload=None, timeout=DEFAULT_TIMEOUT,
     base = cfg.effective_base_url
     if not base:
         raise AiError("No AI API URL is configured.")
-    url = base + path
+    url = _join_url(base, path)
     data = None
     headers = {
-        "Authorization": f"Bearer {cfg.api_key}",
+        "Authorization": f"Bearer {sanitize_key(cfg.api_key)}",
         "Accept": "application/json",
         "User-Agent": "MICO360-Doc-Toolkit",
     }
@@ -241,7 +309,7 @@ def _request(cfg: AiConfig, path: str, payload=None, timeout=DEFAULT_TIMEOUT,
         if cancel is not None and cancel.is_set():
             raise AiError("Cancelled.")
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            with _opener.open(req, timeout=timeout) as resp:  # noqa: S310
                 body = resp.read().decode("utf-8", errors="replace")
             return json.loads(body) if body.strip() else {}
         except urllib.error.HTTPError as exc:
@@ -286,6 +354,11 @@ def _request(cfg: AiConfig, path: str, payload=None, timeout=DEFAULT_TIMEOUT,
             raise AiError(f"The connection to the AI server at {base} was "
                           f"interrupted ({exc}). Check your connection and try "
                           "again.")
+        except (ValueError, UnicodeError):
+            # e.g. "Invalid header value b'Bearer <key>'" — never echo the text,
+            # it can contain the key.
+            raise AiError("The API key or URL contains characters that can't be "
+                          "sent. Re-paste the key in Settings → AI provider.")
 
 
 def _http_message(exc, url: str) -> str:
@@ -348,7 +421,8 @@ def test_connection(cfg: AiConfig) -> tuple[bool, str]:
     except AiError as exc:
         return False, str(exc)
     except Exception as exc:      # noqa: BLE001
-        return False, f"Unexpected error: {exc}"
+        # Only the type: exception text may include request headers (the key).
+        return False, f"Unexpected error ({type(exc).__name__})."
     if not models:
         return True, ("Connected, but the server offers no models to this key. "
                       "Ask an administrator to enable one.")
@@ -384,16 +458,36 @@ def chat(cfg: AiConfig, messages: list[dict], timeout: int = DEFAULT_TIMEOUT,
 # =====================================================================
 # Settings bridge
 # =====================================================================
+def stored_key_for(base_url: str) -> str:
+    """The saved API key, but only for the server it was saved for. Typing a
+    new custom URL must not send the saved key (e.g. the System-AI key) to that
+    host. A key saved before this check existed is bound on first use to the
+    server it was configured with."""
+    from mico360.config import settings
+    key = sanitize_key(unseal_key(settings.ai_api_key_sealed))
+    if not key:
+        return ""
+    bound = settings.ai_key_origin
+    want = _origin(base_url)
+    if not bound:
+        saved = AiConfig(source=settings.ai_source, base_url=settings.ai_base_url)
+        bound = _origin(saved.effective_base_url)
+        if bound:
+            settings.ai_key_origin = bound
+    return key if (want and want == bound) else ""
+
+
 def load_config() -> AiConfig:
     """Build an AiConfig from saved settings (decrypting the key)."""
     from mico360.config import settings
-    return AiConfig(
+    cfg = AiConfig(
         enabled=settings.ai_enabled,
         source=settings.ai_source,
         base_url=settings.ai_base_url,
-        api_key=unseal_key(settings.ai_api_key_sealed),
         model=settings.ai_model,
     )
+    cfg.api_key = stored_key_for(cfg.effective_base_url)
+    return cfg
 
 
 def save_config(cfg: AiConfig, api_key: str | None = None) -> None:
@@ -404,4 +498,5 @@ def save_config(cfg: AiConfig, api_key: str | None = None) -> None:
     settings.ai_base_url = cfg.base_url
     settings.ai_model = cfg.model
     if api_key is not None:
-        settings.ai_api_key_sealed = seal_key(api_key)
+        settings.ai_api_key_sealed = seal_key(sanitize_key(api_key))
+        settings.ai_key_origin = _origin(cfg.effective_base_url)

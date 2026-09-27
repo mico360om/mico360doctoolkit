@@ -6,7 +6,7 @@
 ; ..\vendor and installed alongside the app. See vendor\README.md.
 
 #define AppName "MICO360 Doc Toolkit"
-#define AppVersion "7.3.1"
+#define AppVersion "7.4.0"
 #define AppPublisher "MICO360"
 #define AppExeName "MICO360DocToolkit.exe"
 
@@ -47,6 +47,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional icons:"
+; Optional, and remembered for upgrades (Inno re-uses the previous choice).
+Name: "shellmenu"; Description: "Add ""MICO360 Toolkit"" to the File Explorer right-click menu"; GroupDescription: "Integration:"
+
+[InstallDelete]
+; Upgrades: wipe the previous PyInstaller payload first so libraries dropped or
+; renamed in this version can't linger beside the new ones and get loaded.
+; Safe — user data/settings live in %LOCALAPPDATA% / %APPDATA%, never in {app}.
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Files]
 ; Main application (PyInstaller onedir output). This ALREADY contains the
@@ -64,8 +72,19 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 [Run]
 ; Register the "MICO360 Toolkit" right-click menu for supported file types
 ; (per-user, HKCU — no admin needed). Runs hidden and doesn't block the wizard.
-Filename: "{app}\{#AppExeName}"; Parameters: "--register-shell"; Flags: runhidden nowait; StatusMsg: "Adding the right-click menu…"
+; runasoriginaluser: Setup runs elevated, possibly as a DIFFERENT admin account
+; (over-the-shoulder UAC); the menu must land in the logged-in user's HKCU.
+; Interactive install with the task ticked: an explicit choice (--force).
+; Silent auto-update: re-register, but the app skips it if the user turned the
+; menu off in Settings since. Task unticked: remove it and remember that.
+Filename: "{app}\{#AppExeName}"; Parameters: "--register-shell --force"; Flags: runhidden nowait runasoriginaluser; Tasks: shellmenu; Check: not WizardSilent; StatusMsg: "Adding the right-click menu…"
+Filename: "{app}\{#AppExeName}"; Parameters: "--register-shell"; Flags: runhidden nowait runasoriginaluser; Tasks: shellmenu; Check: WizardSilent
+Filename: "{app}\{#AppExeName}"; Parameters: "--unregister-shell --opt-out"; Flags: runhidden nowait runasoriginaluser; Tasks: not shellmenu
+; Interactive install: offer to launch on the Finished page.
 Filename: "{app}\{#AppExeName}"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
+; Silent install (the in-app auto-updater runs Setup with /SILENT): the wizard
+; has no Finished page, so reopen the app ourselves, as the logged-in user.
+Filename: "{app}\{#AppExeName}"; Flags: nowait runasoriginaluser; Check: WizardSilent
 
 [UninstallRun]
 ; Remove the right-click menu before the app's files are deleted.

@@ -197,6 +197,9 @@ class ToolPage(QWidget):
         self.btn_fav.style().polish(self.btn_fav)
         tip(self.btn_fav, "Unpin this tool from your favourites." if on
             else "Pin this tool to your favourites — it appears on the Home page.")
+        self.btn_fav.setAccessibleName("Favourite: pinned" if on else "Favourite: not pinned")
+        self.btn_fav.setAccessibleDescription(
+            "Press to unpin from favourites." if on else "Press to pin to favourites.")
 
     def _toggle_favorite(self) -> None:
         settings.toggle_favorite(self.tool.id)
@@ -253,6 +256,9 @@ class ToolPage(QWidget):
         self.file_list.customContextMenuRequested.connect(self._file_menu)
         from PySide6.QtGui import QKeySequence, QShortcut
         del_sc = QShortcut(QKeySequence(Qt.Key_Delete), self.file_list)
+        # Only while the queue itself has focus — Delete in an option field
+        # (e.g. a text box) must edit that field, not drop queue rows.
+        del_sc.setContext(Qt.WidgetWithChildrenShortcut)
         del_sc.activated.connect(self._remove_selected)
         self.file_list.itemSelectionChanged.connect(self._update_preview)
         card.add(self.file_list)
@@ -282,7 +288,7 @@ class ToolPage(QWidget):
             "The files themselves are not touched.")
         self.btn_remove_sel.clicked.connect(self._remove_selected)
 
-        self.btn_remove_fin = QPushButton("Remove done")
+        self.btn_remove_fin = QPushButton("Remove finished")
         self.btn_remove_fin.setObjectName("Subtle")
         self.btn_remove_fin.setCursor(Qt.PointingHandCursor)
         tip(self.btn_remove_fin,
@@ -312,6 +318,7 @@ class ToolPage(QWidget):
         # The visual page organizer (Organize tool) needs to know which file to
         # render — the selected row, else the first in the queue.
         self.options_widget.set_file_getter(self._organizer_source)
+        self._init_ai_option()
         card.add(self.options_widget)
 
         # Optional AI assistance (Edit Metadata): suggestions are shown for
@@ -360,6 +367,8 @@ class ToolPage(QWidget):
             "number to the name. Careful: the replaced file is not recoverable.")
         self.chk_overwrite.setChecked(settings.overwrite)
         card.add(self.chk_overwrite)
+        self._synced_same = self.chk_same.isChecked()
+        self._synced_overwrite = self.chk_overwrite.isChecked()
 
         self.note_lbl = QLabel("Your original files are always kept untouched.")
         self.note_lbl.setObjectName("Muted")
@@ -424,8 +433,8 @@ class ToolPage(QWidget):
         self.btn_cancel.setObjectName("Ghost")
         self.btn_cancel.setCursor(Qt.PointingHandCursor)
         tip(self.btn_cancel,
-            "Stop the run (Esc). Files already being processed finish first; "
-            "completed results are kept.")
+            "Stop the run (Esc). Files in progress stop at the next safe point "
+            "and their partial output is removed; finished results are kept.")
         self.btn_cancel.setEnabled(False)
         self.btn_cancel.clicked.connect(self._cancel)
         actions.addWidget(self.btn_start, 1)
@@ -433,6 +442,26 @@ class ToolPage(QWidget):
         actions.addWidget(self.btn_cancel)
         card.add_layout(actions)
         return card
+
+    def showEvent(self, event) -> None:          # noqa: N802 (Qt API)
+        super().showEvent(event)
+        self._resync_from_settings()
+
+    def _resync_from_settings(self) -> None:
+        """Pick up changes made elsewhere (Settings page, another tool page)
+        since this page was built: output folder, Overwrite, Save-beside-
+        originals and whether AI is set up. Never while a run is in progress."""
+        if self.controller is not None:
+            return
+        if settings.output_dir and settings.output_dir != self.out_edit.text():
+            self._set_output_path(settings.output_dir)
+        for chk, value, attr in (
+                (self.chk_same, settings.same_as_source, "_synced_same"),
+                (self.chk_overwrite, settings.overwrite, "_synced_overwrite")):
+            if chk.isChecked() != bool(value):
+                chk.setChecked(bool(value))
+            setattr(self, attr, bool(value))
+        self._init_ai_option()
 
     def _sync_output_mode(self) -> None:
         """Reflect the 'save next to source' choice in the output controls."""
@@ -467,6 +496,34 @@ class ToolPage(QWidget):
             return self.items[row]
         return None
 
+    def _init_ai_option(self) -> None:
+        """Gate the OCR "Use AI" checkbox on AI being set up: default it ON when
+        an AI endpoint is configured (and the user hasn't chosen otherwise),
+        else leave it OFF and disabled with a hint pointing to Settings."""
+        ctrl = self.options_widget._controls.get("ocr_use_ai")
+        if not isinstance(ctrl, QCheckBox):
+            return
+        try:
+            from mico360.core import ai as _ai
+            usable, _why = _ai.load_config().is_usable()
+        except Exception:                     # noqa: BLE001
+            usable = False
+        if not usable:
+            ctrl.setChecked(False)
+            ctrl.setEnabled(False)
+            tip(ctrl, "Set up AI in Settings → AI provider to enable this. OCR still works "
+                      "without it — recognition always runs on your PC.")
+            return
+        was_disabled = not ctrl.isEnabled()
+        ctrl.setEnabled(True)
+        tip(ctrl, "Send the recognised text (every page) to your configured AI "
+                  "to fix OCR mistakes and suggest a title/subject. Recognition "
+                  "itself always runs on your PC.")
+        if "ocr_use_ai" not in settings.tool_options(self.tool.id) and (
+                was_disabled or not getattr(self, "_ai_default_applied", False)):
+            ctrl.setChecked(True)             # default on once AI is configured
+        self._ai_default_applied = True
+
     def _organizer_source(self):
         """Path the visual page organizer should open: the selected row, else
         the first queued file (None if the queue is empty)."""
@@ -489,9 +546,12 @@ class ToolPage(QWidget):
         pix = self._thumbnail(it.path)
         if pix is not None and not pix.isNull():
             tgt = self.preview.size()
-            self.preview.setPixmap(pix.scaled(
-                max(40, tgt.width() - 10), max(40, tgt.height() - 10),
-                Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            dpr = max(1.0, self.devicePixelRatioF())
+            scaled = pix.scaled(
+                int(max(40, tgt.width() - 10) * dpr), int(max(40, tgt.height() - 10) * dpr),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            scaled.setDevicePixelRatio(dpr)   # crisp at 150–250 % scaling
+            self.preview.setPixmap(scaled)
             more = f"  (+{len(sel) - 1} more)" if len(sel) > 1 else ""
             self.preview.setToolTip(it.path.name + more)
         else:
@@ -511,7 +571,7 @@ class ToolPage(QWidget):
             return self._thumb_cache[key]
         if len(self._thumb_cache) > 64:
             self._thumb_cache.clear()
-        box = (360, 240)
+        box = (720, 480)                       # enough for high-DPI screens
         pix = None
         ext = path.suffix.lower()
         try:
@@ -677,6 +737,12 @@ class ToolPage(QWidget):
         row.setData(ROLE_STATE, it.state)
         row.setData(ROLE_SUB, self._sub_text(it))
         row.setData(Qt.DisplayRole, it.path.name)   # accessibility / fallback
+        # State and errors are painted by the delegate; expose them to screen
+        # readers too.
+        state = {"pending": "queued", "running": "working", "done": "done",
+                 "failed": "failed"}.get(it.state, it.state)
+        row.setData(Qt.AccessibleTextRole, f"{it.path.name}, {state}")
+        row.setData(Qt.AccessibleDescriptionRole, self._sub_text(it))
         row.setToolTip(str(it.path) + (f"\n{it.msg}" if it.msg else ""))
 
     def _refresh_list(self) -> None:
@@ -695,6 +761,8 @@ class ToolPage(QWidget):
                 row.setSelected(True)
         self.file_list.blockSignals(False)
         self._update_counts()
+        self._update_preview()        # never keep previewing a removed file
+        self.options_widget.prune_page_plans(it.path for it in self.items)
 
     def _update_item_rows(self, items) -> None:
         """Refresh just the given rows in place — no full rebuild, no stat() —
@@ -760,7 +828,27 @@ class ToolPage(QWidget):
         snapshot = list(before_items)
 
         def _undo():
-            self.items = list(snapshot)
+            # Put back only the rows this action removed, each after its
+            # nearest surviving predecessor — rows added (or run) since stay.
+            present = {it.id for it in self.items}
+            items = list(self.items)
+            prev_id = None
+            restored = 0
+            for it in snapshot:
+                if it.id in present:
+                    prev_id = it.id
+                    continue
+                if it.state == "running":
+                    it.state = "pending"
+                pos = 0
+                if prev_id is not None:
+                    pos = next((k + 1 for k, x in enumerate(items)
+                                if x.id == prev_id), len(items))
+                items.insert(pos, it)
+                present.add(it.id)
+                prev_id = it.id
+                restored += 1
+            self.items = items
             self._refresh_list()
 
         plural = "s" if removed != 1 else ""
@@ -768,8 +856,11 @@ class ToolPage(QWidget):
                               "Undo", _undo)
 
     def _remove_selected(self) -> None:
-        sel = {it.id for it in self._selected_items()}
+        sel = {it.id for it in self._selected_items() if it.state != "running"}
         if not sel:
+            if self._selected_items():
+                self._log("Rows that are being processed can't be removed — "
+                          "cancel the run first.")
             return
         before = list(self.items)
         self.items = [it for it in self.items if it.id not in sel]
@@ -822,8 +913,10 @@ class ToolPage(QWidget):
         if not failed:
             self._update_retry_button()
             return
+        if self.controller is not None:
+            return
         self._retry(failed)          # reset the failed rows to pending…
-        self.start()                 # …and process them
+        self._run(failed)            # …and process just them (not other pending)
 
     def _update_retry_button(self) -> None:
         if not hasattr(self, "retry_row"):
@@ -1034,14 +1127,23 @@ class ToolPage(QWidget):
     # -----------------------------------------------------------------
     # Run
     # -----------------------------------------------------------------
-    def start(self) -> None:
+    def start(self, *_args) -> None:
+        # Ctrl+Enter reaches here even while the Start button is disabled; a
+        # second concurrent batch would process every file twice.
+        if self.controller is not None:
+            return
         if not self.items:
             QMessageBox.information(self, "No files", "Add one or more files first.")
             return
 
-        # Only process rows that are not already done; "done" rows are skipped
-        # until the user retries (or removes & re-adds them).
-        todo = [it for it in self.items if it.state != "done"]
+        if self.tool.mode == AGGREGATE:
+            # One output from the whole queue (Merge, Images → PDF): every row
+            # belongs in it, including rows done in an earlier run.
+            todo = list(self.items)
+        else:
+            # Only process rows that are not already done; "done" rows are
+            # skipped until the user retries (or removes & re-adds them).
+            todo = [it for it in self.items if it.state != "done"]
         if not todo:
             QMessageBox.information(
                 self, "Already done",
@@ -1052,16 +1154,30 @@ class ToolPage(QWidget):
             QMessageBox.information(self, "Need more files",
                                     "Select at least two PDFs to merge.")
             return
+        self._run(todo)
 
-        skipped_done = len(self.items) - len(todo)
+    def _run(self, todo: list) -> None:
+        """Submit exactly *todo* (QueueItems) as one batch."""
+        if self.controller is not None or not todo:
+            return
+        if self.tool.mode == AGGREGATE:
+            todo = list(self.items)   # an aggregate output always uses the queue
+        skipped_done = sum(1 for it in self.items
+                           if it.state == "done" and it not in todo)
         options = self.options_widget.values()
         self.options_widget.save()           # remember these for next time
         options["overwrite"] = self.chk_overwrite.isChecked()
         same_as_source = self.chk_same.isChecked()
         out_dir = Path(self.out_edit.text())
 
-        settings.same_as_source = same_as_source
-        settings.overwrite = self.chk_overwrite.isChecked()
+        # Write back only what the user changed on this page (so a stale page
+        # can't flip the global Overwrite setting back on).
+        if same_as_source != self._synced_same:
+            settings.same_as_source = same_as_source
+            self._synced_same = same_as_source
+        if self.chk_overwrite.isChecked() != self._synced_overwrite:
+            settings.overwrite = self.chk_overwrite.isChecked()
+            self._synced_overwrite = self.chk_overwrite.isChecked()
 
         for it in todo:                      # mark queued rows as running
             it.state, it.msg = "running", ""
@@ -1071,6 +1187,11 @@ class ToolPage(QWidget):
         self._set_running(True)
         self.progress.setMaximum(0)  # busy until 'started' sets total
         self.log_view.clear()
+        if self.tool.id == "pdf_metadata" and len(todo) > 1 and not options.get("privacy"):
+            same = [k for k in ("title", "author", "subject") if options.get(k)]
+            if same:
+                self._log(f"Note: the same {', '.join(same)} will be written into "
+                          f"all {len(todo)} files.")
         msg = f"Starting {self.tool.name} on {len(todo)} file(s)…"
         if skipped_done:
             msg += f"  ({skipped_done} already done, skipped)"
@@ -1089,7 +1210,7 @@ class ToolPage(QWidget):
     def _cancel(self) -> None:
         if self.controller:
             self.controller.cancel()
-            self._log("Cancelling… (in-flight files will finish)")
+            self._log("Cancelling… files in progress stop at the next safe point.")
             self.btn_cancel.setEnabled(False)
 
     def _set_running(self, running: bool) -> None:
@@ -1128,10 +1249,13 @@ class ToolPage(QWidget):
         return f"{secs}s"
 
     def _update_progress_detail(self, pct: float) -> None:
-        total = self._run_total or len(self.items) or 1
-        done = sum(1 for it in self.items if it.state in ("done", "failed"))
-        failed = sum(1 for it in self.items if it.state == "failed")
-        running = next((it.path.name for it in self.items
+        run = self._run_items or self.items
+        total = self._run_total or len(run) or 1
+        # Count only this run's rows — rows finished in an earlier run made it
+        # read "2 of 2" from the very first moment.
+        done = sum(1 for it in run if it.state in ("done", "failed"))
+        failed = sum(1 for it in run if it.state == "failed")
+        running = next((it.path.name for it in run
                         if it.state == "running"), None)
         cur = min(done + 1, total)
         parts = [f"Processing {cur} of {total}"]
@@ -1210,6 +1334,8 @@ class ToolPage(QWidget):
             self._update_counts()
 
     def _on_finished(self, summary: dict) -> None:
+        if self.controller is not None:
+            self.controller.deleteLater()     # don't keep every run's controller
         self.controller = None
         self._set_running(False)
         self.runStatus.emit("")          # clear the running window title

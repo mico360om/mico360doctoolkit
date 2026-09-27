@@ -20,8 +20,11 @@ from mico360.core.deps import find_ghostscript
 from mico360.core.engines import ensure_libreoffice
 from mico360.core.util import (
     ProcessError,
+    _same_file,
+    available_memory_bytes,
     build_output_path,
     human_size,
+    is_nonempty,
     run_subprocess,
     unique_dir,
     unique_path,
@@ -133,7 +136,7 @@ def pdf_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
     if level == "target":
         target_bytes = max(1, int(opt.get("target_kb", 250))) * 1024
         _pdf_compress_to_target(src, out, target_bytes, before, report)
-        _enforce_structural_integrity(src, out, report)
+        _enforce_structural_integrity(src, out, report, prog_base=0.5, prog_span=0.5)
         return [out]
 
     gs = find_ghostscript()
@@ -159,7 +162,10 @@ def pdf_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
             ]
         else:
             args.append(f"-dPDFSETTINGS={_GS_PRESET.get(level, '/ebook')}")
-        args += [f"-sOutputFile={out}", str(src)]
+        # Ghostscript treats "%d"/"%o"… in OutputFile as a per-page format, so a
+        # name like "sale 20%off.pdf" would scatter stray files. "%%" is a
+        # literal percent sign.
+        args += ["-sOutputFile=" + str(out).replace("%", "%%"), str(src)]
 
         report(f"Ghostscript compressing ({level})…")
         try:
@@ -168,7 +174,7 @@ def pdf_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
             raise ProcessError(
                 "Compression timed out (over 10 minutes). Try a lower compression "
                 "level, or split very large PDFs first.")
-        if proc.returncode != 0 or not out.exists():
+        if proc.returncode != 0 or not is_nonempty(out):
             raise ProcessError(
                 "Ghostscript failed: " + (proc.stderr or proc.stdout or "unknown error").strip()[:300]
             )
@@ -395,6 +401,7 @@ def _pdf_compress_to_target(src: Path, out: Path, target_bytes: int,
     def produce(scale: int | None) -> int:
         # scale None = lossless rebuild (highest quality, no image re-encoding).
         # scale 0..100: higher = higher dpi/quality = larger file.
+        _check_cancel(report)             # each probe is a full rewrite
         doc = fitz.open(src)
         try:
             if scale is not None and hasattr(doc, "rewrite_images"):
@@ -411,16 +418,17 @@ def _pdf_compress_to_target(src: Path, out: Path, target_bytes: int,
             doc.close()
         return out.stat().st_size
 
+    # The search fills the first half of the bar; verification fills the rest.
     _TOTAL_STEPS = 10  # 1 lossless probe + up to 8 search probes + 1 final write
 
     # Best quality first: if a plain lossless rebuild already fits, keep it.
     if produce(None) <= target_bytes:
-        _progress(report, _TOTAL_STEPS, _TOTAL_STEPS)
+        _progress_frac(report, 0.5)
         achieved = out.stat().st_size
         pct = (1 - achieved / before) * 100 if before else 0
         report(f"{human_size(before)} → {human_size(achieved)} ({pct:+.0f}%, lossless)")
         return
-    _progress(report, 1, _TOTAL_STEPS)
+    _progress_frac(report, 0.5 / _TOTAL_STEPS)
 
     lo, hi, best = 0, 100, None
     for step in range(8):  # ~log2(100) probes
@@ -428,7 +436,7 @@ def _pdf_compress_to_target(src: Path, out: Path, target_bytes: int,
             break
         mid = (lo + hi) // 2
         size = produce(mid)
-        _progress(report, 2 + step, _TOTAL_STEPS)
+        _progress_frac(report, 0.5 * (2 + step) / _TOTAL_STEPS)
         if size <= target_bytes:
             best = mid
             lo = mid + 1
@@ -437,7 +445,7 @@ def _pdf_compress_to_target(src: Path, out: Path, target_bytes: int,
     # Materialise the chosen setting (last probe may not be the best one).
     final_scale = best if best is not None else 0
     achieved = produce(final_scale)
-    _progress(report, _TOTAL_STEPS, _TOTAL_STEPS)
+    _progress_frac(report, 0.5)
 
     pct = (1 - achieved / before) * 100 if before else 0
     report(f"{human_size(before)} → {human_size(achieved)} ({pct:+.0f}%)")
@@ -449,29 +457,73 @@ def _pdf_compress_to_target(src: Path, out: Path, target_bytes: int,
 # =========================================================================
 # Merge PDFs (aggregate)
 # =========================================================================
+_BAD_NAME_CHARS = set('<>:"/\\|?*')
+_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL",
+                   *(f"COM{i}" for i in range(1, 10)),
+                   *(f"LPT{i}" for i in range(1, 10))}
+
+
+def _safe_output_name(name, default: str) -> str:
+    """A user-typed output base name made safe for a single file name: no path
+    separators (so it can't escape the output folder or create subfolders), no
+    ':' (which on NTFS would write into a hidden alternate data stream), no
+    control characters, no trailing dots/spaces, no reserved device names, and
+    no duplicated '.pdf' extension."""
+    s = "".join(ch for ch in str(name or "")
+                if ch not in _BAD_NAME_CHARS and ord(ch) >= 32).strip()
+    if s.lower().endswith(".pdf"):
+        s = s[:-4]
+    s = s.strip(" .")
+    if not s:
+        return default
+    if s.split(".")[0].upper() in _RESERVED_NAMES:
+        s = f"{s}_"
+    return s[:150]
+
+
+def _string_metadata(reader) -> dict:
+    """The document-info dictionary of a pypdf reader as plain strings."""
+    try:
+        md = reader.metadata or {}
+        return {str(k): str(v) for k, v in md.items()
+                if str(k).startswith("/") and v is not None}
+    except Exception:
+        return {}
+
+
 def pdf_merge(srcs: list[Path], out_dir: Path, opt: dict, report: Report) -> list[Path]:
     from pypdf import PdfReader, PdfWriter
 
     if len(srcs) < 2:
         raise ProcessError("Select at least two PDF files to merge.")
-    name = (opt.get("output_name") or "merged").strip() or "merged"
-    out = unique_path(out_dir / f"{name}.pdf", opt.get("overwrite", False))
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    writer = PdfWriter()
-    total = 0
-    for i, s in enumerate(srcs):
-        report(f"Adding {s.name}")
+    # Open and validate EVERY input before reserving the output name, so a bad
+    # file fails cleanly without leaving an empty placeholder behind.
+    readers = []
+    for s in srcs:
+        _check_cancel(report)
         try:
             reader = PdfReader(str(s))
-            pages = list(reader.pages)
+            _ = len(reader.pages)        # forces decryption of owner-only PDFs
         except Exception as exc:
             raise ProcessError(f"Couldn't read '{s.name}' — it may be corrupt or "
                                f"password-protected ({exc}).")
-        for page in pages:
-            writer.add_page(page)
-        total += len(pages)
-        _progress(report, i + 1, len(srcs))
+        readers.append((s, reader))
+
+    name = _safe_output_name(opt.get("output_name"), "merged")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = unique_path(out_dir / f"{name}.pdf", opt.get("overwrite", False))
+
+    writer = PdfWriter()
+    total = 0
+    for i, (s, reader) in enumerate(readers):
+        _check_cancel(report)
+        report(f"Adding {s.name}")
+        writer.append(reader)             # keeps each file's bookmarks
+        total += len(reader.pages)
+        _progress(report, i + 1, len(readers))
+    meta = _string_metadata(readers[0][1])   # title/author of the first file
+    if meta:
+        writer.add_metadata(meta)
     with open(out, "wb") as fh:
         writer.write(fh)
     report(f"Merged {len(srcs)} files / {total} pages → {out.name}")
@@ -482,7 +534,7 @@ def pdf_merge(srcs: list[Path], out_dir: Path, opt: dict, report: Report) -> lis
 # Split PDF (per-file → many outputs)
 # =========================================================================
 def pdf_split(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
-    from pypdf import PdfReader, PdfWriter
+    from pypdf import PdfReader
 
     try:
         reader = PdfReader(str(src))
@@ -498,9 +550,7 @@ def pdf_split(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]
     outputs: list[Path] = []
 
     def write_pages(indices: list[int], label: str) -> None:
-        w = PdfWriter()
-        for i in indices:
-            w.add_page(reader.pages[i])
+        w = _subset_writer(reader, indices)   # keeps bookmarks + metadata
         p = unique_path(dest / f"{src.stem}_{label}.pdf", overwrite)
         with open(p, "wb") as fh:
             w.write(fh)
@@ -530,28 +580,51 @@ def pdf_split(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]
     return outputs
 
 
+_DASHES = str.maketrans({"–": "-", "—": "-", "−": "-", "‒": "-"})
+
+
+def _spec_tokens(spec: str) -> list[str]:
+    """Split a page spec into tokens; en/em dashes and a minus sign count as
+    range hyphens (people paste "2–4" from documents)."""
+    return [c for c in (spec or "").translate(_DASHES).replace(" ", "").split(",") if c]
+
+
+def _bad_pages_error(bad: list[str], n: int) -> ProcessError:
+    shown = ", ".join(bad[:6]) + ("…" if len(bad) > 6 else "")
+    return ProcessError(
+        f"These page entries aren't valid for this {n}-page PDF: {shown}. "
+        f"Use page numbers from 1 to {n}, e.g. 1-3, 5, 8.")
+
+
 def _parse_ranges(spec: str, n: int) -> list[tuple[str, list[int]]]:
+    """Split ranges like ``1-3, 5, 8-10`` → [(label, 0-based pages)]. Invalid
+    or out-of-range entries raise instead of being silently skipped."""
     out: list[tuple[str, list[int]]] = []
-    for chunk in spec.replace(" ", "").split(","):
-        if not chunk:
-            continue
-        if "-" in chunk:
+    bad: list[str] = []
+    for chunk in _spec_tokens(spec):
+        if "-" in chunk[1:]:
             a, _, b = chunk.partition("-")
             try:
                 start, end = int(a), int(b)
             except ValueError:
+                bad.append(chunk)
                 continue
-            start = max(1, start)
-            end = min(n, end)
-            if start <= end:
-                out.append((f"p{start}-{end}", list(range(start - 1, end))))
+            if not 1 <= start <= end <= n:
+                bad.append(chunk)
+                continue
+            out.append((f"p{start}-{end}", list(range(start - 1, end))))
         else:
             try:
                 p = int(chunk)
             except ValueError:
+                bad.append(chunk)
                 continue
-            if 1 <= p <= n:
-                out.append((f"page{p}", [p - 1]))
+            if not 1 <= p <= n:
+                bad.append(chunk)
+                continue
+            out.append((f"page{p}", [p - 1]))
+    if bad:
+        raise _bad_pages_error(bad, n)
     return out
 
 
@@ -561,29 +634,39 @@ def _parse_ranges(spec: str, n: int) -> list[tuple[str, list[int]]]:
 def _page_list(spec: str, n: int, default_all: bool = False) -> list[int]:
     """Parse a page spec like ``3, 1, 2, 5-8`` into an *ordered* list of 0-based
     indices (preserving the given order, ranges allowed in either direction).
-    Empty / 'all' → every page when ``default_all`` else []."""
-    spec = (spec or "").strip().lower()
-    if spec in ("", "all"):
+    Empty / 'all' → every page when ``default_all`` else []. Invalid or
+    out-of-range entries raise a ProcessError naming them — they are never
+    silently dropped (that used to lose pages without a word)."""
+    raw = (spec or "").strip().lower()
+    if raw in ("", "all"):
         return list(range(n)) if default_all else []
     out: list[int] = []
-    for chunk in spec.replace(" ", "").split(","):
-        if not chunk:
-            continue
+    bad: list[str] = []
+    for chunk in _spec_tokens(raw):
         if "-" in chunk[1:]:  # a range (a leading '-' would be a stray sign)
             a, _, b = chunk.partition("-")
             try:
                 start, end = int(a), int(b)
             except ValueError:
+                bad.append(chunk)
+                continue
+            if not (1 <= start <= n and 1 <= end <= n):
+                bad.append(chunk)
                 continue
             rng = range(start, end + 1) if start <= end else range(start, end - 1, -1)
-            out.extend(p - 1 for p in rng if 1 <= p <= n)
+            out.extend(p - 1 for p in rng)
         else:
             try:
                 p = int(chunk)
             except ValueError:
+                bad.append(chunk)
                 continue
-            if 1 <= p <= n:
-                out.append(p - 1)
+            if not 1 <= p <= n:
+                bad.append(chunk)
+                continue
+            out.append(p - 1)
+    if bad:
+        raise _bad_pages_error(bad, n)
     return out
 
 
@@ -594,6 +677,24 @@ def _page_set(spec: str, n: int, default_all: bool = False) -> set:
 # =========================================================================
 # Organize PDF — rotate / delete / extract / reorder pages
 # =========================================================================
+def _subset_writer(reader, pages: list[int]):
+    """A writer holding ``pages`` of ``reader`` in the given order (duplicates
+    allowed), keeping the bookmarks that point at those pages and the document
+    metadata — a bare add_page() loop silently dropped both."""
+    from pypdf import PdfWriter
+    writer = PdfWriter()
+    try:
+        writer.append(reader, pages=list(pages))
+    except Exception:
+        writer = PdfWriter()
+        for i in pages:
+            writer.add_page(reader.pages[i])
+    meta = _string_metadata(reader)
+    if meta:
+        writer.add_metadata(meta)
+    return writer
+
+
 def pdf_organize(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
     from pypdf import PdfReader, PdfWriter
 
@@ -604,18 +705,18 @@ def pdf_organize(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
         raise ProcessError(f"Couldn't read '{src.name}' — it may be corrupt or "
                            f"password-protected ({exc}).")
     op = opt.get("operation", "rotate")
-    writer = PdfWriter()
 
     if op == "rotate":
         angle = _clampi(opt.get("angle", 90), -270, 270, 90)
         if angle % 90 != 0:
             raise ProcessError("Rotation must be a multiple of 90°.")
         targets = _page_set(opt.get("pages", "all"), n, default_all=True)
+        # Clone the whole document so bookmarks, metadata, form fields and
+        # attachments survive — only the chosen pages' /Rotate changes.
+        writer = PdfWriter(clone_from=reader)
         for i in range(n):
-            page = reader.pages[i]
             if i in targets:
-                page.rotate(angle)
-            writer.add_page(page)
+                writer.pages[i].rotate(angle)
             _progress(report, i + 1, n)
         suffix = "_rotated"
     elif op == "delete":
@@ -625,18 +726,26 @@ def pdf_organize(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
         kept = [i for i in range(n) if i not in remove]
         if not kept:
             raise ProcessError("That would delete every page.")
-        for j, i in enumerate(kept):
-            writer.add_page(reader.pages[i])
-            _progress(report, j + 1, len(kept))
+        writer = _subset_writer(reader, kept)
         suffix = "_pages-removed"
     elif op in ("extract", "reorder"):
         key = "ext_pages" if op == "extract" else "order"
         order = _page_list(opt.get(key, ""), n)
         if not order:
             raise ProcessError("Enter the pages, e.g. 3, 1, 2, 5-8.")
-        for j, i in enumerate(order):
-            writer.add_page(reader.pages[i])
-            _progress(report, j + 1, len(order))
+        if op == "reorder":
+            # "Reorder" promises the same document in a new order — refuse to
+            # quietly drop pages the user didn't list.
+            missing = sorted(set(range(n)) - set(order))
+            if missing:
+                shown = ", ".join(str(i + 1) for i in missing[:10])
+                if len(missing) > 10:
+                    shown += "…"
+                raise ProcessError(
+                    f"Reorder needs every page listed, in the order you want. "
+                    f"Missing: {shown}. (To keep only some pages, use "
+                    f"“Extract pages” instead.)")
+        writer = _subset_writer(reader, order)
         suffix = "_extracted" if op == "extract" else "_reordered"
     elif op == "visual":
         return _organize_visual(src, out_dir, opt, report, n)
@@ -660,13 +769,21 @@ def _organize_visual(src: Path, out_dir: Path, opt: dict, report: Report,
     plan = {"n_src": int, "groups": [[{"src": int, "rotate": int}, ...], ...]}
     One group per output file; pages absent from every group are dropped.
     """
-    from pypdf import PdfReader, PdfWriter
+    from pypdf import PdfReader
 
     plan = opt.get("plan") or {}
     groups = [g for g in (plan.get("groups") or []) if g]
     if not groups:
         raise ProcessError("Open the visual organizer and arrange the pages first "
                            "(Action → Visual organizer).")
+    target = plan.get("target") or ""
+    if target and not _same_file(target, src):
+        # The arrangement belongs to one file; applying it to every queued file
+        # of the same length would silently reorder/split unrelated documents.
+        raise ProcessError(
+            f"The visual arrangement was made for '{Path(target).name}', so "
+            f"'{src.name}' was left unchanged. Select this file and open the "
+            "visual organizer to arrange it.")
     n_src = plan.get("n_src")
     if n_src is not None and int(n_src) != n:
         raise ProcessError(
@@ -688,13 +805,12 @@ def _organize_visual(src: Path, out_dir: Path, opt: dict, report: Report,
         # A fresh reader per output keeps per-page rotation from leaking across
         # files when the same source page appears more than once.
         rg = PdfReader(str(src))
-        writer = PdfWriter()
-        for item in g:
-            i = int(item["src"])
-            writer.add_page(rg.pages[i])
+        # Keeps bookmarks to the kept pages and the document metadata.
+        writer = _subset_writer(rg, [int(item["src"]) for item in g])
+        for k, item in enumerate(g):
             rot = int(item.get("rotate", 0)) % 360
             if rot:
-                writer.pages[-1].rotate(rot)
+                writer.pages[k].rotate(rot)
             done += 1
             _progress(report, done, total)
         suffix = f"_part{part}" if multi else "_organized"
@@ -736,28 +852,44 @@ def pdf_protect(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
     elif op == "unlock":
         report(f"'{src.name}' isn't password-protected — saving a copy.")
 
-    writer = PdfWriter()
-    try:
-        for page in reader.pages:
-            writer.add_page(page)
-    except Exception as exc:
-        raise ProcessError(f"Couldn't read pages from '{src.name}' ({exc}).")
-
     if op == "protect":
         if not pw:
             raise ProcessError("Enter a password to protect the PDF.")
         confirm = opt.get("confirm_password", None)
         if confirm is not None and confirm != pw:
             raise ProcessError("The passwords don't match — please re-enter them.")
+
+    # Clone the whole document (not just its pages) so bookmarks, links, form
+    # fields, metadata and page labels survive protecting / unlocking.
+    try:
+        writer = PdfWriter(clone_from=reader)
+    except Exception:
+        writer = PdfWriter()
+        try:
+            for page in reader.pages:
+                writer.add_page(page)
+        except Exception as exc:
+            raise ProcessError(f"Couldn't read pages from '{src.name}' ({exc}).")
+        try:
+            meta = _string_metadata(reader)
+            if meta:
+                writer.add_metadata(meta)
+        except Exception:
+            pass
+
+    if op == "protect":
         # Prefer strong AES-256 (needs `cryptography`); fall back to the
-        # dependency-free RC4-128 so protection always works.
+        # dependency-free RC4-128 so protection always works — but say so.
         try:
             writer.encrypt(user_password=pw, algorithm="AES-256")
         except Exception:
+            log.debug("AES-256 unavailable", exc_info=True)
             try:
                 writer.encrypt(user_password=pw, algorithm="RC4-128")
             except Exception:
                 writer.encrypt(pw)
+            report("Strong AES-256 encryption isn't available on this system — "
+                   "used older RC4-128 encryption instead, which is weaker.")
         suffix = "_protected"
     else:
         suffix = "_unlocked"
@@ -801,9 +933,22 @@ def _anchor_xy(position: str, pw: float, ph: float, w: float, h: float,
     return x, y
 
 
+def _visual_to_page(page, box):
+    """Map a rectangle given in the page's *visual* coordinates (as a reader
+    sees it, with /Rotate applied — which is what ``page.rect`` describes) to the
+    unrotated coordinates PyMuPDF draws in. Pair with ``rotate=page.rotation``
+    on insert_image / morph so stamps land in the right corner, upright, on
+    rotated pages too."""
+    import fitz
+    r = fitz.Rect(box) * page.derotation_matrix
+    r.normalize()
+    return r
+
+
 def pdf_watermark(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
     """Stamp a watermark on every page — either text or a logo/image, at a
     chosen position."""
+    _require_readable_pdf(src)
     opacity = _clampi(opt.get("opacity", 20), 1, 100, 20) / 100.0
     rotation = _clampi(opt.get("rotation", 45), -180, 180, 45)
     position = opt.get("position", "center")
@@ -825,13 +970,16 @@ def pdf_watermark(src: Path, out_dir: Path, opt: dict, report: Report) -> list[P
     try:
         for i, page in enumerate(doc):
             _check_cancel(report)
-            rect = page.rect
+            rect = page.rect                      # visual (rotation applied)
             tl = fitz.get_text_length(text, fontname="helv", fontsize=size)
             x, y = _anchor_xy(position, rect.width, rect.height, tl, size)
-            pivot = fitz.Point(x + tl / 2.0, y + size / 2.0)
-            tw = fitz.TextWriter(rect, color=color)
-            tw.append(fitz.Point(x, y + size * 0.8), text, fontsize=size)
-            morph = (pivot, fitz.Matrix(rotation))
+            # Position in visual space, then draw in unrotated space and add the
+            # page's own rotation so the text reads upright on rotated pages.
+            pivot = fitz.Point(x + tl / 2.0, y + size / 2.0) * page.derotation_matrix
+            tw = fitz.TextWriter(_visual_to_page(page, rect), color=color)
+            tw.append(fitz.Point(pivot.x - tl / 2.0, pivot.y + size * 0.3), text,
+                      fontsize=size)
+            morph = (pivot, fitz.Matrix(rotation + page.rotation))
             tw.write_text(page, opacity=opacity, morph=morph, overlay=True)
             _progress(report, i + 1, doc.page_count)
         out = build_output_path(src, out_dir, ".pdf", name_suffix="_watermarked",
@@ -862,7 +1010,7 @@ def _pdf_watermark_image(src: Path, out_dir: Path, opt: dict, report: Report,
     if not imgpath.exists():
         raise ProcessError(f"Watermark image not found: {raw}")
     try:
-        logo = Image.open(imgpath).convert("RGBA")
+        logo = _upright(Image.open(imgpath)).convert("RGBA")
     except Exception as exc:
         raise ProcessError(f"Couldn't open image '{imgpath.name}' ({exc}).")
 
@@ -889,8 +1037,10 @@ def _pdf_watermark_image(src: Path, out_dir: Path, opt: dict, report: Report,
                 w = rect.width * scale
                 h = w * ratio
                 x, y = _anchor_xy(position, rect.width, rect.height, w, h)
-                box = fitz.Rect(x, y, x + w, y + h)
-                page.insert_image(box, filename=tmp, overlay=True, keep_proportion=True)
+                box = fitz.Rect(x, y, x + w, y + h)          # visual space
+                page.insert_image(_visual_to_page(page, box), filename=tmp,
+                                  overlay=True, keep_proportion=True,
+                                  rotate=page.rotation)
                 _progress(report, i + 1, doc.page_count)
             out = build_output_path(src, out_dir, ".pdf", name_suffix="_watermarked",
                                     overwrite=opt.get("overwrite", False),
@@ -937,7 +1087,7 @@ def pdf_to_word(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
         cv.convert(str(out), start=0, end=None)
     finally:
         cv.close()
-    if not out.exists():
+    if not is_nonempty(out):
         raise ProcessError("Conversion produced no output.")
     return [out]
 
@@ -972,7 +1122,7 @@ def _ocr_pdf_to_docx(src: Path, out: Path, report: Report,
         for para in paras:
             document.add_paragraph(para)
     document.save(str(out))
-    if not out.exists():
+    if not is_nonempty(out):
         raise ProcessError("OCR produced no output.")
 
 
@@ -1017,6 +1167,34 @@ def _dml_available() -> bool:
         return False
 
 
+class _GpuFallbackSession:
+    """Wraps a DirectML ONNX session. If the GPU fails *during inference*
+    (driver reset, device removed, out of video memory), rebuild the session on
+    the CPU and retry, instead of failing the page — and every page after it."""
+
+    def __init__(self, sess, make_cpu):
+        self._sess = sess
+        self._make_cpu = make_cpu
+        self._on_cpu = False
+
+    def run(self, *a, **kw):
+        try:
+            return self._sess.run(*a, **kw)
+        except Exception:
+            if self._on_cpu:
+                raise
+            global _ocr_active_provider
+            log.warning("GPU OCR failed during inference; switching to CPU",
+                        exc_info=True)
+            self._sess = self._make_cpu()
+            self._on_cpu = True
+            _ocr_active_provider = "CPU"
+            return self._sess.run(*a, **kw)
+
+    def __getattr__(self, name):
+        return getattr(self._sess, name)
+
+
 def _patch_rapidocr_gpu() -> None:
     """Make RapidOCR build its ONNX sessions on the GPU via DirectML — any
     Direct3D-12 GPU (NVIDIA / AMD / Intel, discrete or integrated) — with an
@@ -1055,11 +1233,16 @@ def _patch_rapidocr_gpu() -> None:
             sess = _real_session(model_path, sess_options=sess_options,
                                  providers=providers, **kw)
         try:
-            if "DmlExecutionProvider" in sess.get_providers():
-                _ocr_active_provider = "GPU (DirectML)"
+            on_gpu = "DmlExecutionProvider" in sess.get_providers()
         except Exception:
+            on_gpu = False
             log.debug("could not read OCR execution provider", exc_info=True)
-        return sess
+        if not on_gpu:
+            return sess
+        _ocr_active_provider = "GPU (DirectML)"
+        return _GpuFallbackSession(sess, lambda: _real_session(
+            model_path, sess_options=sess_options,
+            providers=["CPUExecutionProvider"], **kw))
 
     _ru.InferenceSession = _make_session
     _ru._mico360_gpu_patched = True
@@ -1126,7 +1309,171 @@ def ocr_active_provider() -> str:
 
 
 def _page_has_text(page, threshold: int = 8) -> bool:
-    return len(page.get_text("text").strip()) >= threshold
+    """True if the page is already searchable. A scanned page that merely
+    carries a small text stamp (fax header line, Bates number, "Page 3 of 9")
+    still needs OCR, so a short text on a page that is mostly one big image
+    doesn't count."""
+    txt = page.get_text("text").strip()
+    if len(txt) < threshold:
+        return False
+    if len(txt) >= 200:                  # real body text
+        return True
+    try:
+        import fitz
+        area = abs(page.rect)
+        for info in page.get_image_info():
+            if area and abs(fitz.Rect(info["bbox"])) >= 0.5 * area:
+                return False             # a scan with a stamp → OCR it
+    except Exception:
+        pass
+    return True
+
+
+# Fonts able to carry non-WinAnsi OCR text (Arabic, Cyrillic, Polish ł, Czech č,
+# Turkish ş…) in the invisible layer. Base-14 "helv" can't, which turned those
+# characters into garbage and made the "searchable" PDF unsearchable. Glyph
+# coverage is verified before a font is used.
+_OCR_FONT_FILES = (
+    r"C:\Windows\Fonts\segoeui.ttf", r"C:\Windows\Fonts\arial.ttf",
+    r"C:\Windows\Fonts\tahoma.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/Library/Fonts/Arial Unicode.ttf",
+    "/System/Library/Fonts/Supplemental/Tahoma.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+)
+_OCR_BUILTIN_FONTS = ("china-s", "japan", "korea", "china-t")
+_ocr_font_cache: dict = {}
+
+
+def _ocr_font_obj(key: str, fontfile: str | None):
+    import fitz
+    if key not in _ocr_font_cache:
+        try:
+            _ocr_font_cache[key] = (fitz.Font(fontfile=fontfile) if fontfile
+                                    else fitz.Font(key))
+        except Exception:
+            _ocr_font_cache[key] = None
+    return _ocr_font_cache[key]
+
+
+def _ocr_text_font(chars: set) -> tuple[str, str | None]:
+    """(fontname, fontfile) for insert_text that can encode every character in
+    *chars*. Returns ("", None) when no available font covers them."""
+    import os
+    try:
+        "".join(chars).encode("cp1252")
+        return "helv", None               # plain WinAnsi → the Base-14 font
+    except UnicodeEncodeError:
+        pass
+    cands = [(p, p) for p in _OCR_FONT_FILES if os.path.exists(p)]
+    cands += [(name, None) for name in _OCR_BUILTIN_FONTS]
+    for key, ff in cands:
+        f = _ocr_font_obj(key, ff)
+        if f is not None and all(f.has_glyph(ord(c)) for c in chars):
+            return ("ocrtext", ff) if ff else (key, None)
+    return "", None
+
+
+def _is_rtl(text: str) -> bool:
+    """True when a line is mostly right-to-left script (Arabic / Hebrew)."""
+    rtl = ltr = 0
+    for c in text:
+        o = ord(c)
+        if 0x0590 <= o <= 0x08FF or 0xFB1D <= o <= 0xFDFF or 0xFE70 <= o <= 0xFEFF:
+            rtl += 1
+        elif c.isalpha():
+            ltr += 1
+    return rtl > ltr
+
+
+def _norm_extract_text(u: str) -> str:
+    """How a glyph's text should come back out of the PDF: Arabic presentation
+    forms as their base letters (what people type and search for) and a
+    no-break space as a plain space."""
+    import unicodedata
+    out = []
+    for c in u:
+        o = ord(c)
+        if 0xFB50 <= o <= 0xFDFF or 0xFE70 <= o <= 0xFEFF:
+            out.append(unicodedata.normalize("NFKC", c))
+        elif c == " ":
+            out.append(" ")
+        else:
+            out.append(c)
+    return "".join(out)
+
+
+def _parse_tounicode(cm: str) -> dict[int, str]:
+    """Glyph code → text for a ToUnicode CMap (bfchar + bfrange forms)."""
+    import re
+
+    def _dec(h: str) -> str:
+        return bytes.fromhex(h).decode("utf-16-be", "replace")
+
+    gmap: dict[int, str] = {}
+    for blk in re.findall(r"beginbfchar(.*?)endbfchar", cm, re.S):
+        for g, u in re.findall(r"<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>", blk):
+            gmap[int(g, 16)] = _dec(u)
+    for blk in re.findall(r"beginbfrange(.*?)endbfrange", cm, re.S):
+        for lo, hi, rest in re.findall(
+                r"<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>\s*(\[[^\]]*\]|<[0-9a-fA-F]+>)", blk):
+            lo_i, hi_i = int(lo, 16), int(hi, 16)
+            if rest.startswith("["):
+                for k, u in enumerate(re.findall(r"<([0-9a-fA-F]+)>", rest)):
+                    gmap[lo_i + k] = _dec(u)
+            else:
+                start = bytes.fromhex(rest[1:-1])
+                base = int.from_bytes(start, "big")
+                for k in range(hi_i - lo_i + 1):
+                    gmap[lo_i + k] = (base + k).to_bytes(len(start), "big").decode(
+                        "utf-16-be", "replace")
+    return gmap
+
+
+def _build_tounicode(gmap: dict[int, str]) -> bytes:
+    items = sorted(gmap.items())
+    body = []
+    for i in range(0, len(items), 100):
+        chunk = items[i:i + 100]
+        body.append(f"{len(chunk)} beginbfchar")
+        body += [f"<{g:04x}> <{u.encode('utf-16-be').hex()}>" for g, u in chunk]
+        body.append("endbfchar")
+    return ("/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
+            "/CIDSystemInfo <</Registry(Adobe)/Ordering(UCS)/Supplement 0>> def\n"
+            "/CMapName /Adobe-Identity-UCS def\n/CMapType 2 def\n"
+            "1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n"
+            + "\n".join(body)
+            + "\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"
+            ).encode("latin-1")
+
+
+def _normalize_tounicode(doc, pages) -> None:
+    """Rewrite the ToUnicode maps of the fonts on *pages* so the invisible OCR
+    text extracts and searches as normal text. A glyph shared by several code
+    points (an Arabic letter and its isolated form, space and NBSP) is otherwise
+    mapped back to the "wrong" one: Arabic came out as unsearchable
+    presentation forms and spaces as NBSP."""
+    import re
+    seen: set = set()
+    for pno in pages:
+        for f in doc.get_page_fonts(pno, full=True):
+            xref = f[0]
+            if xref in seen:
+                continue
+            seen.add(xref)
+            try:
+                m = re.search(r"/ToUnicode (\d+) 0 R", doc.xref_object(xref))
+                if not m:
+                    continue
+                tx = int(m.group(1))
+                gmap = _parse_tounicode(doc.xref_stream(tx).decode("latin-1"))
+                fixed = {g: _norm_extract_text(u) for g, u in gmap.items()}
+                if fixed != gmap:
+                    doc.update_stream(tx, _build_tounicode(fixed))
+            except Exception:
+                log.debug("couldn't normalise a ToUnicode map", exc_info=True)
 
 
 def _render_page_image(page, dpi: int = _OCR_DPI):
@@ -1199,6 +1546,10 @@ def _ocr_page_lines(engine, page, dpi: int = _OCR_DPI,
     return _ocr_image_lines(engine, img, used_dpi, min_score)
 
 
+# Rough peak working memory of one concurrent CPU OCR inference on a large page.
+_OCR_BYTES_PER_WORKER = 900 * 1024 * 1024
+
+
 def _ocr_pages_concurrent(src: Path, indices: list[int],
                           report: Report,
                           dpi: int = _OCR_DPI,
@@ -1228,17 +1579,25 @@ def _ocr_pages_concurrent(src: Path, indices: list[int],
     # CPU keeps its multi-thread speedup.
     if ocr_active_provider() != "CPU":
         workers = 1
-    if workers == 1:
+    # Each concurrent CPU inference needs its own working memory (large pages at
+    # 300-400 dpi): don't start more than the free RAM comfortably allows.
+    avail = available_memory_bytes()
+    if avail:
+        workers = max(1, min(workers, int(avail // _OCR_BYTES_PER_WORKER)))
+
+    def _serial(todo: list[int], out: dict) -> dict:
         doc = fitz.open(str(src))
         try:
-            out = {}
-            for n, i in enumerate(indices):
+            for i in todo:
                 _check_cancel(report)
                 out[i] = _ocr_page_lines(engine, doc[i], dpi)
-                _progress(report, n + 1, len(indices))
+                _progress(report, len(out), len(indices))
             return out
         finally:
             doc.close()
+
+    if workers == 1:
+        return _serial(list(indices), {})
 
     results: dict[int, list] = {}
     chunk = workers * 2
@@ -1255,9 +1614,34 @@ def _ocr_pages_concurrent(src: Path, indices: list[int],
                     results[i] = lines
                 done += len(batch)
                 _progress(report, done, len(indices))
-    finally:
+    except Exception as exc:
+        if not _is_out_of_memory(exc):
+            raise
+        # Running several pages at once ran out of memory ("bad allocation"):
+        # finish the remaining pages one at a time instead of failing the file.
+        log.warning("OCR ran low on memory with %d workers; continuing serially", workers)
+        report("Low on memory — continuing OCR one page at a time.")
         doc.close()
+        return _serial([i for i in indices if i not in results], results)
+    finally:
+        try:
+            doc.close()
+        except Exception:
+            pass
     return results
+
+
+def _is_out_of_memory(exc: BaseException) -> bool:
+    """True for an allocation failure anywhere in the chain (MemoryError, or
+    onnxruntime's "bad allocation" wrapped by RapidOCR)."""
+    seen = 0
+    while exc is not None and seen < 6:
+        if isinstance(exc, MemoryError) or "bad allocation" in str(exc).lower() \
+                or "bad_alloc" in str(exc).lower():
+            return True
+        exc = exc.__cause__ or exc.__context__
+        seen += 1
+    return False
 
 
 def _ocr_rows(lines: list[tuple[str, tuple]],
@@ -1362,6 +1746,7 @@ def pdf_to_pptx(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
     from pptx.dml.color import RGBColor
     from pptx.util import Emu, Pt
 
+    _require_readable_pdf(src)
     mode = opt.get("mode", "auto")
     ocr = bool(opt.get("ocr", False))
     ocr_engine = None
@@ -1372,8 +1757,31 @@ def pdf_to_pptx(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
     blank = prs.slide_layouts[6]
     EMU_PER_PT = 12700  # 914400 EMU per inch / 72 pt per inch
 
+    # Pages can differ in size (the slide size comes from page 1): map each
+    # page onto the slide with one uniform scale, centred, so nothing is
+    # stretched or pushed off-slide.
+    fit = {"s": 1.0, "dx": 0.0, "dy": 0.0}
+
+    def set_fit(page) -> None:
+        sw = prs.slide_width / EMU_PER_PT
+        sh = prs.slide_height / EMU_PER_PT
+        pr = page.rect
+        s_ = min(sw / max(1.0, pr.width), sh / max(1.0, pr.height))
+        fit.update(s=s_, dx=(sw - pr.width * s_) / 2.0, dy=(sh - pr.height * s_) / 2.0)
+
+    def emu_x(v):
+        return Emu(int((fit["dx"] + v * fit["s"]) * EMU_PER_PT))
+
+    def emu_y(v):
+        return Emu(int((fit["dy"] + v * fit["s"]) * EMU_PER_PT))
+
+    def emu_len(v):
+        return Emu(int(v * fit["s"] * EMU_PER_PT))
+
     def add_text_boxes(slide, page) -> int:
+        import math
         boxes = 0
+        rot_m = page.rotation_matrix       # text bboxes are in unrotated space
         for block in page.get_text("dict").get("blocks", []):
             if block.get("type", 0) != 0:
                 continue  # 0 = text block
@@ -1382,11 +1790,30 @@ def pdf_to_pptx(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
                 if not spans:
                     continue
                 text = "".join(s.get("text", "") for s in spans)
-                x0, y0, x1, y1 = line["bbox"]
-                tb = slide.shapes.add_textbox(
-                    Emu(int(x0 * EMU_PER_PT)), Emu(int(y0 * EMU_PER_PT)),
-                    Emu(int(max(2, x1 - x0) * EMU_PER_PT)),
-                    Emu(int(max(8, y1 - y0) * EMU_PER_PT)))
+                ux0, uy0, ux1, uy1 = line["bbox"]
+                dx_, dy_ = line.get("dir", (1.0, 0.0))
+                # Direction the line reads on the slide (clockwise degrees).
+                angle = (math.degrees(math.atan2(dy_, dx_)) + page.rotation) % 360
+                snap = round(angle / 90.0) * 90 % 360
+                if abs(((angle - snap + 180) % 360) - 180) < 1.0:
+                    angle = snap
+                vis = fitz.Rect(ux0, uy0, ux1, uy1) * rot_m
+                vis.normalize()
+                if angle in (0, 180):
+                    tb = slide.shapes.add_textbox(
+                        emu_x(vis.x0), emu_y(vis.y0),
+                        emu_len(max(2, vis.width)), emu_len(max(8, vis.height)))
+                else:
+                    # Rotated text: a box of the line's own size, spun about the
+                    # centre of where the line appears on the page.
+                    along_x = abs(dx_) >= abs(dy_)
+                    w = max(2.0, (ux1 - ux0) if along_x else (uy1 - uy0))
+                    h = max(8.0, (uy1 - uy0) if along_x else (ux1 - ux0))
+                    cx, cy = (vis.x0 + vis.x1) / 2.0, (vis.y0 + vis.y1) / 2.0
+                    tb = slide.shapes.add_textbox(emu_x(cx - w / 2), emu_y(cy - h / 2),
+                                                  emu_len(w), emu_len(h))
+                if angle:
+                    tb.rotation = float(angle)
                 tf = tb.text_frame
                 tf.word_wrap = False
                 tf.margin_left = tf.margin_right = 0
@@ -1394,7 +1821,7 @@ def pdf_to_pptx(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
                 run = tf.paragraphs[0].add_run()
                 run.text = text
                 s0 = spans[0]
-                run.font.size = Pt(max(6.0, float(s0.get("size", 12))))
+                run.font.size = Pt(max(6.0, float(s0.get("size", 12)) * fit["s"]))
                 flags = int(s0.get("flags", 0))
                 run.font.bold = bool(flags & 16)
                 run.font.italic = bool(flags & 2)
@@ -1404,18 +1831,18 @@ def pdf_to_pptx(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
         return boxes
 
     def add_ocr_boxes(slide, lines) -> int:
+        # OCR ran on the rendered (already rotated) page, so coords are visual.
         for text, (x0, y0, x1, y1) in lines:
-            tb = slide.shapes.add_textbox(
-                Emu(int(x0 * EMU_PER_PT)), Emu(int(y0 * EMU_PER_PT)),
-                Emu(int(max(2, x1 - x0) * EMU_PER_PT)),
-                Emu(int(max(8, y1 - y0) * EMU_PER_PT)))
+            tb = slide.shapes.add_textbox(emu_x(x0), emu_y(y0),
+                                          emu_len(max(2, x1 - x0)),
+                                          emu_len(max(8, y1 - y0)))
             tf = tb.text_frame
             tf.word_wrap = False
             tf.margin_left = tf.margin_right = 0
             tf.margin_top = tf.margin_bottom = 0
             run = tf.paragraphs[0].add_run()
             run.text = text
-            run.font.size = Pt(max(7.0, min(40.0, (y1 - y0) * 0.85)))
+            run.font.size = Pt(max(7.0, min(40.0, (y1 - y0) * 0.85 * fit["s"])))
         return len(lines)
 
     try:
@@ -1428,6 +1855,7 @@ def pdf_to_pptx(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
                 _check_cancel(report)
                 _progress(report, i, doc.page_count)
                 slide = prs.slides.add_slide(blank)
+                set_fit(page)
                 has_text = _page_has_text(page)
                 if mode == "image":
                     pass  # always render the page image (below)
@@ -1437,7 +1865,7 @@ def pdf_to_pptx(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
                     continue
                 elif ocr:
                     if ocr_engine is None:
-                        ocr_engine = _make_ocr_engine()
+                        ocr_engine = _make_ocr_engine(opt.get("ocr_lang", "latin"), report)
                     n = add_ocr_boxes(slide, _ocr_page_lines(ocr_engine, page))
                     report(f"Slide {i + 1}/{doc.page_count} — {n} OCR text box(es)")
                     continue
@@ -1449,8 +1877,9 @@ def pdf_to_pptx(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pat
                 pix = page.get_pixmap(dpi=150)
                 img_path = Path(tmp) / f"p{i}.png"
                 pix.save(str(img_path))
-                slide.shapes.add_picture(str(img_path), 0, 0,
-                                         width=prs.slide_width, height=prs.slide_height)
+                slide.shapes.add_picture(str(img_path), emu_x(0), emu_y(0),
+                                         width=emu_len(page.rect.width),
+                                         height=emu_len(page.rect.height))
                 report(f"Slide {i + 1}/{doc.page_count} — page image")
             prs.save(str(out))
     finally:
@@ -1510,23 +1939,38 @@ def _run_libreoffice(soffice: str, src: Path, out_dir: Path, final: Path,
     import shutil
     import tempfile
 
+    import os
+
     report(f"{label} converting to PDF…")
     profile = tempfile.mkdtemp(prefix="mico360_lo_")
+    # LibreOffice always writes "<outdir>/<stem>.pdf" and silently overwrites an
+    # existing file of that name. Point it at a PRIVATE staging folder — never
+    # the real output folder — so a user's existing report.pdf (or an earlier
+    # output in this batch with the same stem) can't be clobbered. Stage on the
+    # output volume when possible so the final move is an atomic rename.
+    try:
+        stage = tempfile.mkdtemp(prefix=".mico360_lo_out_", dir=str(out_dir))
+    except OSError:
+        stage = tempfile.mkdtemp(prefix="mico360_lo_out_")
     args = [soffice, "--headless", "--norestore", "--invisible", "--nodefault",
             "--nolockcheck", f"-env:UserInstallation={Path(profile).as_uri()}",
-            "--convert-to", "pdf", "--outdir", str(out_dir), str(src)]
+            "--convert-to", "pdf", "--outdir", stage, str(src)]
     try:
         with _office_lock:
             proc = run_subprocess(args, timeout=300)
+        produced = Path(stage) / f"{src.stem}.pdf"
+        if (proc.returncode != 0 or not produced.exists()
+                or produced.stat().st_size == 0):
+            raise RuntimeError((proc.stderr or proc.stdout or "no output")
+                               .strip()[:200])
+        # `final` is our reserved, collision-free name: replace only that file.
+        try:
+            os.replace(str(produced), str(final))
+        except OSError:                       # staging fell back to another drive
+            shutil.copyfile(str(produced), str(final))
     finally:
         shutil.rmtree(profile, ignore_errors=True)
-    produced = out_dir / f"{src.stem}.pdf"
-    if proc.returncode != 0 or not produced.exists():
-        raise RuntimeError((proc.stderr or proc.stdout or "no output").strip()[:200])
-    if produced != final:
-        if final.exists():
-            final.unlink()
-        produced.rename(final)
+        shutil.rmtree(stage, ignore_errors=True)
 
 
 def _word_to_pdf_libreoffice(soffice: str, src: Path, out_dir: Path,
@@ -1557,7 +2001,7 @@ def _word_to_pdf_msword(src: Path, final: Path, report: Report) -> bool:
                 pythoncom.CoUninitialize()
             except Exception:
                 log.debug("COM teardown failed", exc_info=True)
-    if not final.exists():
+    if not is_nonempty(final):
         raise RuntimeError("Word produced no output")
     return True
 
@@ -1652,7 +2096,7 @@ def _word_to_pdf_python(src: Path, final: Path, report: Report) -> None:
                             leftMargin=0.9 * inch, rightMargin=0.9 * inch,
                             topMargin=0.9 * inch, bottomMargin=0.9 * inch)
     doc.build(flow)
-    if not final.exists():
+    if not is_nonempty(final):
         raise RuntimeError("no output produced")
 
 
@@ -1662,6 +2106,7 @@ def _word_to_pdf_python(src: Path, final: Path, report: Report) -> None:
 def pdf_to_image(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
     import fitz
 
+    _require_readable_pdf(src)
     fmt = opt.get("format", "png").lower()
     dpi = _clampi(opt.get("dpi", 150), 72, 600, 150)
     overwrite = opt.get("overwrite", False)
@@ -1762,20 +2207,32 @@ def _image_to_svg_embed(src: Path, out: Path) -> None:
     """Wrap the raster image, unchanged, inside an SVG (exact, lossless)."""
     import base64
 
+    import io
+
     from PIL import Image
     with Image.open(str(src)) as im:
         w, h = im.size
-    mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-            ".webp": "image/webp", ".gif": "image/gif",
-            ".bmp": "image/bmp"}.get(src.suffix.lower())
-    if mime:
-        data = src.read_bytes()
-    else:  # normalise odd formats (e.g. TIFF) to PNG so browsers can show them
-        import io
-        buf = io.BytesIO()
-        with Image.open(str(src)) as im:
-            im.save(buf, "PNG")
-        data, mime = buf.getvalue(), "image/png"
+        rotated = _exif_orientation(im) not in (None, 1)
+        if rotated:
+            # A phone photo with an EXIF rotation: SVG renderers don't agree on
+            # honouring it, so embed the pixels the way they're meant to look
+            # (lossless PNG of the upright image) with matching dimensions.
+            up = _upright(im)
+            w, h = up.size
+            buf = io.BytesIO()
+            up.save(buf, "PNG")
+            data, mime = buf.getvalue(), "image/png"
+    if not rotated:
+        mime = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".webp": "image/webp", ".gif": "image/gif",
+                ".bmp": "image/bmp"}.get(src.suffix.lower())
+        if mime:
+            data = src.read_bytes()
+        else:  # normalise odd formats (e.g. TIFF) to PNG so browsers can show them
+            buf = io.BytesIO()
+            with Image.open(str(src)) as im:
+                im.save(buf, "PNG")
+            data, mime = buf.getvalue(), "image/png"
     b64 = base64.b64encode(data).decode("ascii")
     out.write_text(
         f'<?xml version="1.0" encoding="UTF-8"?>\n'
@@ -1822,9 +2279,12 @@ def image_to_svg(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
     # vtracer reads from a file. We always hand it a fresh PNG: for B&W we
     # threshold to two tones FIRST (vtracer's own colour options can't be passed
     # safely on this Python build), and otherwise normalise to RGBA PNG.
-    work = Path(tempfile.mkdtemp()) / (src.stem + ".png")
+    import shutil
+    workdir = Path(tempfile.mkdtemp(prefix="mico360_svg_"))
+    work = workdir / (src.stem + ".png")
     try:
-        with Image.open(str(src)) as im:
+        with Image.open(str(src)) as raw:
+            im = _upright(raw)
             if bw:
                 im.convert("L").point(lambda p: 0 if p < 128 else 255).convert(
                     "RGB").save(str(work), "PNG")
@@ -1838,16 +2298,95 @@ def image_to_svg(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
         _image_to_svg_embed(src, out)
         report(f"Image → SVG (embedded) → {out.name}")
         return [out]
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)   # don't leak a temp copy
     report(f"Image → SVG (vector trace{', B&W' if bw else ''}) → {out.name}")
     return [out]
 
 
-def image_to_pdf(srcs: list[Path], out_dir: Path, opt: dict, report: Report) -> list[Path]:
+# --- shared image helpers ---------------------------------------------------
+def _exif_orientation(im) -> int | None:
+    try:
+        return im.getexif().get(0x0112)
+    except Exception:
+        return None
+
+
+def _upright(im):
+    """Apply the EXIF Orientation tag to the pixels (phone photos) so the result
+    displays the right way up everywhere — including formats/viewers that ignore
+    EXIF (PDF, many web tools). Safe no-op for images without the tag."""
+    try:
+        from PIL import ImageOps
+        out = ImageOps.exif_transpose(im)
+        return out if out is not None else im
+    except Exception:
+        return im
+
+
+def _flatten_rgb(im, bg=(255, 255, 255)):
+    """RGB copy of ``im`` with any transparency composited onto ``bg`` (white).
+    A plain ``convert("RGB")`` exposes whatever colour hides behind transparent
+    pixels (often black), which looks broken in JPEGs and PDFs."""
     from PIL import Image
-    # Saving a PDF from Pillow uses the JPEG encoder internally; make sure all
-    # plugins are registered first, or Pillow raises KeyError('JPEG') when its
-    # lazy plugin init hasn't run yet (seen on Pillow 12 / frozen builds).
-    Image.init()
+    if im.mode in ("RGBA", "LA", "PA") or (im.mode == "P" and "transparency" in im.info):
+        rgba = im.convert("RGBA")
+        base = Image.new("RGB", rgba.size, bg)
+        base.paste(rgba, mask=rgba.split()[-1])
+        return base
+    return im if im.mode == "RGB" else im.convert("RGB")
+
+
+def _image_dpi(im) -> float | None:
+    try:
+        dpi = im.info.get("dpi")
+        if dpi and float(dpi[0]) > 0:
+            return float(dpi[0])
+    except Exception:
+        pass
+    return None
+
+
+_A4_LONG_IN = 11.69      # never make an image page longer than A4's long side
+
+
+def _add_image_page(doc, path: Path) -> None:
+    """Append one image to a PyMuPDF document as its own page.
+
+    One image is decoded at a time (memory stays bounded for big batches), the
+    page is sized from the image's real DPI (capped so a 4000 px photo becomes an
+    A4-sized page, not a 55-inch one), photos are turned upright and
+    transparency lands on white. A JPEG that needs no rotation is embedded as
+    its original bytes — no re-encoding, no quality loss."""
+    import io
+
+    from PIL import Image
+    with Image.open(path) as raw:
+        dpi = _image_dpi(raw)
+        fmt = (raw.format or "").upper()
+        w, h = raw.size
+        if fmt == "JPEG" and _exif_orientation(raw) in (None, 1) \
+                and raw.mode in ("RGB", "L"):
+            data = path.read_bytes()
+        else:
+            im = _flatten_rgb(_upright(raw))
+            w, h = im.size
+            buf = io.BytesIO()
+            if fmt in ("JPEG", "MPO", "HEIF", "WEBP"):
+                im.save(buf, "JPEG", quality=92, optimize=True)
+            else:
+                im.save(buf, "PNG", optimize=True)
+            data = buf.getvalue()
+    real = dpi if (dpi and 100 <= dpi <= 1200) else 150.0
+    eff = max(real, max(w, h) / _A4_LONG_IN)
+    page = doc.new_page(width=w * 72.0 / eff, height=h * 72.0 / eff)
+    page.insert_image(page.rect, stream=data)
+
+
+def image_to_pdf(srcs: list[Path], out_dir: Path, opt: dict, report: Report) -> list[Path]:
+    import fitz
+    from PIL import Image
+    Image.init()          # register every plugin (HEIC, WebP…) before opening
 
     out_dir.mkdir(parents=True, exist_ok=True)
     overwrite = opt.get("overwrite", False)
@@ -1856,24 +2395,27 @@ def image_to_pdf(srcs: list[Path], out_dir: Path, opt: dict, report: Report) -> 
     if not imgs:
         raise ProcessError("No supported image files were provided.")
 
-    def load(p: Path) -> "Image.Image":
-        im = Image.open(p)
-        if im.mode in ("RGBA", "P", "LA"):
-            bg = Image.new("RGB", im.size, (255, 255, 255))
-            im = im.convert("RGBA")
-            bg.paste(im, mask=im.split()[-1])
-            return bg
-        return im.convert("RGB")
+    def _write(paths: list[Path], out: Path) -> None:
+        doc = fitz.open()
+        try:
+            for j, p in enumerate(paths):
+                _check_cancel(report)
+                try:
+                    _add_image_page(doc, p)
+                except ProcessError:
+                    raise
+                except Exception as exc:
+                    raise ProcessError(f"Couldn't read '{p.name}' as an image ({exc}).")
+                if len(paths) > 1:
+                    _progress(report, j + 1, len(paths))
+            doc.save(str(out), garbage=3, deflate=True)
+        finally:
+            doc.close()
 
     if combine:
-        name = (opt.get("output_name") or "images").strip() or "images"
+        name = _safe_output_name(opt.get("output_name"), "images")
         out = unique_path(out_dir / f"{name}.pdf", overwrite)
-        loaded = []
-        for j, p in enumerate(imgs):
-            loaded.append(load(p))
-            _progress(report, j + 1, len(imgs))
-        first, *rest = loaded
-        first.save(out, save_all=True, append_images=rest)
+        _write(imgs, out)
         report(f"Combined {len(imgs)} images → {out.name}")
         return [out]
 
@@ -1886,7 +2428,7 @@ def image_to_pdf(srcs: list[Path], out_dir: Path, opt: dict, report: Report) -> 
         # a single base dir for aggregate units).
         dest = p.parent if numbered else out_dir
         out = build_output_path(p, dest, ".pdf", overwrite=overwrite, numbered=numbered)
-        load(p).save(out)
+        _write([p], out)
         outputs.append(out)
         report(f"{p.name} → {out.name}")
         _progress(report, j + 1, len(imgs))
@@ -1900,19 +2442,39 @@ _IMG_QUALITY = {"low": 85, "medium": 65, "high": 45}
 
 
 def verify_image_identical(src_path, out_path) -> bool:
-    """True if two images have exactly the same dimensions and pixels (used to
-    confirm a lossless image operation changed nothing visible)."""
+    """True if two images have the same frame count, dimensions, pixels (every
+    frame, not just the first) and resolution — used to confirm a lossless
+    image operation changed nothing."""
     from PIL import Image, ImageChops
     try:
-        a = Image.open(str(src_path)); a.load()
-        b = Image.open(str(out_path)); b.load()
+        a = Image.open(str(src_path))
+        b = Image.open(str(out_path))
     except Exception:
         return False
-    if a.size != b.size:
+    try:
+        na = getattr(a, "n_frames", 1) or 1
+        nb = getattr(b, "n_frames", 1) or 1
+        if na != nb or a.size != b.size:
+            return False
+        da, db = _image_dpi(a), _image_dpi(b)
+        if da and (not db or round(da) != round(db)):
+            return False                    # resolution was lost
+        for i in range(na):
+            a.seek(i)
+            b.seek(i)
+            fa, fb = a.copy(), b.copy()
+            if fa.size != fb.size:
+                return False
+            if fa.mode != fb.mode:
+                fa, fb = fa.convert("RGBA"), fb.convert("RGBA")
+            if ImageChops.difference(fa, fb).getbbox() is not None:
+                return False
+        return True
+    except Exception:
         return False
-    if a.mode != b.mode:
-        a = a.convert("RGBA"); b = b.convert("RGBA")
-    return ImageChops.difference(a, b).getbbox() is None
+    finally:
+        a.close()
+        b.close()
 
 
 def _image_compress_lossless(src: Path, im, out_dir: Path, opt: dict,
@@ -1926,16 +2488,26 @@ def _image_compress_lossless(src: Path, im, out_dir: Path, opt: dict,
     out = build_output_path(src, out_dir, ext, name_suffix="_compressed",
                             overwrite=opt.get("overwrite", False),
                             numbered=opt.get("same_as_source", False))
+    # Keep everything that makes the file "the same image": every frame of a
+    # multi-page TIFF / animated WebP, the resolution (DPI), the colour profile
+    # and EXIF (incl. the orientation tag — pixels are NOT rotated here).
+    frames = getattr(im, "n_frames", 1) or 1
+    meta = {k: im.info[k] for k in ("dpi", "icc_profile", "exif") if im.info.get(k)}
     saved = False
     try:
         if ext == ".png":
-            im.save(out, format="PNG", optimize=True)
+            if frames > 1:
+                raise ValueError("animated PNG — kept as-is")
+            im.save(out, format="PNG", optimize=True, **meta)
             saved = True
         elif ext == ".webp":
-            im.save(out, format="WEBP", lossless=True, method=6)
+            im.save(out, format="WEBP", lossless=True, method=6,
+                    save_all=frames > 1,
+                    **{k: v for k, v in meta.items() if k != "dpi"})
             saved = True
         elif ext in (".tif", ".tiff"):
-            im.save(out, format="TIFF", compression="tiff_deflate")
+            im.save(out, format="TIFF", compression="tiff_deflate",
+                    save_all=frames > 1, **meta)
             saved = True
     except Exception as exc:
         report(f"Lossless re-pack unavailable ({exc}); keeping the original.")
@@ -1984,6 +2556,11 @@ def image_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[
     if level == "lossless":
         return _image_compress_lossless(src, im, out_dir, opt, before, report)
 
+    # Lossy from here on: bake the EXIF orientation into the pixels so phone
+    # photos come out the right way up (the tag itself isn't carried over).
+    icc = im.info.get("icc_profile")
+    im = _upright(im)
+
     # Optional downscale
     if max_dim and max(im.size) > max_dim:
         ratio = max_dim / max(im.size)
@@ -1992,14 +2569,14 @@ def image_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[
 
     if out_format == "keep":
         ext = src.suffix.lower()
-        if ext in (".tif", ".tiff", ".bmp"):
-            ext = ".jpg"  # these don't benefit from lossy 'quality'; convert
+        if ext in (".tif", ".tiff", ".bmp", ".heic", ".heif"):
+            ext = ".jpg"  # no usable lossy 'quality' in these formats; convert
     else:
         ext = {"jpg": ".jpg", "png": ".png", "webp": ".webp"}.get(out_format, ".jpg")
 
     # --- compress-to-target-size ---------------------------------------
     if level == "target":
-        if ext == ".png":
+        if ext not in (".jpg", ".jpeg", ".webp"):
             ext = ".jpg"  # need a lossy format to hit an arbitrary size
         target_bytes = max(1, int(opt.get("target_kb", 250))) * 1024
         out = build_output_path(src, out_dir, ext, name_suffix="_compressed",
@@ -2017,10 +2594,12 @@ def image_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[
                             numbered=opt.get("same_as_source", False))
     save_kwargs: dict = {}
     if ext in (".jpg", ".jpeg"):
-        im = im.convert("RGB")
+        im = _flatten_rgb(im)          # transparency → white, not black
         save_kwargs = {"quality": quality, "optimize": True, "progressive": True}
     elif ext == ".webp":
         save_kwargs = {"quality": quality, "method": 6}
+    if icc and ext in (".jpg", ".jpeg", ".webp", ".png"):
+        save_kwargs["icc_profile"] = icc      # keep colours accurate
     elif ext == ".png":
         if im.mode not in ("RGBA", "RGB", "P", "L"):
             im = im.convert("RGBA")
@@ -2040,8 +2619,7 @@ def _encode_image(im, ext: str, quality: int) -> bytes:
     buf = io.BytesIO()
     work = im
     if ext in (".jpg", ".jpeg"):
-        if work.mode != "RGB":
-            work = work.convert("RGB")
+        work = _flatten_rgb(work)       # transparency → white, not black
         work.save(buf, "JPEG", quality=quality, optimize=True, progressive=True)
     elif ext == ".webp":
         work.save(buf, "WEBP", quality=quality, method=6)
@@ -2060,13 +2638,16 @@ def _image_compress_to_target(im, out: Path, ext: str, target_bytes: int,
     report(f"Targeting <= {human_size(target_bytes)} (auto-selecting quality)…")
     best: bytes | None = None
     scale = 1.0
-    for _ in range(7):
+    for attempt in range(7):
+        _check_cancel(report)
+        _progress(report, attempt, 7)
         work = im if scale == 1.0 else im.resize(
             (max(1, int(im.width * scale)), max(1, int(im.height * scale))),
             Image.LANCZOS)
         lo, hi, found = 5, 95, None
         while lo <= hi:                       # binary search quality
             q = (lo + hi) // 2
+            _check_cancel(report)
             data = _encode_image(work, ext, q)
             if len(data) <= target_bytes:
                 found = data
@@ -2083,6 +2664,7 @@ def _image_compress_to_target(im, out: Path, ext: str, target_bytes: int,
     if best is None:
         best = _encode_image(im, ext, 5)
     out.write_bytes(best)
+    _progress(report, 7, 7)
     return len(best)
 
 
@@ -2117,18 +2699,18 @@ def pdf_rotate(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path
     if angle % 90 != 0:
         raise ProcessError("Rotation must be a multiple of 90°.")
     targets = _page_set(opt.get("pages", "all"), n, default_all=True)
-    writer = PdfWriter()
+    try:        # clone the whole document: bookmarks, links, forms, metadata
+        writer = PdfWriter(clone_from=reader)
+    except Exception:
+        writer = _subset_writer(reader, list(range(n)))
     for i in range(n):
-        page = reader.pages[i]
         if i in targets:
-            page.rotate(angle)
-        writer.add_page(page)
+            writer.pages[i].rotate(angle)
         _progress(report, i + 1, n)
     return _write_pdf(writer, src, out_dir, opt, "_rotated", report)
 
 
 def pdf_delete(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
-    from pypdf import PdfWriter
     reader, n = _open_reader(src)
     remove = _page_set(opt.get("pages", ""), n)
     if not remove:
@@ -2136,23 +2718,18 @@ def pdf_delete(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path
     kept = [i for i in range(n) if i not in remove]
     if not kept:
         raise ProcessError("That would delete every page.")
-    writer = PdfWriter()
-    for j, i in enumerate(kept):
-        writer.add_page(reader.pages[i])
-        _progress(report, j + 1, len(kept))
+    writer = _subset_writer(reader, kept)
+    _progress(report, 1, 1)
     return _write_pdf(writer, src, out_dir, opt, "_pages-removed", report)
 
 
 def pdf_extract(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
-    from pypdf import PdfWriter
     reader, n = _open_reader(src)
     order = _page_list(opt.get("pages", ""), n)
     if not order:
         raise ProcessError("Enter the pages to extract, e.g. 1-5, 10, 15-20.")
-    writer = PdfWriter()
-    for j, i in enumerate(order):
-        writer.add_page(reader.pages[i])
-        _progress(report, j + 1, len(order))
+    writer = _subset_writer(reader, order)
+    _progress(report, 1, 1)
     return _write_pdf(writer, src, out_dir, opt, "_extracted", report)
 
 
@@ -2166,6 +2743,7 @@ _PN_POS = {
 
 def pdf_page_numbers(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
     import fitz
+    _require_readable_pdf(src)
     fmt = opt.get("format", "n")
     halign, valign = _PN_POS.get(opt.get("position", "bottom-center"),
                                  ("center", "bottom"))
@@ -2225,9 +2803,18 @@ def pdf_sign(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
     except Exception as exc:
         raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
     try:
+        import io
+
         from PIL import Image
-        with Image.open(sigpath) as im:
-            ratio = (im.height / im.width) if im.width else 0.4
+        try:
+            with Image.open(sigpath) as im:
+                sig = _upright(im)            # phone photo of a signature
+                ratio = (sig.height / sig.width) if sig.width else 0.4
+                buf = io.BytesIO()
+                sig.save(buf, "PNG")          # PNG keeps any transparency
+                sigdata = buf.getvalue()
+        except Exception as exc:
+            raise ProcessError(f"Couldn't open the signature image ({exc}).")
         if which == "first":
             pages = [0]
         elif which == "all":
@@ -2244,9 +2831,10 @@ def pdf_sign(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
                   else rect.width - margin - w if halign == "right"
                   else (rect.width - w) / 2.0)
             y0 = (margin if valign == "top" else rect.height - margin - h)
-            box = fitz.Rect(x0, y0, x0 + w, y0 + h)
-            page.insert_image(box, filename=str(sigpath), overlay=True,
-                              keep_proportion=True)
+            box = fitz.Rect(x0, y0, x0 + w, y0 + h)          # visual space
+            page.insert_image(_visual_to_page(page, box), stream=sigdata,
+                              overlay=True, keep_proportion=True,
+                              rotate=page.rotation)
             _progress(report, n + 1, len(pages))
         out = build_output_path(src, out_dir, ".pdf", name_suffix="_signed",
                                 overwrite=opt.get("overwrite", False),
@@ -2267,22 +2855,166 @@ def _pdf_date(dt) -> str:
     return dt.strftime("D:%Y%m%d%H%M%S") + f"{sign}{hh:02d}'{mm:02d}'"
 
 
-def _xmp_rights_packet(copyright_text: str) -> bytes:
-    """A minimal, valid XMP packet carrying the copyright (dc:rights) and marking
-    the document as rights-managed — the way Acrobat stores 'Copyright'."""
-    from xml.sax.saxutils import escape
-    c = escape(copyright_text)
-    return (
-        '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>'
-        '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
-        '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
-        '<rdf:Description rdf:about="" '
-        'xmlns:dc="http://purl.org/dc/elements/1.1/" '
-        'xmlns:xmpRights="http://ns.adobe.com/xap/1.0/rights/">'
-        f'<dc:rights><rdf:Alt><rdf:li xml:lang="x-default">{c}</rdf:li></rdf:Alt></dc:rights>'
-        '<xmpRights:Marked>True</xmpRights:Marked>'
-        '</rdf:Description></rdf:RDF></x:xmpmeta>'
-        '<?xpacket end="w"?>').encode("utf-8")
+_XMP_NS = {
+    "x": "adobe:ns:meta/",
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "dc": "http://purl.org/dc/elements/1.1/",
+    "pdf": "http://ns.adobe.com/pdf/1.3/",
+    "xmp": "http://ns.adobe.com/xap/1.0/",
+    "xmpRights": "http://ns.adobe.com/xap/1.0/rights/",
+}
+# XMP property -> (namespace prefix, local name, container kind)
+_XMP_FIELDS = {
+    "title": ("dc", "title", "alt"), "subject": ("dc", "description", "alt"),
+    "author": ("dc", "creator", "seq"), "rights": ("dc", "rights", "alt"),
+    "keywords": ("pdf", "Keywords", "text"), "producer": ("pdf", "Producer", "text"),
+    "creator": ("xmp", "CreatorTool", "text"), "create_date": ("xmp", "CreateDate", "text"),
+    "modify_date": ("xmp", "ModifyDate", "text"), "metadata_date": ("xmp", "MetadataDate", "text"),
+    "marked": ("xmpRights", "Marked", "text"),
+}
+
+
+def _pdf_date_to_xmp(value: str) -> str:
+    """'D:20260607143000+04'00'' -> '2026-06-07T14:30:00+04:00' ('' if unparsable)."""
+    import re
+    m = re.match(r"D?:?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?"
+                 r"(Z|[+-]\d{2}'?\d{2}'?)?", str(value or ""))
+    if not m:
+        return ""
+    y, mo, d, hh, mi, ss, tz = m.groups()
+    out = f"{y}-{mo or '01'}-{d or '01'}T{hh or '00'}:{mi or '00'}:{ss or '00'}"
+    if tz and tz != "Z":
+        t = tz.replace("'", "")
+        out += f"{t[:3]}:{t[3:5]}"
+    elif tz == "Z":
+        out += "Z"
+    return out
+
+
+def _merge_xmp(existing: bytes | None, fields: dict) -> bytes:
+    """Update the XMP packet in place: set the given properties (removing any
+    older copy, in element or attribute form) and keep everything else — e.g.
+    the PDF/A identification, which a replaced packet used to lose."""
+    import xml.etree.ElementTree as ET
+    for k, v in _XMP_NS.items():
+        ET.register_namespace(k, v)
+    rdf = _XMP_NS["rdf"]
+    root = None
+    if existing:
+        try:
+            txt = existing.decode("utf-8", "replace")
+            # Keep the packet's own prefixes (pdfaid:, xmpMM:, …) on output
+            # instead of ElementTree's ns0:, ns1:.
+            import re
+            for pfx, uri in re.findall(r'xmlns:([A-Za-z_][\w.-]*)="([^"]+)"', txt):
+                try:
+                    ET.register_namespace(pfx, uri)
+                except ValueError:
+                    pass
+            start = txt.find("<x:xmpmeta")
+            if start < 0:
+                start = txt.find("<rdf:RDF")
+            end_tag = "</x:xmpmeta>" if "<x:xmpmeta" in txt else "</rdf:RDF>"
+            end = txt.rfind(end_tag)
+            if start >= 0 and end > start:
+                root = ET.fromstring(txt[start:end + len(end_tag)])
+        except ET.ParseError:
+            root = None
+    if root is None:
+        root = ET.Element(f"{{{_XMP_NS['x']}}}xmpmeta")
+        ET.SubElement(root, f"{{{rdf}}}RDF")
+    rdf_el = root if root.tag == f"{{{rdf}}}RDF" else root.find(f"{{{rdf}}}RDF")
+    if rdf_el is None:
+        rdf_el = ET.SubElement(root, f"{{{rdf}}}RDF")
+    descs = rdf_el.findall(f"{{{rdf}}}Description")
+    if not descs:
+        d = ET.SubElement(rdf_el, f"{{{rdf}}}Description")
+        d.set(f"{{{rdf}}}about", "")
+        descs = [d]
+    target = descs[0]
+    for key, value in fields.items():
+        if value is None or key not in _XMP_FIELDS:
+            continue
+        pfx, local, kind = _XMP_FIELDS[key]
+        tag = f"{{{_XMP_NS[pfx]}}}{local}"
+        for d in descs:                                 # drop every older copy
+            for el in d.findall(tag):
+                d.remove(el)
+            if tag in d.attrib:
+                del d.attrib[tag]
+        if value == "":
+            continue                                    # "" = remove only
+        el = ET.SubElement(target, tag)
+        if kind == "text":
+            el.text = str(value)
+        else:
+            box = ET.SubElement(el, f"{{{rdf}}}{'Alt' if kind == 'alt' else 'Seq'}")
+            li = ET.SubElement(box, f"{{{rdf}}}li")
+            if kind == "alt":
+                li.set("{http://www.w3.org/XML/1998/namespace}lang", "x-default")
+            li.text = str(value)
+    body = ET.tostring(root, encoding="unicode")
+    return ('<?xpacket begin="\ufeff" id="W5M0MpCehiHzreSzNTczkc9d"?>' + body
+            + '<?xpacket end="w"?>').encode("utf-8")
+
+
+def _scrub_document(writer, keep_info: set, report: Report) -> list[str]:
+    """Remove identifying data beyond the Info dictionary: custom Info keys,
+    annotation authors, embedded files, page/image XMP, private app data and
+    the file identifier. Returns what was removed (for the report)."""
+    import os
+    from pypdf.generic import ArrayObject, ByteStringObject, NameObject
+    removed: list[str] = []
+    info = writer._info.get_object() if writer._info is not None else {}
+    for k in list(info.keys()):
+        if k not in keep_info:
+            try:
+                del info[k]
+            except Exception:
+                pass
+    root = writer._root_object
+    names = root.get("/Names")
+    names = names.get_object() if names is not None else None
+    if names is not None and "/EmbeddedFiles" in names:
+        del names[NameObject("/EmbeddedFiles")]
+        removed.append("embedded files")
+    for k in ("/AF", "/PieceInfo", "/SpiderInfo"):
+        if k in root:
+            del root[NameObject(k)]
+    authors = 0
+    for page in writer.pages:
+        for k in ("/Metadata", "/PieceInfo"):
+            if k in page:
+                del page[NameObject(k)]
+        for a in (page.get("/Annots") or []):
+            try:
+                ann = a.get_object()
+            except Exception:
+                continue
+            for k in ("/T", "/RC", "/CreationDate", "/M", "/NM"):
+                if k in ann:
+                    del ann[NameObject(k)]
+                    authors += k == "/T"
+            if ann.get("/Subtype") == "/FileAttachment" and "/FS" in ann:
+                del ann[NameObject("/FS")]
+        res = page.get("/Resources")
+        xo = res.get_object().get("/XObject") if res is not None else None
+        for ref in (xo.get_object().values() if xo is not None else []):
+            try:
+                o = ref.get_object()
+                if "/Metadata" in o:
+                    del o[NameObject("/Metadata")]
+            except Exception:
+                pass
+    if authors:
+        removed.append(f"{authors} comment author name(s)")
+    # A fresh file identifier (the old one can link copies of a document).
+    try:
+        writer._ID = ArrayObject([ByteStringObject(os.urandom(16)),
+                                  ByteStringObject(os.urandom(16))])
+    except Exception:
+        pass
+    return removed
 
 
 def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
@@ -2314,10 +3046,7 @@ def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
         import datetime
         info = writer._info.get_object()
         if privacy == "all":
-            try:
-                info.clear()
-            except Exception:
-                log.debug("could not clear PDF info dictionary", exc_info=True)
+            extra = _scrub_document(writer, set(), report)
             for key in ("/Metadata", "/Lang"):
                 if key in root:
                     try:
@@ -2325,14 +3054,10 @@ def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
                     except Exception:
                         log.debug("could not remove PDF root key", exc_info=True)
             msg = "Removed all metadata"
-        else:  # scrub: drop identifying fields, reset dates, drop XMP
-            for k in ("/Author", "/Creator", "/Producer", "/Company",
-                      "/Manager", "/Comments"):
-                if k in info:
-                    try:
-                        del info[k]
-                    except Exception:
-                        log.debug("could not remove PDF info key", exc_info=True)
+        else:  # scrub: keep only Title/Subject/Keywords (+Trapped), reset dates
+            extra = _scrub_document(
+                writer, {"/Title", "/Subject", "/Keywords", "/Trapped"}, report)
+            info = writer._info.get_object()
             stamp = create_string_object(_pdf_date(datetime.datetime.now()))
             info[NameObject("/CreationDate")] = stamp
             info[NameObject("/ModDate")] = stamp
@@ -2342,6 +3067,8 @@ def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
                 except Exception:
                     log.debug("could not remove XMP metadata stream", exc_info=True)
             msg = "Scrubbed identifying metadata (kept Title/Subject/Keywords)"
+        if extra:
+            msg += "; also removed " + ", ".join(extra)
         with open(out, "wb") as fh:
             writer.write(fh)
         report(f"{msg} → {out.name}")
@@ -2411,16 +3138,41 @@ def pdf_metadata(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
         vp[NameObject("/DisplayDocTitle")] = BooleanObject(True)
         changed.append("show_title")
 
-    # --- copyright → XMP rights ----------------------------------------------
+    # --- XMP: keep it in step with the Info dictionary ------------------------
+    # Readers such as Acrobat show XMP over Info, so an edit that left the old
+    # XMP in place still showed the old author. Merge — never replace — so the
+    # rest of the packet (e.g. PDF/A identification) survives.
     copyright_text = str(opt.get("copyright", "") or "").strip()
+    existing = None
+    if "/Metadata" in root:
+        try:
+            existing = root["/Metadata"].get_object().get_data()
+        except Exception:
+            existing = None
+    info_now = writer._info.get_object() if writer._info is not None else {}
+    xmp_fields: dict = {}
+    for key, pdfkey in (("title", "/Title"), ("author", "/Author"),
+                        ("subject", "/Subject"), ("keywords", "/Keywords"),
+                        ("creator", "/Creator"), ("producer", "/Producer")):
+        if key in changed:
+            xmp_fields[key] = str(info_now.get(pdfkey, ""))
+    for key, pdfkey, optkey in (("create_date", "/CreationDate", "creation_date"),
+                                ("modify_date", "/ModDate", "mod_date")):
+        if optkey in changed:
+            xmp_fields[key] = _pdf_date_to_xmp(str(info_now.get(pdfkey, "")))
     if copyright_text:
+        xmp_fields["rights"] = copyright_text
+        xmp_fields["marked"] = "True"
+        changed.append("copyright")
+    if xmp_fields and (existing is not None or copyright_text):
+        import datetime
         from pypdf.generic import DecodedStreamObject
+        xmp_fields["metadata_date"] = _pdf_date_to_xmp(_pdf_date(datetime.datetime.now()))
         st = DecodedStreamObject()
-        st.set_data(_xmp_rights_packet(copyright_text))
+        st.set_data(_merge_xmp(existing, xmp_fields))
         st[NameObject("/Type")] = NameObject("/Metadata")
         st[NameObject("/Subtype")] = NameObject("/XML")
         root[NameObject("/Metadata")] = writer._add_object(st)
-        changed.append("copyright")
 
     with open(out, "wb") as fh:
         writer.write(fh)
@@ -2447,11 +3199,26 @@ def _parse_dt(value):
         return None
     if s.lower() in ("now", "today"):
         return datetime.datetime.now()
+    hits = []
     for fmt in _DT_FORMATS:
         try:
-            return datetime.datetime.strptime(s, fmt)
+            dt = datetime.datetime.strptime(s, fmt)
         except ValueError:
             continue
+        if fmt.startswith("%Y"):
+            return dt                         # ISO is never ambiguous
+        if dt not in hits:
+            hits.append(dt)
+    if len(hits) == 1:
+        return hits[0]
+    if len(hits) > 1:
+        # 03/04/2026 is 3 April in most of the world and March 4 in the US;
+        # silently picking one writes a wrong date into the file.
+        a_, b_ = hits[0], hits[1]
+        raise ProcessError(
+            f"The date '{s}' is ambiguous — it could be {a_:%d %B %Y} or "
+            f"{b_:%d %B %Y}. Please type it as year-month-day, e.g. "
+            f"{a_:%Y-%m-%d}.")
     raise ProcessError(
         f"Couldn't understand the date '{s}'. Use e.g. 2026-06-07 or "
         "2026-06-07 14:30.")
@@ -2578,14 +3345,66 @@ def pdf_ocr(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
                + (f"  ({kept} already searchable)" if kept else ""))
         # OCR the image-only pages in parallel, then write text in page order.
         page_lines = _ocr_pages_concurrent(src, todo, report, dpi, lang)
-        added = 0
+        # Optional AI pass: clean up the recognised text and derive metadata.
+        # Recognition already ran locally; only the text is sent for correction.
+        ai_meta = _ocr_ai_pass(src, opt, page_lines, report) if opt.get("ocr_use_ai") else None
+        _check_cancel(report)     # Cancel during the AI step → no half-done file
+        added = skipped = 0
+        embedded = False
         for i in todo:
+            tw = None
             for text, (x0, y0, x1, y1) in page_lines.get(i, []):
+                chars = {c for c in text if not c.isspace()}
+                fontname, fontfile = _ocr_text_font(chars)
+                if not fontname:
+                    skipped += 1          # never write garbage into the layer
+                    continue
                 fontsize = max(4.0, (y1 - y0) * 0.9)
-                # render_mode=3 → invisible text (selectable/searchable only)
-                doc[i].insert_text(fitz.Point(x0, y1), text, fontsize=fontsize,
-                                   fontname="helv", render_mode=3)
+                if fontname == "helv":
+                    if tw is not None:        # flush first: keep reading order
+                        tw.write_text(doc[i], render_mode=3)
+                        tw = None
+                    # render_mode=3 → invisible text (selectable/searchable only)
+                    doc[i].insert_text(fitz.Point(x0, y1), text, fontsize=fontsize,
+                                       fontname="helv", render_mode=3)
+                else:
+                    # Unicode text (Arabic, Cyrillic, ł/č/ş…): TextWriter keeps
+                    # right-to-left lines in logical (searchable) order.
+                    if tw is None:
+                        tw = fitz.TextWriter(doc[i].rect)
+                    tw.append(fitz.Point(x0, y1), text,
+                              font=_ocr_font_obj(fontfile or fontname, fontfile),
+                              fontsize=fontsize, right_to_left=_is_rtl(text))
+                    embedded = True
                 added += 1
+            if tw is not None:
+                tw.write_text(doc[i], render_mode=3)
+        if skipped:
+            report(f"{skipped} line(s) use characters no installed font can "
+                   "represent and were left out of the text layer.")
+        if embedded:
+            try:
+                doc.subset_fonts()        # embed only the glyphs actually used
+            except Exception:
+                log.debug("font subsetting unavailable", exc_info=True)
+            _normalize_tounicode(doc, todo)   # base letters + real spaces
+        if ai_meta:                          # write AI-derived document metadata
+            # Only Title / Subject (what the option promises), and only where the
+            # file has none — never overwrite the source's real metadata, never
+            # invent an Author.
+            md = dict(doc.metadata or {})
+            filled = [f for f in ("title", "subject")
+                      if ai_meta.get(f) and not (md.get(f) or "").strip()]
+            for fld in filled:
+                md[fld] = ai_meta[fld]
+            if filled:
+                try:
+                    doc.set_metadata(md)
+                    report("AI filled in the document's " + " and ".join(filled)
+                           + " (it had none).")
+                except Exception:            # noqa: BLE001 — metadata is a nicety
+                    log.debug("could not set AI metadata on the OCR output",
+                              exc_info=True)
         out = build_output_path(src, out_dir, ".pdf", name_suffix="_searchable",
                                 overwrite=opt.get("overwrite", False),
                                 numbered=opt.get("same_as_source", False))
@@ -2594,6 +3413,49 @@ def pdf_ocr(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
         doc.close()
     report(f"Added a searchable text layer ({added} snippets) → {out.name}")
     return [out]
+
+
+def _ocr_ai_pass(src: Path, opt: dict, page_lines: dict, report: Report):
+    """Best-effort AI step for OCR: clean up the recognised text in-place (in
+    ``page_lines``) and return a metadata dict (title/author/subject) derived
+    from the corrected text, or None. Never raises; degrades to plain OCR."""
+    if not any(page_lines.values()):
+        return None
+    from mico360.core import ai as _ai
+    cfg = _ai.load_config()
+    ok, why = cfg.is_usable()
+    if not ok:
+        report(f"AI step skipped — {why}")
+        return None
+    is_cancelled = getattr(report, "cancelled", None)
+    from mico360.core import ocr_ai
+    import urllib.parse
+    host = urllib.parse.urlsplit(cfg.effective_base_url).hostname or "the AI server"
+    n_pages = sum(1 for v in page_lines.values() if v)
+    report(f"AI: sending the recognised text of {n_pages} page(s) to {host} "
+           "for clean-up (turn off \"Use AI\" to keep everything on this PC)…")
+    for i, lines in list(page_lines.items()):
+        if is_cancelled is not None and is_cancelled():
+            return None
+        texts = [t for t, _bbox in lines]
+        fixed = ocr_ai.cleanup_lines(cfg, texts, is_cancelled)
+        page_lines[i] = [(fixed[j] or texts[j], lines[j][1])
+                         for j in range(len(lines))]
+    if is_cancelled is not None and is_cancelled():
+        return None
+    # Derive metadata from the cleaned text (reuses the metadata prompt).
+    excerpt = "\n".join(t for lines in page_lines.values()
+                        for t, _bbox in lines).strip()[:6000]
+    if not excerpt:
+        return None
+    try:
+        from mico360.core import ai_metadata
+        report("AI: reading the document for title & subject…")
+        return ai_metadata.suggest_metadata(src, cfg, excerpt=excerpt,
+                                             cancel=ocr_ai.cancel_event(is_cancelled))
+    except Exception as exc:                 # noqa: BLE001
+        report(f"AI metadata skipped ({type(exc).__name__}).")
+        return None
 
 
 # =========================================================================
@@ -2675,7 +3537,7 @@ def _office_com_to_pdf(app_name: str, src: Path, final: Path) -> bool:
                 pres = app.Presentations.Open(src_s, WithWindow=False)
                 pres.SaveAs(final_s, 32)             # 32 = ppSaveAsPDF
                 pres.Close()
-        return final.exists()
+        return is_nonempty(final)
     finally:
         try:
             if app is not None:
@@ -2776,7 +3638,7 @@ def _lo_convert_to(soffice: str, src: Path, to_ext: str) -> Path:
         import shutil
         shutil.rmtree(profile, ignore_errors=True)
     produced = tmpdir / f"{src.stem}.{to_ext}"
-    if proc.returncode != 0 or not produced.exists():
+    if proc.returncode != 0 or not is_nonempty(produced):
         raise RuntimeError((proc.stderr or proc.stdout or "no output").strip()[:200])
     return produced
 
@@ -3126,8 +3988,7 @@ def _save_image(im, out: Path, fmt: str, quality: int = 90) -> None:
     """Save *im* to *out* in *fmt* (jpg/png/webp/tiff/bmp), handling mode."""
     fmt = fmt.lower()
     if fmt in ("jpg", "jpeg"):
-        if im.mode != "RGB":
-            im = im.convert("RGB")
+        im = _flatten_rgb(im)          # transparency → white, not black
         im.save(out, "JPEG", quality=quality, optimize=True, progressive=True)
     elif fmt == "webp":
         im.save(out, "WEBP", quality=quality, method=6)
@@ -3139,7 +4000,7 @@ def _save_image(im, out: Path, fmt: str, quality: int = 90) -> None:
         im.save(out, "TIFF")
     elif fmt == "bmp":
         if im.mode not in ("RGB", "L", "P"):
-            im = im.convert("RGB")
+            im = _flatten_rgb(im)
         im.save(out, "BMP")
     elif fmt in ("heic", "heif"):
         if im.mode not in ("RGB", "RGBA", "L"):
@@ -3164,6 +4025,7 @@ def image_resize(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
         im.load()
     except Exception as exc:
         raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
+    im = _upright(im)                  # phone photos: width/height as displayed
     w, h = im.size
     mode = opt.get("mode", "dimensions")
     if mode == "percent":
@@ -3208,6 +4070,7 @@ def image_convert(src: Path, out_dir: Path, opt: dict, report: Report) -> list[P
         im.load()
     except Exception as exc:
         raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
+    im = _upright(im)
     out = build_output_path(src, out_dir, ext, overwrite=opt.get("overwrite", False),
                             numbered=opt.get("same_as_source", False))
     _save_image(im, out, fmt, _clampi(opt.get("quality", 90), 5, 100, 90))
@@ -3233,7 +4096,7 @@ def image_watermark(src: Path, out_dir: Path, opt: dict, report: Report) -> list
     if src.suffix.lower() not in IMAGE_EXTS:
         raise ProcessError(f"Unsupported image type: {src.suffix}")
     try:
-        base = Image.open(src).convert("RGBA")
+        base = _upright(Image.open(src)).convert("RGBA")
     except Exception as exc:
         raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
     opacity = _clampi(opt.get("opacity", 25), 1, 100, 25) / 100.0
@@ -3246,7 +4109,7 @@ def image_watermark(src: Path, out_dir: Path, opt: dict, report: Report) -> list
         if not raw or not Path(raw).exists():
             raise ProcessError("Choose a logo / image for the watermark.")
         try:
-            logo = Image.open(raw).convert("RGBA")
+            logo = _upright(Image.open(raw)).convert("RGBA")
         except Exception as exc:
             raise ProcessError(f"Couldn't open logo ({exc}).")
         scale = _clampi(opt.get("scale", 40), 5, 100, 40) / 100.0

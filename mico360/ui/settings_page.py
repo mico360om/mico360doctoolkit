@@ -504,33 +504,16 @@ class SettingsPage(QWidget):
         self._models_gen += 1
         gen = self._models_gen
 
-        from PySide6.QtCore import QObject, QThread, Signal
-
-        class _Worker(QObject):
-            done = Signal(list)
-            failed = Signal(str)
-
-            def run(self):
-                try:
-                    self.done.emit(list(ai_core.list_models(cfg)))
-                except Exception as exc:               # noqa: BLE001
-                    self.failed.emit(str(exc))
-
-        self._models_thread = QThread(self)
-        self._models_worker = _Worker()
-        self._models_worker.moveToThread(self._models_thread)
-        self._models_thread.started.connect(self._models_worker.run)
-        self._models_worker.done.connect(
-            lambda models: self._on_models(models, quiet, gen))
-        self._models_worker.failed.connect(
+        # Daemon thread + UI-thread relay (see mico360.ui.bg): the callbacks run
+        # on the UI thread — they used to run on the worker thread and touch
+        # widgets from there, which crashed intermittently.
+        from mico360.ui.bg import run_in_background
+        self._models_thread = run_in_background(
+            self, lambda: list(ai_core.list_models(cfg)),
+            lambda models: self._on_models(models, quiet, gen),
             lambda msg: self._on_models_failed(msg, quiet, gen))
-        self._models_thread.start()
 
     def _end_models_thread(self) -> None:
-        t = getattr(self, "_models_thread", None)
-        if t is not None:
-            t.quit()
-            t.wait(3000)
         self._models_thread = None
         self._models_worker = None
         if getattr(self, "_models_again", False):
@@ -616,7 +599,14 @@ class SettingsPage(QWidget):
         custom = self.ai_source.currentData() == ai_core.SOURCE_CUSTOM
         self.ai_url.setEnabled(custom)
         stored = ai_core.unseal_key(settings.ai_api_key_sealed)
-        if stored:
+        cur = ai_core.AiConfig(source=self.ai_source.currentData(),
+                               base_url=self.ai_url.text().strip())
+        if stored and not ai_core.stored_key_for(cur.effective_base_url):
+            self.ai_key.setPlaceholderText("Paste the API key for this server")
+            self.ai_key_state.setText(
+                "The saved key belongs to a different AI server, so it won't be "
+                "sent here. Paste this server's key and save.")
+        elif stored:
             self.ai_key.setPlaceholderText(ai_core.masked_key(stored) + "  (saved)")
             self.ai_key_state.setText(
                 "A key is saved. Leave blank to keep it, or type a new one to "
@@ -635,14 +625,15 @@ class SettingsPage(QWidget):
     def _collect_ai(self):
         """Form values as an AiConfig, plus the freshly typed key (if any)."""
         from mico360.core import ai as ai_core
-        typed = self.ai_key.text().strip()
+        typed = ai_core.sanitize_key(self.ai_key.text())
         cfg = ai_core.AiConfig(
             enabled=self.chk_ai.isChecked(),
             source=self.ai_source.currentData(),
             base_url=self.ai_url.text().strip(),
-            api_key=typed or ai_core.unseal_key(settings.ai_api_key_sealed),
             model=self.ai_model.currentText().strip(),
         )
+        # The saved key is only reused for the server it was saved for.
+        cfg.api_key = typed or ai_core.stored_key_for(cfg.effective_base_url)
         return cfg, typed
 
     def _save_ai(self) -> None:
@@ -682,28 +673,22 @@ class SettingsPage(QWidget):
         self.ai_status.setText("Testing…")
         cfg = ai_core.load_config()
 
-        from PySide6.QtCore import QObject, QThread, Signal
+        def _run():
+            try:
+                return ai_core.test_connection(cfg)
+            except Exception as exc:            # noqa: BLE001
+                return False, f"Unexpected error ({type(exc).__name__})."
 
-        class _Tester(QObject):
-            done = Signal(bool, str)
+        def _done(result):
+            self._clear_test_thread()
+            self._on_test_done(*result)
 
-            def run(self):
-                try:
-                    ok, msg = ai_core.test_connection(cfg)
-                except Exception as exc:            # noqa: BLE001
-                    ok, msg = False, f"Unexpected error: {exc}"
-                self.done.emit(ok, msg)
+        def _failed(_msg):
+            self._clear_test_thread()
+            self._on_test_done(False, "Unexpected error.")
 
-        self._test_thread = QThread(self)
-        self._test_worker = _Tester()
-        self._test_worker.moveToThread(self._test_thread)
-        self._test_thread.started.connect(self._test_worker.run)
-        self._test_worker.done.connect(self._on_test_done)
-        self._test_worker.done.connect(self._test_thread.quit)
-        self._test_thread.finished.connect(self._test_worker.deleteLater)
-        self._test_thread.finished.connect(self._test_thread.deleteLater)
-        self._test_thread.finished.connect(self._clear_test_thread)
-        self._test_thread.start()
+        from mico360.ui.bg import run_in_background
+        self._test_thread = run_in_background(self, _run, _done, _failed)
 
     def _clear_test_thread(self) -> None:
         self._test_thread = None
@@ -925,6 +910,9 @@ class SettingsPage(QWidget):
         registry blocked), snap the checkbox back to the real state."""
         from mico360 import shell_integration as si
         ok = si.register() if on else si.unregister()
+        if ok:
+            # Remembered, so an install / auto-update never re-adds it.
+            settings.shell_menu_opt_out = not on
         if not ok or si.is_registered() != on:
             self.chk_shell.blockSignals(True)
             self.chk_shell.setChecked(si.is_registered())

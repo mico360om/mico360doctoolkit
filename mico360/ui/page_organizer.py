@@ -175,6 +175,17 @@ class PageOrganizerDialog(QDialog):
                          f"editable.)")
         self._sync_toolbar()
 
+        # Keyboard access (the grid's own arrow keys move the selection).
+        from PySide6.QtGui import QKeySequence, QShortcut
+        for keys, slot, btn in (("Ctrl+R", self._rotate_cw, self.btn_rot_cw),
+                                ("Ctrl+L", self._rotate_ccw, self.btn_rot_ccw),
+                                ("Delete", self._delete_selected, self.btn_delete),
+                                ("Ctrl+B", self._add_split, self.btn_split)):
+            sc = QShortcut(QKeySequence(keys), self.grid)
+            sc.setContext(Qt.WidgetWithChildrenShortcut)
+            sc.activated.connect(slot)
+            btn.setToolTip(f"{btn.text().strip()}  ({keys})")
+
         # Kick off progressive rendering (no-op once the queue drains).
         self._timer = QTimer(self)
         self._timer.setInterval(0)
@@ -226,8 +237,21 @@ class PageOrganizerDialog(QDialog):
             if not it.data(_DIVIDER) and it.data(_SRC) == src:
                 self._paint_item(it)
 
-    def closeEvent(self, ev):           # noqa: N802
+    def _stop(self) -> None:
+        """Stop background rendering and release the PDF. Apply/Cancel go
+        through done(), never closeEvent — without this the render timer kept
+        running and the source file stayed locked on Windows."""
+        if hasattr(self, "_timer"):
+            self._timer.stop()
+        self._render_queue = []
         self._close_doc()
+
+    def done(self, result: int) -> None:  # noqa: D401 (Qt API)
+        self._stop()
+        super().done(result)
+
+    def closeEvent(self, ev):           # noqa: N802
+        self._stop()
         super().closeEvent(ev)
 
     # -- construction helpers ------------------------------------------------

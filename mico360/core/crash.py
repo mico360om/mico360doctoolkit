@@ -86,10 +86,45 @@ def write_report(text: str) -> Path | None:
         return None
 
 
+_DOC_EXT = (r"pdf|docx?|xlsx?|pptx?|odt|ods|odp|rtf|csv|txt|md|png|jpe?g|webp|"
+            r"bmp|tiff?|gif|heic|heif|svg|zip")
+
+
+def redact(text: str) -> str:
+    """Strip personal details from text that is about to leave the computer
+    (a public GitHub issue, an email): the Windows/macOS user name and home
+    folder in paths, document file names, and anything that looks like an API
+    key. The locally saved report keeps full detail."""
+    import getpass
+    import os
+    import re
+    out = str(text or "")
+    home = os.path.expanduser("~")
+    if home and len(home) > 3:
+        for variant in {home, home.replace("\\", "/")}:
+            out = re.sub(re.escape(variant), "~", out, flags=re.IGNORECASE)
+    try:
+        user = getpass.getuser()
+    except Exception:
+        user = ""
+    if user and len(user) >= 3:
+        out = re.sub(rf"(?<![A-Za-z0-9]){re.escape(user)}(?![A-Za-z0-9])", "<user>",
+                     out, flags=re.IGNORECASE)
+    out = re.sub(r"(Bearer\s+)\S+", r"\1<redacted>", out, flags=re.IGNORECASE)
+    out = re.sub(r"\b(sk|mico)[-_][A-Za-z0-9_\-]{8,}", "<redacted-key>", out)
+    # Document names: keep the extension (useful for debugging), drop the name.
+    # After a path separator the name may contain spaces; a bare name may not.
+    out = re.sub(rf"([\\/])[^\\/:*?\"'<>|\r\n]+?\.({_DOC_EXT})\b", r"\1<file>.\2",
+                 out, flags=re.IGNORECASE)
+    out = re.sub(rf"(?<![\w.<>\\/-])[\w\-.()\[\]]+\.({_DOC_EXT})\b", r"<file>.\1",
+                 out, flags=re.IGNORECASE)
+    return out
+
+
 def issue_title(exc_type, exc) -> str:
     """A concise, useful issue title derived from the exception."""
     name = getattr(exc_type, "__name__", "Error")
-    msg = " ".join(str(exc).split())          # collapse whitespace/newlines
+    msg = " ".join(redact(str(exc)).split())  # collapse whitespace/newlines
     title = f"Crash: {name}: {msg}".rstrip(": ").strip()
     return (title[:117] + "…") if len(title) > 118 else title
 
@@ -101,11 +136,13 @@ def github_issue_url(title: str, body: str, report_path: Path | None = None) -> 
 
     The report body is trimmed until the *encoded* URL fits GitHub's limit, so the
     link always opens (rather than failing with '414 URI Too Long')."""
+    body = redact(body)          # the issue is public: no user name / file names
     note = ("\n\n---\n_Filed from the in-app crash reporter. "
             "Please add what you were doing when it happened._")
     if report_path is not None:
         note += (f"\n_A full report and log were saved on your computer at "
-                 f"`{report_path}` and `{report_path.with_suffix('.log').name}` — "
+                 f"`{redact(str(report_path))}` and "
+                 f"`{report_path.with_suffix('.log').name}` — "
                  f"please drag the `.log` here to attach it._")
 
     def build(b: str) -> str:
@@ -126,6 +163,6 @@ def mailto_url(text: str) -> str:
     """A mailto: link pre-filled with a (truncated) report — opens the user's
     email client; nothing is sent until the user presses send themselves."""
     subject = f"{__app_name__} v{__version__} crash report"
-    body = text[:1500]
+    body = redact(text)[:1500]
     return (f"mailto:{REPORT_EMAIL}?subject={urllib.parse.quote(subject)}"
             f"&body={urllib.parse.quote(body)}")

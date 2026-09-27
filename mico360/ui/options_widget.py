@@ -48,6 +48,7 @@ class _PosGrid(QWidget):
                 rb.setObjectName("PosDot")
                 rb.setCursor(Qt.PointingHandCursor)
                 rb.setToolTip(pos.replace("-", " ").title())
+                rb.setAccessibleName(pos.replace("-", " ").title())   # screen readers
                 self._group.addButton(rb)
                 self._buttons[pos] = rb
                 g.addWidget(rb, r, c, Qt.AlignCenter)
@@ -99,10 +100,13 @@ class _PagePlanField(QWidget):
         from mico360.ui.page_organizer import PageOrganizerDialog
         seed = self._plan if self._target == path else None
         dlg = PageOrganizerDialog(path, self, seed)
-        if dlg.exec():
-            self._plan = dlg.plan()
-            self._target = path
-            self._update_summary(path.name)
+        try:
+            if dlg.exec():
+                self._plan = dlg.plan()
+                self._target = path
+                self._update_summary(path.name)
+        finally:
+            dlg.deleteLater()           # frees its (up to 400) thumbnails
 
     def _update_summary(self, name: str) -> None:
         groups = (self._plan or {}).get("groups", [])
@@ -115,7 +119,19 @@ class _PagePlanField(QWidget):
         self.summary.setText(f"{txt}  —  {name}")
 
     def value(self) -> dict | None:
-        return self._plan
+        # The plan names the file it was arranged for, so the runner applies it
+        # to that file only — never to every queued file with the same length.
+        if not self._plan:
+            return None
+        return dict(self._plan, target=str(self._target) if self._target else "")
+
+    def target(self):
+        return self._target
+
+    def clear(self) -> None:
+        self._plan = None
+        self._target = None
+        self.summary.setText("No arrangement yet — click to open.")
 
 
 class OptionsWidget(QWidget):
@@ -150,7 +166,12 @@ class OptionsWidget(QWidget):
     # --- construction ----------------------------------------------------
     def _add_option(self, opt: Option) -> None:
         # Start from the last-used value if we have one, else the spec default.
-        default = self._saved.get(opt.key, opt.default)
+        # Per-document values (persist=False) always start blank.
+        if getattr(opt, "persist", True):
+            default = self._saved.get(opt.key, opt.default)
+        else:
+            self._no_save_keys.add(opt.key)
+            default = opt.default
         field: QWidget
         read_widget: QWidget | None = None   # widget values() reads (if != field)
         if opt.kind == "file":
@@ -321,9 +342,26 @@ class OptionsWidget(QWidget):
         operate on (the tool page's selected/first file)."""
         self._file_getter = fn
 
+    def prune_page_plans(self, present_paths) -> None:
+        """Forget an organizer arrangement whose file has left the queue."""
+        from pathlib import Path
+        keep = {Path(p) for p in present_paths}
+        for ctrl in self._controls.values():
+            if isinstance(ctrl, _PagePlanField) and ctrl.target() is not None                     and Path(ctrl.target()) not in keep:
+                ctrl.clear()
+
     def save(self) -> None:
         """Remember the current option values for next time — but never persist
         passwords or file-specific plans to disk."""
         skip = self._password_keys | self._no_save_keys
-        vals = {k: v for k, v in self.values().items() if k not in skip}
+        # A control that is disabled (e.g. OCR "Use AI" before AI is set up)
+        # holds a forced value, not a choice — saving it would override the
+        # default once the feature becomes available.
+        disabled = {k for k, c in self._controls.items() if not c.isEnabled()}
+        vals = {k: v for k, v in self.values().items()
+                if k not in skip and k not in disabled}
+        old = settings.tool_options(self.tool.id)
+        for k in disabled - skip:
+            if k in old:
+                vals[k] = old[k]              # keep a real earlier choice
         settings.set_tool_options(self.tool.id, vals)

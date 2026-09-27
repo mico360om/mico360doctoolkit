@@ -17,11 +17,21 @@ from mico360.core.tools import AGGREGATE, Tool
 from mico360.core.util import (
     ProcessError,
     auto_worker_count,
+    begin_reservations,
+    discard_empty_reservations,
+    is_nonempty,
     require_free_space,
 )
+
 from mico360.logging_setup import get_logger
 
 log = get_logger("mico360.engine")
+
+# Output types that are never valid at 0 bytes (text formats like .md/.txt can
+# legitimately be empty for a blank document, so they aren't listed).
+_NEVER_EMPTY_EXTS = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff",
+                     ".gif", ".bmp", ".heic", ".heif", ".svg", ".docx", ".pptx",
+                     ".xlsx"}
 
 
 @dataclass
@@ -82,6 +92,7 @@ class _Worker(QRunnable):
                                                   index=self.index))
             return
         report = self._make_report()
+        begin_reservations()           # track output placeholders for cleanup
         try:
             # Low-storage guard: fail fast with a clear message instead of a
             # cryptic mid-write error (or a corrupt half-written file) when the
@@ -93,9 +104,22 @@ class _Worker(QRunnable):
                 need = 0
             require_free_space(self.out_dir, need, self.label)
             outputs = self.tool.runner(self.item, self.out_dir, self.options, report)
+            # A binary output that is still 0 bytes means an engine failed
+            # silently (the placeholder was never filled) — that's a failure,
+            # not a success.
+            empty = [o for o in (outputs or [])
+                     if Path(o).suffix.lower() in _NEVER_EMPTY_EXTS
+                     and not is_nonempty(o)]
+            # (An empty *source* can legitimately give an empty result, e.g.
+            # File Properties on a 0-byte file.)
+            if (outputs and len(empty) == len(outputs)
+                    and any(is_nonempty(s) for s in (srcs or []))):
+                raise ProcessError("The conversion produced an empty file — the "
+                                   "engine may have failed silently. Please try again.")
             self.signals.finished.emit(UnitResult(self.label, True, outputs or [],
                                                   sources=srcs, index=self.index))
         except ProcessError as exc:
+            discard_empty_reservations()
             if self.cancel.is_set():   # cancelled mid-loop -> skipped, not failed
                 self.signals.finished.emit(UnitResult(self.label, False, skipped=True,
                                                       message="Cancelled", sources=srcs,
@@ -105,6 +129,7 @@ class _Worker(QRunnable):
             self.signals.finished.emit(UnitResult(self.label, False, message=str(exc),
                                                   sources=srcs, index=self.index))
         except Exception as exc:  # pragma: no cover - defensive
+            discard_empty_reservations()
             log.exception("Unexpected error processing %s", self.label)
             self.signals.finished.emit(UnitResult(self.label, False,
                                                   message=f"Unexpected error: {exc}",

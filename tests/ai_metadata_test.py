@@ -128,7 +128,14 @@ def main() -> int:
 
         # ---------- URL normalisation --------------------------------
         cases = {
-            "ai.example.com:5310": "http://ai.example.com:5310/v1",
+            # A bare public host defaults to HTTPS (the key must not travel in
+            # clear text); local/LAN servers keep plain HTTP.
+            "ai.example.com:5310": "https://ai.example.com:5310/v1",
+            "localhost:11434": "http://localhost:11434/v1",
+            "https://generativelanguage.googleapis.com/v1beta/openai/":
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+            "https://r.openai.azure.com/openai/deployments/g?api-version=1":
+                "https://r.openai.azure.com/openai/deployments/g?api-version=1",
             "http://x.test:5310/": "http://x.test:5310/v1",
             "http://x.test:5310/v1/": "http://x.test:5310/v1",
             "http://x.test:5310/v1/chat/completions": "http://x.test:5310/v1",
@@ -346,8 +353,15 @@ def main() -> int:
                 ok_txt = sp.ai_status.text()
                 check(f"Test connection renders SUCCESS ({theme} theme)",
                       "qwen2.5" in ok_txt and "<span" in ok_txt, ok_txt[:60])
-                # failure — unreachable server
+                # A different server never gets the saved key (M-23)…
                 sp.ai_url.setText("http://127.0.0.1:9/v1")
+                sp._test_ai(); await_test()
+                check(f"the saved key is NOT sent to a new server ({theme})",
+                      "no ai api key" in sp.ai_status.text().lower(),
+                      sp.ai_status.text()[:70])
+                # …failure — unreachable server, with its own key typed in
+                sp.ai_url.setText("http://127.0.0.1:9/v1")
+                sp.ai_key.setText(GOOD_KEY)
                 sp._test_ai(); await_test()
                 bad_txt = sp.ai_status.text()
                 check(f"Test connection renders FAILURE without crashing ({theme})",
@@ -475,6 +489,7 @@ def main() -> int:
             # emptying the dropdown.
             before = listed()
             sp.ai_url.setText("http://127.0.0.1:9/v1")
+            sp.ai_key.setText(GOOD_KEY)       # a key is bound to its server
             sp._save_ai()
             sp.refresh_models_async(quiet=True)
             kept = wait_models(lambda: "last known" in sp.ai_models_state.text())
@@ -500,6 +515,7 @@ def main() -> int:
                   wait_models(lambda: "couldn" in sp.ai_models_state.text().lower()),
                   sp.ai_models_state.text()[:60])
             sp.ai_url.setText(base)
+            sp.ai_key.setText(GOOD_KEY)
             sp._save_ai()
 
             # ===== panel: all fields, bulk update, auto apply ==========

@@ -36,6 +36,12 @@ def main() -> int:
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])
 
+    def _settle(ms=350):
+        """Run the event loop long enough for the coalescing debounce to fire."""
+        loop = QEventLoop()
+        QTimer.singleShot(ms, loop.quit)
+        loop.exec()
+
     from mico360.app import parse_cli
     from mico360 import shell_integration as si
     from mico360.core.tools import TOOLS_BY_ID
@@ -44,9 +50,15 @@ def main() -> int:
     print("--- command-line parsing ---")
     check("plain launch -> no request", parse_cli(["exe"]) is None)
     check("--register-shell parsed",
-          parse_cli(["exe", "--register-shell"]) == {"action": "register"})
+          parse_cli(["exe", "--register-shell"]) == {"action": "register", "force": False})
+    check("--register-shell --force parsed (explicit installer choice)",
+          parse_cli(["exe", "--register-shell", "--force"])
+          == {"action": "register", "force": True})
     check("--unregister-shell parsed",
-          parse_cli(["exe", "--unregister-shell"]) == {"action": "unregister"})
+          parse_cli(["exe", "--unregister-shell"]) == {"action": "unregister", "opt_out": False})
+    check("--unregister-shell --opt-out parsed",
+          parse_cli(["exe", "--unregister-shell", "--opt-out"])
+          == {"action": "unregister", "opt_out": True})
     r = parse_cli(["exe", "--tool", "pdf_compress", r"C:\a.pdf"])
     check("--tool + file parsed",
           r == {"action": "open", "tool": "pdf_compress", "files": [r"C:\a.pdf"]})
@@ -54,7 +66,29 @@ def main() -> int:
     check("bare file -> open with auto tool",
           r == {"action": "open", "tool": None, "files": [r"C:\a.pdf"]})
     r = parse_cli(["exe", "--tool", "pdf_merge", "a.pdf", "b.pdf"])
-    check("multiple files kept", r["files"] == ["a.pdf", "b.pdf"])
+    import os as _os
+    check("multiple files kept (made absolute for the running instance)",
+          r["files"] == [_os.path.abspath("a.pdf"), _os.path.abspath("b.pdf")], str(r["files"]))
+    # M-29: Explorer's "E:\\" for a drive root arrives as  E:"
+    r = parse_cli(["exe", "--tool", "pdf_compress", "--", 'E:"'])
+    check("a drive root mangled by argv quoting is repaired",
+          r["files"] == ["E:\\"], str(r["files"]))
+    # a file whose name starts with "-" isn't dropped
+    import tempfile as _tf
+    _d = _tf.mkdtemp()
+    _dash = _os.path.join(_d, "-draft.pdf")
+    open(_dash, "wb").close()
+    _cwd = _os.getcwd()
+    _os.chdir(_d)
+    try:
+        r = parse_cli(["exe", "-draft.pdf"])
+        check("a file named '-draft.pdf' is opened, not ignored as a flag",
+              r is not None and r["files"] == [_dash], str(r))
+        r = parse_cli(["exe", "--tool", "pdf_compress", "--", "-x.pdf"])
+        check("everything after -- is a path",
+              r is not None and r["files"] == [_os.path.join(_d, "-x.pdf")], str(r))
+    finally:
+        _os.chdir(_cwd)
 
     # ================= action map =================================
     print("--- per-file-type actions ---")
@@ -69,7 +103,30 @@ def main() -> int:
     check(".svg lists the SVG action", ea.get(".svg") == si._SVG)
     cmd = si.launch_command("pdf_compress", '"APP.EXE"')
     check("launch command opens the tool and passes the file",
-          cmd == '"APP.EXE" --tool pdf_compress "%1"')
+          cmd == '"APP.EXE" --tool pdf_compress -- "%1"')
+
+    # folder actions + the %V (folder) command variant
+    fa = si.folder_actions()
+    check("folder actions are all real tools and non-empty",
+          fa and all(tid in TOOLS_BY_ID for tid in fa), str(fa))
+    fcmd = si.launch_command("pdf_compress", '"APP.EXE"', arg="%V")
+    check("folder command passes the folder path (%V)",
+          fcmd == '"APP.EXE" --tool pdf_compress -- "%V"')
+
+    # "Open with MICO360 Toolkit" — no --tool (auto-route)
+    ocmd = si.open_command('"APP.EXE"')
+    check("open-with command carries no --tool (auto-route)",
+          ocmd == '"APP.EXE" -- "%1"' and "--tool" not in ocmd)
+    check("open-with folder command uses %V",
+          si.open_command('"APP.EXE"', arg="%V") == '"APP.EXE" -- "%V"')
+
+    # per-tool submenu icons
+    missing_icons = [t.id for t in TOOLS_BY_ID.values()
+                     if not si._tool_icon(t.id).rstrip('"').endswith(f"{t.id}.ico")]
+    check("every tool has its own bundled submenu .ico", not missing_icons,
+          str(missing_icons))
+    check("_tool_icon falls back to the app icon for an unknown tool",
+          si._tool_icon("nope___unknown") == si._icon())
 
     # ================= registry round-trip (Windows) ===============
     print("--- registry round-trip (HKCU sandbox) ---")
@@ -111,19 +168,75 @@ def main() -> int:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
                                 rf"{shell}\{first}") as k:
                 label = winreg.QueryValueEx(k, "MUIVerb")[0]
+                child_icon = winreg.QueryValueEx(k, "Icon")[0]
             check("first item is labelled with the tool name",
                   label == TOOLS_BY_ID["pdf_compress"].name, label)
+            check("first item shows its own tool icon (not the app icon)",
+                  child_icon.rstrip('"').endswith("pdf_compress.ico"), child_icon)
             check("first item's command opens that tool with the file",
                   "--tool pdf_compress" in command and '"%1"' in command, command)
             # An image extension is registered too
             check("image extension is registered",
                   si.is_registered(base=BASE)
                   and _key_exists(rf"{BASE}\.png\shell\{si.PARENT_KEY}"))
+
+            # --- folder & folder-background menus ---
+            dir_parents = si._dir_menu_parents(BASE)
+            check("both folder verbs registered (Directory + Background)",
+                  all(_key_exists(p) for p in dir_parents), str(dir_parents))
+            fdir = dir_parents[0]
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, fdir) as k:
+                fmui = winreg.QueryValueEx(k, "MUIVerb")[0]
+                fsub = winreg.QueryValueEx(k, "SubCommands")[0]
+            check("folder parent verb titled 'MICO360 Toolkit', cascading",
+                  fmui == si.MENU_TITLE and fsub == "")
+            fkids = []
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"{fdir}\shell") as k:
+                j = 0
+                while True:
+                    try:
+                        fkids.append(winreg.EnumKey(k, j)); j += 1
+                    except OSError:
+                        break
+            check("folder submenu has one item per folder action",
+                  len(fkids) == len(si.folder_actions()), f"{len(fkids)} items")
+            fchild = sorted(fkids)[0]
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                rf"{fdir}\shell\{fchild}\command") as k:
+                fchild_cmd = winreg.QueryValue(k, "")
+            check("folder item's command passes the folder (%V), not %1",
+                  '"%V"' in fchild_cmd and "--tool" in fchild_cmd
+                  and "%1" not in fchild_cmd, fchild_cmd)
+            check("folder-background verb exists too", _key_exists(dir_parents[1]))
+
+            # --- "Open with MICO360 Toolkit" top-level verb ---
+            openkey = rf"{BASE}\.pdf\shell\{si.OPEN_KEY}"
+            check("top-level 'Open with' verb registered on files",
+                  _key_exists(openkey))
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, openkey) as k:
+                omui = winreg.QueryValueEx(k, "MUIVerb")[0]
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"{openkey}\command") as k:
+                ocommand = winreg.QueryValue(k, "")
+            check("'Open with' labelled correctly", omui == si.OPEN_TITLE, omui)
+            check("'Open with' command auto-routes (no --tool, passes %1)",
+                  "--tool" not in ocommand and '"%1"' in ocommand, ocommand)
+            fshell = dir_parents[0].rsplit("\\", 1)[0]     # ...\Directory\shell
+            check("'Open with' verb registered on folders (with %V)",
+                  _key_exists(rf"{fshell}\{si.OPEN_KEY}"))
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                rf"{fshell}\{si.OPEN_KEY}\command") as k:
+                ofcmd = winreg.QueryValue(k, "")
+            check("folder 'Open with' uses %V and no --tool",
+                  "--tool" not in ofcmd and '"%V"' in ofcmd, ofcmd)
         finally:
             si.unregister(base=BASE)
             # nuke the whole sandbox tree
             si._delete_tree(winreg.HKEY_CURRENT_USER, r"Software\MICO360-shelltest")
         check("unregister() removes the menu", not si.is_registered(base=BASE))
+        check("unregister() also removes the folder verbs",
+              not any(_key_exists(p) for p in si._dir_menu_parents(BASE)))
+        check("unregister() also removes the 'Open with' verbs",
+              not _key_exists(rf"{BASE}\.pdf\shell\{si.OPEN_KEY}"))
 
     # ================= IPC payload forwarding ======================
     # The receiver is the part that carries the fix (read the payload on
@@ -210,8 +323,7 @@ def main() -> int:
         # explicit tool
         w.handle_open_request({"action": "open", "tool": "pdf_compress",
                                "files": [str(f)]})
-        for _ in range(4):
-            app.processEvents()
+        _settle()
         tp = w._current_tool_page()
         check("explicit-tool request opens that tool",
               w.top_title.text() == TOOLS_BY_ID["pdf_compress"].name,
@@ -225,8 +337,7 @@ def main() -> int:
         from PIL import Image
         Image.new("RGB", (20, 20), "white").save(str(img))
         w.handle_open_request({"action": "open", "tool": None, "files": [str(img)]})
-        for _ in range(4):
-            app.processEvents()
+        _settle()
         tp2 = w._current_tool_page()
         check("auto-routed image opens an image tool and loads it",
               tp2 is not None and str(img).endswith(".png")
@@ -235,11 +346,73 @@ def main() -> int:
 
         # on_activation with a JSON payload routes; empty is a safe no-op
         w.on_activation(json.dumps({"files": [str(f)], "tool": "pdf_metadata"}))
-        for _ in range(4):
-            app.processEvents()
+        _settle()
         check("on_activation(payload) routes to the requested tool",
               w.top_title.text() == TOOLS_BY_ID["pdf_metadata"].name,
               w.top_title.text())
+
+        # --- multi-file selection: Explorer fires one request per file ------
+        # (a right-click "Compress" on 3 selected PDFs). They must coalesce into
+        # a SINGLE queue on one tool, not open three windows / three navigations.
+        multi = []
+        for n in range(3):
+            p = Path(td) / f"scan{n}.pdf"
+            d = fitz.open(); d.new_page(); d.save(str(p)); d.close()
+            multi.append(p)
+        for p in multi:            # one per-file request, as the shell verb does
+            w.on_activation(json.dumps({"files": [str(p)], "tool": "pdf_compress"}))
+        _settle()
+        tpm = w._current_tool_page()
+        names = {Path(it.path).name for it in tpm.items} if tpm else set()
+        check("a 3-file right-click lands as one batch on the one tool",
+              w.top_title.text() == TOOLS_BY_ID["pdf_compress"].name
+              and {"scan0.pdf", "scan1.pdf", "scan2.pdf"} <= names, str(sorted(names)))
+        check("no duplicate rows from repeated per-file requests",
+              tpm is not None and sum(1 for it in tpm.items
+                                      if Path(it.path).name == "scan0.pdf") == 1)
+
+        # --- folder menu: %V passes a folder; the app expands it to matches ---
+        # (right-click a folder -> "Compress PDFs": load every PDF inside it,
+        # ignoring non-PDFs, exactly as the registered %V command delivers.)
+        folder = Path(td) / "batchdir"
+        folder.mkdir()
+        for n in range(4):
+            d = fitz.open(); d.new_page(); d.save(str(folder / f"doc{n}.pdf")); d.close()
+        Image.new("RGB", (10, 10), "white").save(str(folder / "ignore.png"))
+        (folder / "notes.txt").write_text("skip me")
+        w.on_activation(json.dumps({"files": [str(folder)], "tool": "pdf_compress"}))
+        _settle()
+        tpf = w._current_tool_page()
+        fnames = {Path(it.path).name for it in tpf.items} if tpf else set()
+        check("a folder right-click loads every matching file inside it",
+              {f"doc{n}.pdf" for n in range(4)} <= fnames, str(sorted(fnames)))
+        check("folder expansion skips non-matching file types",
+              "ignore.png" not in fnames and "notes.txt" not in fnames)
+
+        # --- "Open with MICO360 Toolkit": no tool => auto-route ---
+        # A single image, no tool -> an image tool opens with it loaded.
+        openimg = Path(td) / "openme.png"
+        Image.new("RGB", (12, 12), "white").save(str(openimg))
+        w.on_activation(json.dumps({"files": [str(openimg)], "tool": None}))
+        _settle()
+        tpo = w._current_tool_page()
+        check("'Open with' on a file auto-routes and loads it",
+              tpo is not None and any(Path(it.path).name == "openme.png"
+                                      for it in tpo.items)
+              and tpo.tool.accept and ".png" in tpo.tool.accept, w.top_title.text())
+
+        # A folder of PDFs, no tool -> routes by contents to a PDF tool.
+        pdir = Path(td) / "openfolder"
+        pdir.mkdir()
+        for n in range(2):
+            d = fitz.open(); d.new_page(); d.save(str(pdir / f"o{n}.pdf")); d.close()
+        w.on_activation(json.dumps({"files": [str(pdir)], "tool": None}))
+        _settle()
+        tpo2 = w._current_tool_page()
+        onames = {Path(it.path).name for it in tpo2.items} if tpo2 else set()
+        check("'Open with' on a folder routes by its contents (PDF tool)",
+              tpo2 is not None and ".pdf" in tpo2.tool.accept
+              and {"o0.pdf", "o1.pdf"} <= onames, f"{w.top_title.text()} {sorted(onames)}")
         try:
             w.on_activation("")
             w.on_activation("not json")

@@ -88,7 +88,7 @@ DARK = {
     # text
     "text": "#F4F5F7",
     "text_muted": "#9AA0A9",
-    "text_faint": "#787E88",
+    "text_faint": "#8A909A",     # ≥ 4.5:1 on every dark surface (WCAG AA)
     # brand
     "primary": "#E5323C",          # a touch brighter so it sings on black
     "primary_hover": "#F04A54",
@@ -108,6 +108,7 @@ DARK = {
     "error": "#EF6259",
     "error_bg": "#241413",
     "info": "#5B9BE0",
+    "on_info": "#0C0C0E",        # text on an info fill (white was 2.9:1)
     # drop zone
     "drop": "#141417",
     "drop_active": "#1F1416",
@@ -131,7 +132,7 @@ LIGHT = {
     "divider": "#EBEDF0",
     "text": "#16171A",
     "text_muted": "#585E67",
-    "text_faint": "#828892",
+    "text_faint": "#696E77",     # ≥ 4.5:1 on bg / surface (WCAG AA)
     "primary": "#D81E28",          # a touch deeper for contrast on white
     "primary_hover": "#EC2C37",
     "primary_pressed": "#B5141D",
@@ -148,6 +149,7 @@ LIGHT = {
     "error": "#C8372E",
     "error_bg": "#FBEAE8",
     "info": "#2D74C4",
+    "on_info": "#FFFFFF",
     "drop": "#F8F9FB",
     "drop_active": "#FDF0F1",
     "scrollbar": "#CCD0D6",
@@ -505,7 +507,7 @@ QLabel#HelpBody {{ color: {c['text']}; font-size: 13px; }}
     background-color: {c['surface_2']}; color: {c['text_muted']};
 }}
 #Chip[chipState="ready"] {{ background-color: {c['surface_2']}; color: {c['text_muted']}; }}
-#Chip[chipState="run"] {{ background-color: {c['info']}; color: #FFFFFF; }}
+#Chip[chipState="run"] {{ background-color: {c['info']}; color: {c['on_info']}; }}
 #Chip[chipState="ok"] {{ background-color: {c['success_bg']}; color: {c['success']}; }}
 #Chip[chipState="err"] {{ background-color: {c['error_bg']}; color: {c['error']}; }}
 

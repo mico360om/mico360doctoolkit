@@ -1,6 +1,7 @@
 """Application bootstrap."""
 from __future__ import annotations
 
+import os
 import sys
 
 from PySide6.QtCore import Qt
@@ -49,9 +50,28 @@ def configure_high_dpi() -> None:
                 get_logger().debug("Qt attribute %s not applied", attr, exc_info=True)
 
 
+_crash_relay = None      # UI-thread QObject that shows the crash dialog
+
+
+def install_crash_relay() -> None:
+    """Create (on the UI thread, after the QApplication) the relay the crash hook
+    uses to show its dialog from exceptions raised on worker threads — a
+    QMessageBox built off the UI thread can crash the whole app."""
+    global _crash_relay
+    from PySide6.QtCore import QObject, Signal
+
+    class _Relay(QObject):
+        show = Signal(object)
+
+    _crash_relay = _Relay()
+    _crash_relay.show.connect(lambda args: _show_crash_dialog(*args))
+
+
 def install_crash_guard(log) -> None:
     """Last-resort handler: log any uncaught exception and keep the app alive
     with a friendly message instead of crashing to the desktop."""
+    import threading
+
     def _hook(exc_type, exc, tb):
         if issubclass(exc_type, KeyboardInterrupt):
             sys.__excepthook__(exc_type, exc, tb)
@@ -65,42 +85,57 @@ def install_crash_guard(log) -> None:
             path = crash.write_report(report)
         except Exception:
             log.error("Could not write the crash report", exc_info=True)
-        try:
-            from PySide6.QtGui import QGuiApplication
-            from PySide6.QtWidgets import QApplication, QMessageBox
-            from mico360.config import settings
-            if (QApplication.instance() is None
-                    or QGuiApplication.platformName() == "offscreen"
-                    or not settings.crash_reports_enabled):
-                return
-            box = QMessageBox(QMessageBox.Warning, __app_name__,
-                              "Something went wrong, but the app is still running.\n\n"
-                              f"{exc_type.__name__}: {exc}\n\n"
-                              "A report (with the recent log) was saved on your computer. "
-                              "You can report it to help us fix it — nothing is sent "
-                              "unless you choose to. \"Report on GitHub\" opens a "
-                              "pre-filled issue for you to review and submit.")
-            b_github = box.addButton("Report on GitHub", QMessageBox.AcceptRole)
-            b_email = box.addButton("Email report", QMessageBox.ActionRole)
-            b_copy = box.addButton("Copy details", QMessageBox.ActionRole)
-            box.addButton("Continue", QMessageBox.RejectRole)
-            box.exec()
-            clicked = box.clickedButton()
-            if clicked is b_copy and report:
-                QApplication.clipboard().setText(report)
-            elif clicked in (b_email, b_github) and report:
-                from PySide6.QtCore import QUrl
-                from PySide6.QtGui import QDesktopServices
-                from mico360.core import crash
-                if clicked is b_github:
-                    url = crash.github_issue_url(
-                        crash.issue_title(exc_type, exc), report, path)
-                else:
-                    url = crash.mailto_url(report)
-                QDesktopServices.openUrl(QUrl(url))
-        except Exception:
-            log.debug("Crash dialog could not be shown", exc_info=True)
+        args = (exc_type, exc, report, path, log)
+        if threading.current_thread() is not threading.main_thread():
+            if _crash_relay is not None:
+                try:
+                    _crash_relay.show.emit(args)      # queued to the UI thread
+                except RuntimeError:
+                    pass
+            return
+        _show_crash_dialog(*args)
+
     sys.excepthook = _hook
+    threading.excepthook = lambda a: _hook(a.exc_type, a.exc_value, a.exc_traceback)
+
+
+def _show_crash_dialog(exc_type, exc, report, path, log) -> None:
+    """Show the crash dialog (UI thread only)."""
+    try:
+        from PySide6.QtGui import QGuiApplication
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        from mico360.config import settings
+        if (QApplication.instance() is None
+                or QGuiApplication.platformName() == "offscreen"
+                or not settings.crash_reports_enabled):
+            return
+        box = QMessageBox(QMessageBox.Warning, __app_name__,
+                          "Something went wrong, but the app is still running.\n\n"
+                          f"{exc_type.__name__}: {exc}\n\n"
+                          "A report (with the recent log) was saved on your computer. "
+                          "You can report it to help us fix it — nothing is sent "
+                          "unless you choose to. \"Report on GitHub\" opens a "
+                          "pre-filled issue for you to review and submit.")
+        b_github = box.addButton("Report on GitHub", QMessageBox.AcceptRole)
+        b_email = box.addButton("Email report", QMessageBox.ActionRole)
+        b_copy = box.addButton("Copy details", QMessageBox.ActionRole)
+        box.addButton("Continue", QMessageBox.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is b_copy and report:
+            QApplication.clipboard().setText(report)
+        elif clicked in (b_email, b_github) and report:
+            from PySide6.QtCore import QUrl
+            from PySide6.QtGui import QDesktopServices
+            from mico360.core import crash
+            if clicked is b_github:
+                url = crash.github_issue_url(
+                    crash.issue_title(exc_type, exc), report, path)
+            else:
+                url = crash.mailto_url(report)
+            QDesktopServices.openUrl(QUrl(url))
+    except Exception:
+        log.debug("Crash dialog could not be shown", exc_info=True)
 
 
 def parse_cli(argv: list[str]) -> dict | None:
@@ -109,42 +144,89 @@ def parse_cli(argv: list[str]) -> dict | None:
       {"action": "register"} / {"action": "unregister"}   — shell menu setup
       {"action": "open", "tool": <id|None>, "files": [...]} — open a tool/file
     """
+    import os
     args = list(argv[1:])
     if not args:
         return None
+    if "--selftest" in args:
+        # Post-build check of the packaged app (see mico360/selftest.py).
+        i = args.index("--selftest")
+        path = args[i + 1] if i + 1 < len(args) else "mico360_selftest.json"
+        return {"action": "selftest", "report": os.path.abspath(path)}
     if "--register-shell" in args:
-        return {"action": "register"}
+        return {"action": "register", "force": "--force" in args}
     if "--unregister-shell" in args:
-        return {"action": "unregister"}
+        return {"action": "unregister", "opt_out": "--opt-out" in args}
     tool = None
     files: list[str] = []
     i = 0
+    only_files = False
     while i < len(args):
         a = args[i]
-        if a in ("--tool", "-t") and i + 1 < len(args):
-            tool = args[i + 1]
-            i += 2
-            continue
-        if a.startswith("-"):        # ignore unknown flags
-            i += 1
-            continue
-        files.append(a)
+        if not only_files:
+            if a == "--":                # everything after this is a path
+                only_files = True
+                i += 1
+                continue
+            if a in ("--tool", "-t") and i + 1 < len(args):
+                tool = args[i + 1]
+                i += 2
+                continue
+            # Unknown flags are ignored — unless it's a real file whose name
+            # starts with "-" (e.g. "-draft.pdf"), which used to be dropped.
+            if a.startswith("-") and not os.path.exists(a):
+                i += 1
+                continue
+        files.append(_normalize_cli_path(a))
         i += 1
     if files:
         return {"action": "open", "tool": tool, "files": files}
     return None
 
 
+def _normalize_cli_path(a: str) -> str:
+    """Make a command-line path absolute (a forwarded request is handled by
+    the already-running instance, whose working directory differs) and repair
+    a drive/share root mangled by argv quoting: Explorer passes "E:\\" for a
+    folder-background click on a drive root, which parses as  E:"  ."""
+    import os
+    if a.endswith('"'):
+        a = a[:-1] + "\\"
+    try:
+        return os.path.abspath(a)
+    except (OSError, ValueError):
+        return a
+
+
 def main() -> int:
     setup_logging()
     log = get_logger()
 
-    # Shell-integration setup runs without the GUI (used by the installer).
     cli = parse_cli(sys.argv)
+    if cli and cli["action"] == "selftest":
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        from mico360 import selftest
+        rc = selftest.run(cli["report"])
+        log.info("self-test finished: %s", "passed" if rc == 0 else "FAILED")
+        return rc
+
+    # Shell-integration setup runs without the GUI (used by the installer).
     if cli and cli["action"] in ("register", "unregister"):
         from mico360 import shell_integration
-        ok = (shell_integration.register() if cli["action"] == "register"
-              else shell_integration.unregister())
+        if cli["action"] == "register":
+            # The installer / auto-update re-registers on every run; a user who
+            # turned the menu off keeps it off (only an explicit choice in the
+            # interactive installer, --force, turns it back on).
+            if settings.shell_menu_opt_out and not cli.get("force"):
+                log.info("shell register: skipped (turned off by the user)")
+                return 0
+            ok = shell_integration.register()
+            if ok:
+                settings.shell_menu_opt_out = False
+        else:
+            ok = shell_integration.unregister()
+            if ok and cli.get("opt_out"):
+                settings.shell_menu_opt_out = True
         log.info("shell %s: %s", cli["action"], "ok" if ok else "skipped")
         return 0 if ok else 1
 
@@ -153,6 +235,7 @@ def main() -> int:
     configure_high_dpi()
 
     app = QApplication(sys.argv)
+    install_crash_relay()
     app.setApplicationName(__app_name__)
     app.setOrganizationName("MICO360")
 
@@ -201,6 +284,15 @@ def main() -> int:
     except Exception:
         log.exception("Failed to start UI")
         raise
+
+    # Installed app only: keep a registered right-click menu pointing at this
+    # exe (a moved install / older build left entries launching a dead path).
+    if getattr(sys, "frozen", False) and not settings.shell_menu_opt_out:
+        try:
+            from mico360 import shell_integration
+            log.info("shell menu self-check: %s", shell_integration.self_heal())
+        except Exception:
+            log.debug("shell menu self-check failed", exc_info=True)
 
     return app.exec()
 

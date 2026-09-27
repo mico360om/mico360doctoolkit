@@ -51,7 +51,9 @@ hiddenimports = [
     "pdfplumber", "pdfminer", "openpyxl", "pypdfium2",
     "vtracer",             # Image -> SVG vector tracing
     # AI metadata generator (ai_suggest is imported lazily inside a method)
-    "mico360.core.ai", "mico360.core.ai_metadata", "mico360.ui.ai_suggest",
+    "mico360.core.ai", "mico360.core.ai_metadata", "mico360.core.ocr_ai",
+    "mico360.ui.ai_suggest", "mico360.ui.bg",   # AI worker threads (lazy)
+    "mico360.selftest",   # --selftest (post-build check; lazy)
     # Lazily imported inside functions — name them so PyInstaller collects them.
     # (mico360.shell_integration is Windows-only and deliberately omitted.)
     "mico360.capabilities", "mico360.ui.icons", "mico360.ui.page_organizer",

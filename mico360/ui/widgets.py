@@ -548,6 +548,7 @@ class Toast(QFrame):
                  duration: int = 3400, action_text: str = "",
                  on_action=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WA_DeleteOnClose, True)   # freed once dismissed
         self.setObjectName("Toast")
         self.setProperty("toastKind", kind)
         self.setAttribute(Qt.WA_StyledBackground, True)

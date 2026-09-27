@@ -29,7 +29,7 @@ tool automatically.</p>
   <li><b>Choose where outputs go</b> — a folder you pick, or tick <b>Save next to the original
       files</b> to write each result beside its source (named “name (1).ext”, “name (2).ext”…).</li>
   <li>Click <b>Start</b>. Your <b>original files are never modified</b>. Watch progress in the
-      bar and the Activity log; click a finished file to open its output.</li>
+      bar and the Activity log; double-click a finished file to open its output.</li>
 </ol>
 
 <h3>The queue &amp; status</h3>
@@ -50,11 +50,15 @@ tool automatically.</p>
   <li><b>Start</b> only processes rows that aren't done yet — finished rows are skipped until
       you retry them. The same file can be queued more than once (Duplicate), each tracked
       separately.</li>
-  <li><b>Cancel</b> stops the batch; long jobs (OCR, many pages) stop within a moment.</li>
+  <li><b>Cancel</b> stops the batch: files in progress stop at the next safe point (their
+      partial output is removed) and finished results are kept.</li>
+  <li><b>Merge</b> and <b>Images → PDF</b> always combine <i>every</i> file in the queue,
+      including ones finished in an earlier run.</li>
   <li>If a run finishes with failures, a <b>Retry <i>N</i> failed</b> button appears — one
-      click re-runs just the failed rows, no hunting through the list.</li>
+      click re-runs just the failed rows (other pending rows wait for <b>Start</b>).</li>
   <li>Removing or clearing the queue shows a brief <b>Undo</b> so an accidental
-      <i>Remove</i> / <i>Clear</i> is easy to take back.</li>
+      <i>Remove</i> / <i>Clear</i> is easy to take back (files added since are kept).
+      Rows that are being processed can't be removed until you cancel.</li>
   <li>While a batch runs, the <b>window title</b> (and its taskbar preview) shows the live
       progress — e.g. <i>“37 of 200 · ~4m left · 2 failed”</i> — so you can glance back
       even when the window is minimised.</li>
@@ -73,11 +77,13 @@ tool automatically.</p>
       <i>custom ranges</i> like <i>1-3, 5, 8-10</i>. Each source gets its own output subfolder.</li>
   <li><b>Organize PDF</b> — <i>rotate</i> (all or chosen pages), <i>delete</i> pages,
       <i>extract</i> only the pages you want, or <i>reorder</i> the whole document. Pages
-      are given 1-based, e.g. <i>3, 1, 2, 5-8</i> (ranges may run backwards). Prefer to
+      are given 1-based, e.g. <i>3, 1, 2, 5-8</i> (ranges may run backwards); an entry
+      that doesn't exist in the file is reported instead of being skipped, and
+      <i>reorder</i> must list every page. Bookmarks and document properties are kept. Prefer to
       work by eye? Choose <b>Visual organizer</b> to open a thumbnail grid where you
       <i>drag</i> pages to reorder, <i>rotate</i> or <i>delete</i> the selected ones, and add
-      <i>split points</i> to break the file into several PDFs — all on the file you've
-      selected in the queue.</li>
+      <i>split points</i> to break the file into several PDFs. The arrangement belongs to
+      the file you had selected; other queued files are left unchanged.</li>
   <li><b>Protect PDF</b> — add a password (strong AES-256 encryption — you confirm it,
       with show/hide toggles) or remove one (enter the PDF's current password to unlock).
       Passwords are never saved.</li>
@@ -102,7 +108,7 @@ tool automatically.</p>
       low-confidence suggestion is never applied, and nothing is applied while a
       <b>Privacy</b> preset is selected. Only a short excerpt of that one document
       is sent, and only when you ask.<br>
-      Set it up in <b>Settings → AI</b>: choose the <b>System AI</b> (provided for
+      Set it up in <b>Settings → AI provider</b>: choose the <b>System AI</b> (provided for
       you) or <b>your own</b> OpenAI-compatible API (URL + key + model), press
       <b>Test connection</b>, and pick a model from the <b>Model</b> dropdown —
       it lists the models your key may use and refreshes itself. Your API key is
@@ -111,12 +117,21 @@ tool automatically.</p>
       Keywords, Creator, Producer, creation/modification dates, named fields
       (Company, Manager, Category, Comments), your own <i>custom</i> properties
       (one <code>Key = Value</code> per line), Copyright, document Language and the
-      Trapped flag. Blank fields are left untouched. The <b>Privacy</b> menu can also
-      <i>Scrub identifying info</i> (clears Author/Creator/Producer/Company/Manager/
-      Comments and resets the dates, keeping Title/Subject/Keywords) or <i>Remove all
-      metadata</i> before sharing.</li>
+      Trapped flag. Blank fields are left untouched, and edits are mirrored into the
+      document's XMP metadata (so other apps show the new values). Title, author,
+      dates and other per-document values aren't remembered for the next session.
+      The <b>Privacy</b> menu can also <i>Scrub identifying info</i> (keeps only Title /
+      Subject / Keywords; removes every other property, comment author names,
+      embedded files and XMP, resets the dates and gives the file a new identifier) or
+      <i>Remove all metadata</i> before sharing.</li>
   <li><b>Searchable PDF (OCR)</b> — add an invisible text layer to a scanned PDF so it
-      becomes selectable and searchable (the look of the page is unchanged).</li>
+      becomes selectable and searchable (the look of the page is unchanged).
+      Recognition always runs <b>on your PC</b>; it does not need AI. Optionally,
+      if you've set up AI in <b>Settings → AI provider</b>, <b>Use AI</b> sends the
+      <b>recognised text of every page</b> to your AI to fix obvious recognition
+      errors (only small character fixes are accepted — numbers are never changed)
+      and to fill in an <i>empty</i> Title/Subject. It's on by default once AI is set
+      up; untick it to keep everything on your PC.</li>
   <li><b>PDF → …</b> — one tool to convert a PDF to <b>Word</b> (editable .docx; turn on
       <b>OCR</b> for scanned pages), <b>PowerPoint</b> (<i>Auto</i> keeps text editable and
       falls back to a page image so slides are never empty; OCR optional), <b>Excel</b>
@@ -161,10 +176,13 @@ and recovers the text.</p>
       directly (no OCR needed), so it’s safe to leave on.</li>
   <li>Recognised text is laid out in reading order — words on the same line are kept
       together, and clear vertical gaps become paragraph breaks.</li>
-  <li>It runs <b>entirely on your computer</b> — nothing is uploaded — and works offline.</li>
+  <li>Recognition runs <b>entirely on your computer</b> and works offline. Only the
+      optional <b>Use AI</b> clean-up (Searchable PDF, when AI is set up) sends the
+      recognised text to your AI provider — untick it to keep OCR fully offline.</li>
   <li><b>GPU acceleration:</b> if your PC has a graphics card, OCR automatically runs on it
       (via DirectML — any NVIDIA / AMD / Intel GPU) for a large speed-up, falling back to the
-      CPU when no GPU is available. Toggle this in <b>Settings → Processing</b>.</li>
+      CPU when no GPU is available or the GPU fails mid-job (Windows only). Toggle this
+      in <b>Settings → Performance</b>.</li>
   <li><b>For the best accuracy:</b> start from a clean, straight, high-resolution scan
       (300&nbsp;dpi or more). Faint, skewed or low-contrast scans recognise less reliably.</li>
   <li>OCR is heavier than a normal conversion, so large documents take longer; the
@@ -174,8 +192,8 @@ and recovers the text.</p>
       <b>Language</b> in the <b>Searchable PDF (OCR)</b> tool (or the scanned-PDF → Word
       option) to read other scripts — <b>Arabic</b> is supported, and downloads a small
       model (~8&nbsp;MB) once on first use; right-to-left text is put back in natural
-      reading order. You can pre-download languages in <b>Settings → Performance →
-      OCR&nbsp;languages</b>.</li>
+      reading order, and the searchable text layer finds Arabic, Cyrillic and accented
+      words. You can pre-download languages in <b>Settings → OCR&nbsp;languages</b>.</li>
 </ul>
 
 <h3>Staying up to date</h3>
@@ -200,23 +218,35 @@ and recovers the text.</p>
   <li><b>Right-click a supported file</b> (PDF, image, Office document or SVG) in File
       Explorer and open the <b>“MICO360 Toolkit”</b> menu. It lists the tools that make
       sense for that file type.</li>
+  <li>Or choose <b>“Open with MICO360 Toolkit”</b> to just open the file (or folder) and
+      let the app pick the right tool automatically — handy when you're not sure which
+      one you need.</li>
   <li>Pick an action and MICO360 opens on that tool with the file <b>already loaded</b> —
       no browsing. If the app is already open, the file is sent to the running window.</li>
-  <li>Turn this on or off any time in <b>Settings → Advanced → Windows integration</b>. It's
-      per-user, needs no admin rights, and is removed cleanly when you uninstall.</li>
+  <li><b>Select several files</b> and right-click — every file lands in the <b>same
+      queue</b> in one window, ready to run as a batch.</li>
+  <li><b>Right-click a folder</b> (or the empty space inside an open folder) and use the
+      <b>“MICO360 Toolkit”</b> menu to run a job on <b>everything inside</b> — e.g.
+      <i>Compress PDF</i> loads every PDF in the folder, <i>Compress Image</i> every image.
+      Files that don't match the chosen tool are skipped.</li>
+  <li>The installer offers it as a checkbox; turn it on or off any time in
+      <b>Settings → Windows integration</b>. Once you turn it off, updates don't add it
+      back. It's per-user and is removed when you uninstall.</li>
 </ul>
 
 <h3>Keyboard &amp; mouse</h3>
 <ul>
   <li><b>Shortcuts:</b> <b>Ctrl+K</b> search tools · <b>Ctrl+O</b> add files ·
       <b>Ctrl+V</b> paste copied files · <b>Ctrl+Enter</b> Start · <b>Esc</b> cancel a
-      running batch · <b>Ctrl+1…9</b> jump to a pinned (favourite) tool · <b>F1</b> Help.</li>
+      running batch (in a search box, Esc clears it instead) · <b>Ctrl+1…9</b> jump to a
+      pinned (favourite) tool · <b>F1</b> Help. In the visual organizer: <b>Ctrl+R</b> /
+      <b>Ctrl+L</b> rotate, <b>Delete</b> removes pages, <b>Ctrl+B</b> adds a split.</li>
   <li><b>Search</b> the sidebar box by name <i>or</i> by what a tool does — typing
       “password” finds Protect PDF, “dpi” finds Compress.</li>
   <li><b>Drag &amp; drop</b> files or folders anywhere to add them; the empty queue is also a
       click target that opens the file picker.</li>
   <li><b>Double-click</b> a finished file to reveal its output; <b>right-click</b> any file
-      for more actions; <b>Delete</b> removes the selected files.</li>
+      for more actions; <b>Delete</b> removes the selected files (while the queue has focus).</li>
   <li><b>Tab / Shift+Tab</b> move between controls; <b>Space / Enter</b> activates the focused
       button or the drop zone (to browse); a checkbox toggles with <b>Space</b>.</li>
   <li>Use the <b>☰</b> button to collapse the sidebar for more room, and the
@@ -229,18 +259,21 @@ and recovers the text.</p>
       (follow your Windows/macOS theme). The sun / moon button in the top bar pins Light/Dark.</li>
   <li><b>Output</b> — default output folder, “open the folder when a batch finishes”, and
       overwrite behaviour.</li>
-  <li><b>Processing</b> — number of parallel workers (0 = automatic, uses CPU cores − 1), and
-      <b>Use the GPU for OCR</b> when a graphics card is available (with automatic CPU fallback).</li>
-  <li><b>AI</b> — turn AI suggestions on or off (off by default), choose the <b>System AI</b> or
+  <li><b>Performance</b> — number of parallel workers (0 = automatic, uses CPU cores − 1), and
+      <b>Use the GPU for OCR</b> when a graphics card is available (with automatic CPU fallback).
+      <b>OCR languages</b> lets you pre-download language packs.</li>
+  <li><b>AI provider</b> — turn AI on or off (off by default), choose the <b>System AI</b> or
       <b>your own</b> OpenAI-compatible API (URL, key, model), <b>Test connection</b>, pick a
       model from the self-refreshing dropdown, and set <b>Auto apply</b>. Your API key is
-      encrypted on your computer and never displayed again.</li>
+      encrypted on your computer, never displayed again, and only ever sent to the server
+      it was saved for — switching to another server asks for that server's key.</li>
   <li><b>Updates</b> — see your current version, check for updates on demand, and turn the
       automatic startup check on or off.</li>
-  <li><b>Advanced</b> — manage the <b>Conversion engine</b> (LibreOffice): see its status,
-      download it ahead of time, or turn off the automatic first‑use download; point the app at
-      an existing LibreOffice or at Ghostscript (for the smallest lossy PDF compression); and,
-      on Windows, toggle the <b>“MICO360 Toolkit” right-click menu</b>. All optional.</li>
+  <li><b>Conversion engine</b> — see the LibreOffice engine's status, download it ahead of
+      time, or turn off the automatic first‑use download. <b>External tools</b> — point the
+      app at an existing LibreOffice or at Ghostscript (for the smallest lossy PDF
+      compression). <b>Windows integration</b> — toggle the <b>“MICO360 Toolkit”
+      right-click menu</b>.</li>
   <li><b>About &amp; Legal</b> — About Us, Terms &amp; Conditions, Privacy Policy, and contact info.</li>
 </ul>
 

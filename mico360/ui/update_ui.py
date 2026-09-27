@@ -43,6 +43,12 @@ class CheckWorker(QObject):
         except Exception as exc:  # network / parse error
             self.failed.emit(str(exc))
             return
+        # A successful check is the moment to sweep stale installers/partials
+        # from the updates folder — keeping the one on offer so it can resume.
+        try:
+            updater.cleanup_downloads(keep_asset=info.asset_name if info else None)
+        except Exception:
+            log.debug("Update-download cleanup failed", exc_info=True)
         if info:
             self.found.emit(info)
         else:
@@ -65,8 +71,11 @@ class DownloadWorker(QObject):
 
     def run(self) -> None:
         try:
+            # The stable per-user folder (not a fresh temp dir), so Retry — or a
+            # later attempt — resumes the partial download instead of restarting.
             path = updater.download(
                 self._info,
+                dest_dir=updater.updates_dir(),
                 progress=lambda d, t: self.progress.emit(d, t),
                 is_cancelled=lambda: self._cancel,
             )
@@ -356,9 +365,17 @@ class UpdateDialog(QDialog):
         self.btn_install = QPushButton("Download && Install")
         self.btn_install.setObjectName("Primary")
         self.btn_install.setCursor(Qt.PointingHandCursor)
-        tip(self.btn_install,
-            "Download the update (checksum-verified) and install it now. "
-            "The app closes and restarts automatically.")
+        if info.sha256 or info.sha256_url:
+            tip(self.btn_install,
+                "Download the update (checksum-verified) and install it now. "
+                "The app closes and restarts automatically.")
+        else:
+            # No checksum published → download() will refuse it; don't promise
+            # a verified install we can't deliver.
+            tip(self.btn_install,
+                "This release has no checksum file, so it can't be verified or "
+                "installed automatically — use “Open on GitHub” to "
+                "download it manually.")
         self.btn_install.setDefault(True)
         self.btn_install.clicked.connect(self._start_download)
         btns.addWidget(self.btn_page)
@@ -441,7 +458,10 @@ class UpdateDialog(QDialog):
         self.bar.setRange(0, 100)
         self.bar.setValue(100)
         self._set_state("installing")
-        self.progress_caption.setText("Download complete   ·   100%")
+        verified = updater.is_verified(path, self._info.sha256)
+        self.progress_caption.setText(
+            "Download complete   ·   checksum verified   ·   100%" if verified
+            else "Download complete   ·   100%")
         self.status.setVisible(True)
         self.status.setText("↻  Installing the update — the app will close and "
                             "reopen automatically to finish. Please approve the "
@@ -454,7 +474,7 @@ class UpdateDialog(QDialog):
         except Exception:
             log.warning("Could not record the pending update marker", exc_info=True)
         try:
-            updater.apply_and_exit(path)
+            updater.apply_and_exit(path, self._info.sha256)
         except Exception as exc:
             self._on_failed(f"Could not start the installer: {exc}")
             return
@@ -532,7 +552,13 @@ def maybe_show_update_completed(parent) -> None:
     settings.pending_update = {}        # one-shot, whatever the outcome
     if not target:
         return
-    if updater.parse_version(__version__) >= updater.parse_version(target):
+    if updater.version_key(__version__) >= updater.version_key(target):
+        # We're on the new version now, so earlier installers are stale. (The
+        # one that just ran is kept a while by cleanup_downloads' age guard.)
+        try:
+            updater.cleanup_downloads()
+        except Exception:
+            log.debug("Update-download cleanup failed", exc_info=True)
         import datetime
         when = datetime.datetime.now().strftime("%B %d, %Y at %I:%M %p")
         try:

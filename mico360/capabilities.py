@@ -32,15 +32,17 @@ def _ai() -> tuple[str, str]:
         ok, _ = cfg.is_usable()
         if not ok:
             return ("off", "Off — optional, and off by default. Turn it on in "
-                           "Settings → AI (choose the System AI or your own "
-                           "OpenAI-compatible API).")
+                           "Settings → AI provider (choose the System AI or your "
+                           "own OpenAI-compatible API).")
         model = cfg.effective_model
+        sends = (" OCR \"Use AI\" is on by default and sends the recognised text "
+                 "of every OCR'd page there; untick it to keep OCR offline.")
         if cfg.source == ai_core.SOURCE_SYSTEM:
             return ("system", f"Active — using the System AI provided for you "
-                              f"(model <b>{html.escape(model)}</b>).")
+                              f"(model <b>{html.escape(model)}</b>)." + sends)
         return ("custom", "Active — using <b>your own</b> AI API at "
                           f"<b>{html.escape(_host(cfg.effective_base_url))}</b> "
-                          f"(model <b>{html.escape(model)}</b>).")
+                          f"(model <b>{html.escape(model)}</b>)." + sends)
     except Exception:
         return ("off", "Off.")
 
@@ -58,13 +60,16 @@ def _key_protection() -> str:
 
 
 def _gpu_ocr() -> str:
+    if not sys.platform.startswith("win"):
+        return ("Not available on this platform — OCR runs on the CPU (GPU "
+                "acceleration uses DirectML, which is Windows-only).")
     try:
         from mico360.config import settings
         if settings.ocr_use_gpu:
             return ("On — OCR uses a compatible graphics card automatically "
                     "when one is present (DirectML; any NVIDIA / AMD / Intel "
                     "GPU), and falls back to the CPU otherwise.")
-        return "Off — OCR runs on the CPU. Enable it in Settings → Processing."
+        return "Off — OCR runs on the CPU. Enable it in Settings → Performance."
     except Exception:
         return "Automatic (GPU when available, else CPU)."
 
@@ -82,7 +87,7 @@ def _engine() -> str:
             return ("Not yet installed — it downloads automatically (one time, "
                     "~340 MB) the first time you convert an Office file.")
         return ("Not installed, and automatic download is off — install "
-                "LibreOffice, or download the engine in Settings → Advanced.")
+                "LibreOffice, or download the engine in Settings → Conversion engine.")
     except Exception:
         return "Downloads automatically on first use."
 
@@ -104,12 +109,13 @@ def _shell_menu() -> str:
     try:
         from mico360 import shell_integration
         if shell_integration.is_registered():
-            return ("On — right-click a supported file in File Explorer to send "
-                    "it straight to a tool. Toggle in Settings → Advanced.")
-        return ("Off — turn on \"Add MICO360 to the right-click menu\" in "
-                "Settings → Advanced.")
+            return ("On — right-click a supported file or folder in File Explorer "
+                    "to send it straight to a tool. Toggle in Settings → Windows "
+                    "integration.")
+        return ("Off — turn on the right-click menu in Settings → Windows "
+                "integration.")
     except Exception:
-        return "Manage it in Settings → Advanced."
+        return "Manage it in Settings → Windows integration."
 
 
 def _platform_note() -> str:
@@ -145,10 +151,10 @@ def capabilities_html() -> str:
     s = capability_state()
     return f"""
 <p>This reflects <b>your</b> current setup — what's enabled and available to you
-right now. Everything optional is off until you turn it on, and you can change
-any of it in <b>Settings</b>.</p>
+right now. AI stays off until you set it up; the other optional parts have the
+defaults shown below. You can change any of it in <b>Settings</b>.</p>
 <ul>
-  <li><b>AI suggestions:</b> {s['ai']}</li>
+  <li><b>AI features:</b> {s['ai']}</li>
   <li><b>AI key storage:</b> {s['key_protection']}</li>
   <li><b>GPU-accelerated OCR:</b> {s['gpu_ocr']}</li>
   <li><b>Office conversion engine:</b> {s['engine']}</li>

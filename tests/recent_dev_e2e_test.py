@@ -412,13 +412,18 @@ def main() -> int:
     # settings, so point the saved base_url at a dead port.)
     settle()
     before = listed()
+    # A saved key is bound to the server it was saved for (M-23), so bind it to
+    # the dead server too — as a user who saved that server's key would have.
+    prev_origin = settings.ai_key_origin
     settings.ai_base_url = "http://127.0.0.1:9/v1"
+    settings.ai_key_origin = ai_core._origin("http://127.0.0.1:9/v1")
     sp.refresh_models_async(quiet=True)
     kept = wait_for(lambda: "last known" in sp.ai_models_state.text())
     check("UI an offline server keeps the last known list",
           kept and len(listed()) == len(before), sp.ai_models_state.text()[:50])
     settle()
     settings.ai_base_url = base
+    settings.ai_key_origin = prev_origin
 
     # =================================================================
     print("\n--- UI: dropdown arrow renders (v6.9.6) ---")

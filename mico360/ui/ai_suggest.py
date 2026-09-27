@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QGridLayout,
@@ -267,24 +267,28 @@ class AiSuggestPanel(Card):
                          f"{self._total_fields} fields… (the first request can "
                          "take up to a minute — Cancel to stop waiting)")
 
-        thread = QThread(self)
-        worker = _SuggestWorker(Path(path), cfg, self._cancel_event)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.done.connect(lambda v, t=token: self._on_done(v, t))
-        worker.failed.connect(lambda m, t=token: self._on_failed(m, t))
-        # Non-blocking self-reap: the thread quits and deletes itself when the
-        # worker finishes, so a cancelled run cleans up on its own without the UI
-        # ever calling wait() on a still-blocked network read.
-        worker.done.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda th=thread: self._pending.discard(th))
+        # A daemon thread with a UI-thread relay (mico360.ui.bg): results are
+        # handled on the UI thread, and closing the window mid-request can no
+        # longer abort the app ("QThread destroyed while running").
+        from mico360.ui.bg import run_in_background
+        from mico360.core.ai_metadata import suggest_metadata
+        p, cancel = Path(path), self._cancel_event
+        holder: dict = {}
+
+        def _ok(v, t=token):
+            self._pending.discard(holder.get("t"))
+            self._on_done(v, t)
+
+        def _err(m, t=token):
+            self._pending.discard(holder.get("t"))
+            self._on_failed(m, t)
+
+        thread = run_in_background(
+            self, lambda: suggest_metadata(p, cfg, cancel=cancel), _ok, _err)
+        holder["t"] = thread
         self._pending.add(thread)
         self._thread = thread
-        self._worker = worker
-        thread.start()
+        self._worker = None
 
     def _cancel(self) -> None:
         """Stop waiting for the current suggestion and free the panel now.
@@ -296,8 +300,6 @@ class AiSuggestPanel(Card):
         self._active_token += 1               # any result in flight is now stale
         if self._cancel_event is not None:
             self._cancel_event.set()
-        if self._thread is not None:
-            self._thread.requestInterruption()
         self._thread = None
         self._worker = None
         self._reset_idle()
@@ -318,16 +320,8 @@ class AiSuggestPanel(Card):
         self._active_token += 1
         if self._cancel_event is not None:
             self._cancel_event.set()
-        for th in list(self._pending):
-            # A thread may already have self-reaped (deleteLater) by the time we
-            # get here; touching a deleted QThread would raise and, at shutdown,
-            # crash the app. Guard every call.
-            try:
-                th.requestInterruption()
-                th.quit()
-                th.wait(3000)
-            except RuntimeError:
-                pass
+        # Worker threads are daemons that stop at their next cancel check (or
+        # simply end with the process); nothing to join here.
         self._pending.clear()
         self._thread = None
         self._worker = None

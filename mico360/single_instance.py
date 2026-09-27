@@ -12,14 +12,21 @@ from __future__ import annotations
 
 import getpass
 import hashlib
+import os
+import tempfile
+import time
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QLockFile, QObject, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 _ACTIVATE = b"ACTIVATE\n"
 _CONNECT_TIMEOUT_MS = 400
 # The primary reads and closes the connection; give it a moment to do so.
 _WRITE_TIMEOUT_MS = 2000
+# A secondary started at the same moment as the primary (Explorer launches one
+# process per selected file) may find the primary still starting up; it keeps
+# trying to reach it for this long.
+_PRIMARY_STARTUP_MS = 8000
 
 
 def _default_name() -> str:
@@ -50,6 +57,7 @@ class SingleInstance(QObject):
         super().__init__(parent)
         self._name = name or _default_name()
         self._server: QLocalServer | None = None
+        self._lock: QLockFile | None = None
         self._primary = False
         self._claim()
 
@@ -63,6 +71,17 @@ class SingleInstance(QObject):
             self._primary = False
             return
         probe.abort()
+        # "Probe, then listen" isn't atomic — on Windows listen() even succeeds
+        # while another instance is listening — so several processes launched
+        # together all became primary (one window per selected file). An
+        # OS-exclusive lock file decides it: exactly one process gets it. A lock
+        # left by a crashed instance is detected as stale (dead PID) and reused.
+        lock = QLockFile(os.path.join(tempfile.gettempdir(), self._name + ".lock"))
+        lock.setStaleLockTime(0)          # stale only if its owner is gone
+        if not lock.tryLock(0):
+            self._primary = False
+            return
+        self._lock = lock
         # Nobody home — become the primary. removeServer() clears a stale socket
         # left by a previous crash (a no-op for live named pipes on Windows).
         QLocalServer.removeServer(self._name)
@@ -83,9 +102,15 @@ class SingleInstance(QObject):
         forwarding a request payload (e.g. an "open tool with file" request).
         Returns True if the ping was delivered."""
         sock = QLocalSocket()
-        sock.connectToServer(self._name)
-        if not sock.waitForConnected(_CONNECT_TIMEOUT_MS):
-            return False
+        deadline = time.monotonic() + _PRIMARY_STARTUP_MS / 1000.0
+        while True:
+            sock.connectToServer(self._name)
+            if sock.waitForConnected(_CONNECT_TIMEOUT_MS):
+                break
+            sock.abort()
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.1)               # the primary may still be starting
         try:
             msg = (payload.encode("utf-8") + b"\n") if payload else _ACTIVATE
             sock.write(msg)
@@ -141,3 +166,6 @@ class SingleInstance(QObject):
         if self._server is not None:
             self._server.close()
             self._server = None
+        if self._lock is not None:
+            self._lock.unlock()
+            self._lock = None

@@ -94,7 +94,7 @@ def main() -> int:
             P.pdf_split(pdf, out, {"mode": "ranges", "ranges": "1-2, 4", "overwrite": True}, rep), 2))
         check("split bad ranges -> error",
               lambda: expect_error(lambda: P.pdf_split(
-                  pdf, out, {"mode": "ranges", "ranges": "zzz"}, rep), "no valid"))
+                  pdf, out, {"mode": "ranges", "ranges": "zzz"}, rep), "aren't valid"))
 
         # --- merge: happy + too-few ------------------------------------
         check("merge 2 -> 1", lambda: files_ok(
