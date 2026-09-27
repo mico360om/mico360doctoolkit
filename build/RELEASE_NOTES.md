@@ -1,14 +1,17 @@
-## MICO360 Doc Toolkit v7.4.2
+## MICO360 Doc Toolkit v7.5.0
 
-**Clearer update notes, and up-to-date Help, Terms and Privacy.**
+**OCR for images, and a cleaner, easier OCR screen.**
+
+**New features**
+- Searchable PDF (OCR) now accepts images — JPG, PNG, TIFF (every page of a multi-page TIFF), WEBP, BMP and HEIC — and turns each one into a searchable PDF. Phone photos are turned upright and each page matches the picture.
+- Right-click an image in File Explorer → MICO360 Toolkit → Searchable PDF (OCR) to make it searchable straight away.
+- The drop area on every tool now says what it accepts (for example "Drag & drop PDFs or images here") and lists the formats.
 
 **Bugs fixed**
-- The "Update available" window now shows every change in full — notes were cut off mid-sentence — and lists only the changes in that version.
-- Help now uses the app's real option names (for example "Save beside originals") and describes what Start does when every file is already done.
+- The OCR screen was cluttered: option notes sat in the wrong column with big gaps, the "&" in an option name disappeared, the quality choice was cut off, and long text pushed the Start button out of view. It is now compact and tidy, and Start is visible without scrolling.
+- Option notes on every tool now sit directly under their option, with no large blank gaps.
 
 **Improvements**
-- Help explains running a tool again, the new "Redo OCR on pages that already have text" option, and that large text is read correctly at every OCR quality setting.
-- Terms & Conditions and the Privacy Policy now show a "Last updated" date, and the Terms note that automated results (OCR, AI, conversions) can contain mistakes, so important documents should be checked.
-- The update window groups improvements under their own "Improvements" heading.
+- OCR options have short, clear names and one-line notes; hover over an option for the full explanation.
 
 _Windows: the installer updates in place — your settings and favourites are kept. macOS: open the `.dmg` and drag the app to Applications._

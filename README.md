@@ -1,4 +1,4 @@
-# MICO360 Doc Toolkit  ·  v7.4.2
+# MICO360 Doc Toolkit  ·  v7.5.0
 
 A modern desktop app for **Windows 10/11 and macOS** for PDF & image management —
 a **Dashboard** home plus tools to compress, merge, split, organize (including a
@@ -129,7 +129,7 @@ After installing, the app keeps itself up to date automatically.
 | **PDF → …** | One tool: PDF to **Word** (editable, OCR optional), **PowerPoint**, **Excel** (tables), or **Images** |
 | **Office → PDF** | **Word / Excel / PowerPoint → PDF**, type auto-detected (LibreOffice → MS Office → built-in fallback) |
 | **Document → Markdown** | **Word / Excel / PowerPoint / PDF → `.md`** — headings, tables, slide sections, page text |
-| **Searchable PDF (OCR)** | Invisible, searchable text layer (Latin built in, **Arabic** on demand; Unicode-safe); quality 200/300/400 dpi; GPU on Windows; optional **AI clean-up** |
+| **Searchable PDF (OCR)** | Scanned **PDFs or images** (JPG, PNG, multi-page TIFF, WEBP, BMP, HEIC) → searchable PDF with an invisible text layer (Latin built in, **Arabic** on demand; Unicode-safe); Fast/Balanced/High quality; GPU on Windows; optional **AI clean-up** |
 | **Image → PDF** | One PDF each, or combined |
 | **Compress Image** | Lossless (verified), presets, **target file size**, or custom quality + resize / format change |
 | **Resize / Convert / Watermark Image** | Batch resize, format conversion (incl. **HEIC**), text or logo stamps |

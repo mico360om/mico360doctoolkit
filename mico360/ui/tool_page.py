@@ -51,6 +51,36 @@ log = get_logger("mico360.ui")
 _row_ids = itertools.count(1)
 
 
+_EXT_ALIASES = {".jpeg": ".jpg", ".tiff": ".tif", ".heif": ".heic"}
+
+
+def drop_prompt(accept: set) -> tuple[str, str]:
+    """(prompt, formats) for a tool's drop band — e.g. ("Drag & drop PDFs or
+    images here", "PDF · JPG · PNG · TIFF · …")."""
+    from mico360.core.tools import IMAGES, OFFICE, PDF, SVG
+    acc = {e.lower() for e in accept}
+    if "*" in acc:
+        return "Drag & drop any files here", "Any file type — or a whole folder"
+    kinds = []
+    if acc & PDF:
+        kinds.append("PDFs")
+    if acc & IMAGES:
+        kinds.append("images")
+    if acc & SVG:
+        kinds.append("SVG files")
+    if acc & OFFICE:
+        kinds.append("Office documents")
+    if not kinds:
+        kinds.append("files")
+    what = kinds[0] if len(kinds) == 1 else ", ".join(kinds[:-1]) + " or " + kinds[-1]
+    order = [".pdf", ".jpg", ".png", ".tif", ".webp", ".bmp", ".heic", ".svg"]
+    exts = sorted({_EXT_ALIASES.get(e, e) for e in acc},
+                  key=lambda e: (order.index(e) if e in order else len(order), e))
+    labels = [("TIFF" if e == ".tif" else e.lstrip(".").upper()) for e in exts]
+    # A single format adds nothing ("PDFs" / "PDF"): only list several.
+    return f"Drag & drop {what} here", (" · ".join(labels) if len(labels) > 1 else "")
+
+
 def _safe_size(p: Path) -> int:
     try:
         return p.stat().st_size
@@ -218,6 +248,7 @@ class ToolPage(QWidget):
 
         # Compact drop band — small, so the queue gets the vertical space.
         self.drop = DropArea(compact=True)
+        self.drop.set_prompt(*drop_prompt(self.tool.accept))
         self.drop.pathsAdded.connect(self.add_paths)
         self.drop.browseFiles.connect(self._browse_files)
         self.drop.browseFolder.connect(self._browse_folder)
@@ -516,9 +547,10 @@ class ToolPage(QWidget):
             return
         was_disabled = not ctrl.isEnabled()
         ctrl.setEnabled(True)
-        tip(ctrl, "Send the recognised text (every page) to your configured AI "
-                  "to fix OCR mistakes and suggest a title/subject. Recognition "
-                  "itself always runs on your PC.")
+        tip(ctrl, "Sends the recognised text of EVERY page to your AI provider, "
+                  "which fixes obvious OCR mistakes (small fixes only — numbers are "
+                  "never changed) and fills in an empty title/subject. Untick to keep "
+                  "everything on your PC; recognition itself always stays local.")
         if "ocr_use_ai" not in settings.tool_options(self.tool.id) and (
                 was_disabled or not getattr(self, "_ai_default_applied", False)):
             ctrl.setChecked(True)             # default on once AI is configured

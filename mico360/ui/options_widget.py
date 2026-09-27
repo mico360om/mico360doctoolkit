@@ -62,6 +62,28 @@ class _PosGrid(QWidget):
         return "center"
 
 
+# Checkbox indicator + spacing, so a hint lines up with the checkbox's text.
+_CHECK_TEXT_INDENT = 28
+
+
+class _HintLabel(QLabel):
+    """A wrapping hint that reserves only the lines it really needs. A plain
+    word-wrapped QLabel in a form is sized from a guessed narrow width, so a
+    one-line hint got the height of three lines — big gaps above and below."""
+
+    def sizeHint(self):  # noqa: N802 (Qt API)
+        sh = super().sizeHint()
+        w = self.width()
+        if self.wordWrap() and w > 40:
+            sh.setHeight(self.heightForWidth(w))
+        return sh
+
+    def resizeEvent(self, event):  # noqa: N802 (Qt API)
+        super().resizeEvent(event)
+        if self.wordWrap() and event.oldSize().width() != event.size().width():
+            self.updateGeometry()          # re-measure for the new width
+
+
 class _PagePlanField(QWidget):
     """Control for the visual page organizer: a button that opens the thumbnail
     grid for the currently-selected file, plus a one-line summary. Its value is
@@ -256,7 +278,9 @@ class OptionsWidget(QWidget):
                 sp.setSuffix(opt.suffix)
             field = sp
         elif opt.kind == "bool":
-            chk = QCheckBox(opt.label)
+            # "&&": Qt reads a single "&" as a keyboard-shortcut marker and hides
+            # it ("text & fill" showed as "text  fill").
+            chk = QCheckBox(opt.label.replace("&", "&&"))
             chk.setChecked(bool(default))
             chk.stateChanged.connect(self._apply_visibility)
             field = chk
@@ -277,10 +301,11 @@ class OptionsWidget(QWidget):
         # it has one) doubles as a word-wrapped tooltip on the control itself —
         # so the explanation is available right under the pointer, not only in
         # the small hint line below. Obvious, hint-less options get no tooltip.
+        detail = getattr(opt, "details", "") or opt.hint
         for w in {field, read_widget} - {None}:
             w.setAccessibleName(opt.label)
-            if opt.hint:
-                tip(w, opt.hint)
+            if detail:
+                tip(w, detail)
 
         if opt.kind == "bool":
             # Span the whole row so the checkbox sits left-aligned with its
@@ -293,10 +318,18 @@ class OptionsWidget(QWidget):
             self._rows[opt.key] = (lbl, field)
 
         if opt.hint:
-            hint = QLabel(opt.hint)
+            hint = _HintLabel(opt.hint)
             hint.setObjectName("Hint")
             hint.setWordWrap(True)
-            self._form.addRow("", hint)
+            if getattr(opt, "details", ""):
+                tip(hint, opt.details)
+            if opt.kind == "bool":
+                # Directly under the checkbox, aligned with its text — not
+                # pushed into the right-hand field column with a ragged gap.
+                hint.setIndent(_CHECK_TEXT_INDENT)
+                self._form.addRow(hint)
+            else:
+                self._form.addRow("", hint)
             # tie hint visibility to the field via a synthetic key
             self._rows[f"__hint__{opt.key}"] = (hint, hint)
 

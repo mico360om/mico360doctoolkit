@@ -282,6 +282,37 @@ def run(report_path: str) -> int:
         return f"{len(words)} scans in a row + re-run + redo OK"
     check("Searchable PDF (OCR) — repeated runs, large text, redo", _ocr_repeat)
 
+    def _ocr_image():
+        """An image (PNG) and a multi-page TIFF become searchable PDFs."""
+        import fitz
+        from PIL import Image, ImageDraw, ImageFont
+        try:
+            font = ImageFont.truetype(r"C:\Windows\Fonts\arial.ttf", 48)
+        except Exception:
+            font = ImageFont.load_default()
+
+        def pg(text):
+            im = Image.new("RGB", (1275, 1650), "white")
+            ImageDraw.Draw(im).text((100, 160), text, fill="black", font=font)
+            return im
+        png = work / "in" / "photo_scan.png"
+        pg("Delivery note 7731").save(png, dpi=(150, 150))
+        o = _run_tool("pdf_ocr", png, out / "ocr_image", {"ocr_use_ai": False})[0]
+        t = " ".join(fitz.open(str(o))[0].get_text().split())
+        if o.suffix != ".pdf" or "Delivery note 7731" not in t:
+            raise AssertionError(f"image OCR: {o.name} {t!r}")
+        tif = work / "in" / "pages.tif"
+        fr = [pg(f"Page number {n}") for n in (1, 2)]
+        fr[0].save(tif, save_all=True, append_images=fr[1:], dpi=(150, 150))
+        o2 = _run_tool("pdf_ocr", tif, out / "ocr_image", {"ocr_use_ai": False})[0]
+        d = fitz.open(str(o2))
+        texts = [" ".join(p.get_text().split()) for p in d]
+        d.close()
+        if len(texts) != 2 or "Page number 2" not in texts[1]:
+            raise AssertionError(f"multi-page TIFF OCR: {texts}")
+        return f"{o.name} + {o2.name} (2 pages)"
+    check("Searchable PDF (OCR) from images (PNG, multi-page TIFF)", _ocr_image)
+
     def _ui():
         from PySide6.QtWidgets import QApplication
         app = QApplication.instance() or QApplication([])

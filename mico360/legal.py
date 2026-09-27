@@ -30,7 +30,7 @@ features, and only when you turn them on (see the Privacy Policy).</p>
       plus a target-file-size mode.</li>
   <li>Convert PDF ⇄ Word / PowerPoint / Excel / images, Office → PDF, and
       Document → Markdown — the conversion engine downloads once on first use (no Office needed).</li>
-  <li><b>OCR</b> turns scanned, image-only PDFs into searchable text, and uses your
+  <li><b>OCR</b> turns scanned PDFs and images (JPG, PNG, TIFF, HEIC…) into searchable PDFs, and uses your
       <b>GPU</b> automatically when one is available.</li>
   <li>A real <b>file queue</b> with batch processing across all CPU cores, and
       bulk <b>file-property</b> editing (dates &amp; owner).</li>

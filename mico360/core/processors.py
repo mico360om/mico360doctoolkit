@@ -3422,8 +3422,65 @@ def _ocr_dpi_from_opt(opt: dict) -> int:
     return _OCR_QUALITY_DPI.get(str(opt.get("quality", "balanced")), _OCR_DPI)
 
 
+_OCR_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff",
+                   ".heic", ".heif"}
+
+
+def _image_file_to_pdf(src: Path, dest: Path, report: Report) -> int:
+    """Turn a scanned image (or every page of a multi-page TIFF) into a PDF,
+    one page per frame: upright, at its real size, transparency on white.
+    Returns the page count."""
+    import fitz
+    from PIL import Image, ImageSequence
+    try:
+        with Image.open(src) as im:
+            frames = getattr(im, "n_frames", 1)
+    except Exception as exc:
+        raise ProcessError(f"Couldn't read the image '{src.name}' — it may be damaged "
+                           f"or not a supported image ({exc}).")
+    doc = fitz.open()
+    try:
+        if frames <= 1:
+            _add_image_page(doc, src)
+        else:
+            tmp = dest.parent
+            with Image.open(src) as im:
+                for n, frame in enumerate(ImageSequence.Iterator(im)):
+                    _check_cancel(report)
+                    fp = tmp / f"frame_{n:04d}.png"
+                    f = frame.copy()
+                    dpi = im.info.get("dpi")
+                    f.save(fp, "PNG", **({"dpi": dpi} if dpi else {}))
+                    _add_image_page(doc, fp)
+        doc.save(str(dest), garbage=3, deflate=True)
+        return doc.page_count
+    finally:
+        doc.close()
+
+
 def pdf_ocr(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
-    """Make a scanned PDF searchable by overlaying an invisible OCR text layer."""
+    """Make a scanned PDF — or a scanned image (JPG, PNG, TIFF incl. multi-page,
+    WEBP, BMP, HEIC) — searchable: the output is a PDF with an invisible OCR
+    text layer over the original page images."""
+    import shutil
+    import tempfile
+
+    if src.suffix.lower() in _OCR_IMAGE_EXTS:
+        tmpdir = Path(tempfile.mkdtemp(prefix="mico360_ocrimg_"))
+        try:
+            work = tmpdir / f"{src.stem}.pdf"
+            pages = _image_file_to_pdf(src, work, report)
+            report(f"Image → PDF ({pages} page{'s' if pages != 1 else ''}), now recognising text…")
+            return _pdf_ocr_run(work, src, out_dir, opt, report)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+    return _pdf_ocr_run(src, src, out_dir, opt, report)
+
+
+def _pdf_ocr_run(src: Path, orig: Path, out_dir: Path, opt: dict,
+                 report: Report) -> list[Path]:
+    """OCR the PDF at *src*; output is named after (and placed beside, when
+    "Save beside originals" is on) the file the user queued, *orig*."""
     import fitz
 
     lang = str(opt.get("ocr_lang", "latin"))
@@ -3451,7 +3508,7 @@ def pdf_ocr(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
             # Nothing to recognise: every page already carries (visible or OCR)
             # text. Say so plainly instead of "succeeding" with an unchanged copy.
             raise ProcessError(
-                f"Every page of '{src.name}' already has text, so there was "
+                f"Every page of '{orig.name}' already has text, so there was "
                 "nothing to OCR." + ("" if redo else
                                      " If that text is wrong or incomplete (for example, "
                                      "from an earlier OCR), turn on \"Redo OCR on pages "
@@ -3521,7 +3578,7 @@ def pdf_ocr(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
                 except Exception:            # noqa: BLE001 — metadata is a nicety
                     log.debug("could not set AI metadata on the OCR output",
                               exc_info=True)
-        out = build_output_path(src, out_dir, ".pdf", name_suffix="_searchable",
+        out = build_output_path(orig, out_dir, ".pdf", name_suffix="_searchable",
                                 overwrite=opt.get("overwrite", False),
                                 numbered=opt.get("same_as_source", False))
         doc.save(str(out), garbage=3, deflate=True)

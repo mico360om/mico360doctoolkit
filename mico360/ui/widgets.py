@@ -348,6 +348,18 @@ class DropArea(QFrame):
         else:
             self._build_full()
 
+    def set_prompt(self, title: str, formats: str = "") -> None:
+        """What this tool accepts: the band's prompt and a formats line."""
+        lbl = getattr(self, "_title_lbl", None)
+        if lbl is not None:
+            lbl.setText(title)
+        fl = getattr(self, "_formats_lbl", None)
+        if fl is not None:
+            fl.setText(formats)
+            fl.setToolTip(formats)
+            fl.setVisible(bool(formats))
+        self.setAccessibleName(title)
+
     def keyPressEvent(self, event):  # noqa: N802
         if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
             self.browseFiles.emit()
@@ -426,7 +438,19 @@ class DropArea(QFrame):
         # Let the prompt shrink so the band never forces the panel wide.
         title.setMinimumWidth(0)
         title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        lay.addWidget(title, 1, Qt.AlignVCenter)
+        # A second, smaller line lists the accepted formats (set per tool).
+        formats = QLabel("")
+        formats.setObjectName("DropFormats")
+        formats.setMinimumWidth(0)
+        formats.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        formats.setVisible(False)
+        text_col = QVBoxLayout()
+        text_col.setContentsMargins(0, 0, 0, 0)
+        text_col.setSpacing(1)
+        text_col.addWidget(title)
+        text_col.addWidget(formats)
+        lay.addLayout(text_col, 1)
+        self._title_lbl, self._formats_lbl = title, formats
 
         b_files = QPushButton("Browse")
         b_files.setObjectName("Ghost")

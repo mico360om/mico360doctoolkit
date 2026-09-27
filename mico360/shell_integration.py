@@ -38,7 +38,7 @@ DEFAULT_BASE = r"Software\Classes\SystemFileAssociations"
 _PDF = ["pdf_compress", "pdf_merge", "pdf_split", "pdf_organize", "pdf_protect",
         "pdf_watermark", "pdf_ocr", "pdf_convert", "pdf_metadata"]
 _IMAGE = ["image_compress", "image_resize", "image_convert", "image_to_pdf",
-          "image_watermark", "image_to_svg"]
+          "pdf_ocr", "image_watermark", "image_to_svg"]
 _OFFICE = ["office_to_pdf", "to_markdown"]
 _SVG = ["svg_to_image"]
 

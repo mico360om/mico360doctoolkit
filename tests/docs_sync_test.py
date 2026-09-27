@@ -111,7 +111,7 @@ def test_help() -> None:
     check("help: every Settings section is covered", not miss_sec, str(miss_sec))
     # Features that must stay documented (add new user-visible features here).
     features = ["redo ocr on pages that already have text", "use ai", "visual organizer",
-                "run them all again", "retry", "undo", "right-click", "recognition quality",
+                "run them all again", "retry", "undo", "right-click", "quality setting",
                 "privacy", "scrub", "save beside", "watermark"]
     miss_f = [f for f in features if f not in text]
     check("help: key features are documented", not miss_f, str(miss_f))
@@ -119,10 +119,14 @@ def test_help() -> None:
     # that no longer exist (spot-check the OCR ones by their real labels).
     from mico360.core.tools import TOOLS_BY_ID
     ocr_labels = [o.label for o in TOOLS_BY_ID["pdf_ocr"].options]
-    check("help: the OCR tool's option labels match the app",
-          all(any(w in text for w in (lab.lower(), lab.lower().split(" (")[0]))
-              for lab in ocr_labels if lab != "Use AI to clean up text & fill title/subject"),
-          str(ocr_labels))
+    # Help may shorten a long label to its first words ("Use AI"), but every OCR
+    # option must be recognisable in Help by its real on-screen name.
+    missing_lab = [lab for lab in ocr_labels
+                   if lab.lower() not in text and " ".join(lab.lower().split()[:2]) not in text]
+    check("help: the OCR tool's option labels match the app", not missing_lab,
+          f"not in Help: {missing_lab}")
+    check("help: OCR says it accepts images",
+          "images" in text and "jpg, png, tiff" in text and "searchable pdf" in text)
 
 
 def test_legal() -> None:

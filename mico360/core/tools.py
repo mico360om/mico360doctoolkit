@@ -34,6 +34,9 @@ class Option:
     # remembered as next session's defaults, where they'd silently be written
     # into unrelated files.
     persist: bool = True
+    # Longer explanation shown only as the hover tooltip (the short ``hint`` is
+    # the line under the control). Keeps option panels compact.
+    details: str = ""
 
 
 @dataclass
@@ -292,34 +295,37 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         id="pdf_ocr", name="Searchable PDF (OCR)", icon="🔍",
-        tagline="Make scanned PDFs selectable & searchable.",
-        mode=PER_FILE, accept=PDF, runner=processors.pdf_ocr, group="Recognize",
+        tagline="Turn scanned PDFs and images into searchable PDFs.",
+        mode=PER_FILE, accept=PDF | IMAGES, runner=processors.pdf_ocr, group="Recognize",
         options=[
             Option("ocr_lang", "Language", "choice", "latin", OCR_LANG_CHOICES,
-                   hint="Pick the document's main script. Non-Latin languages "
-                        "download a small model once on first use."),
-            Option("quality", "Recognition quality", "choice", "balanced", [
-                ("fast", "Fast — 200 dpi"),
-                ("balanced", "Balanced — 300 dpi (recommended)"),
-                ("high", "High — 400 dpi (best on small text)"),
-            ], hint="Higher quality reads small or faint text better, but is slower. "
-                    "Large text is handled automatically at any setting."),
+                   details="Pick the document's main script. Languages other than "
+                           "English / Latin download a small model once, on first use."),
+            Option("quality", "Quality", "choice", "balanced", [
+                ("fast", "Fast"),
+                ("balanced", "Balanced (recommended)"),
+                ("high", "High — small print"),
+            ], hint="Higher: better on small print, but slower.",
+                   details="Fast renders pages at 200 dpi, Balanced at 300 dpi and High at "
+                           "400 dpi. Large text (headings, phone photos) is handled "
+                           "automatically at every setting."),
             Option("ocr_redo", "Redo OCR on pages that already have text", "bool", False,
-                   hint="Replaces an earlier (or poor) OCR text layer by reading those "
-                        "pages again. Real, visible text is never removed."),
+                   hint="Replaces an earlier OCR layer; real text stays.",
+                   details="Pages that already contain text are normally skipped. Tick "
+                           "this to replace an earlier or poor OCR text layer by reading "
+                           "those pages again. Real, visible text is never removed."),
             # Optional AI polish. Recognition always runs locally; when this is on
             # (and AI is set up in Settings → AI provider) an AI additionally fixes obvious
             # OCR errors and fills in the document's title/subject from the text.
             # Defaults on when AI is configured, off/disabled otherwise (the UI
             # sets this) — so OCR still works fully offline.
-            Option("ocr_use_ai", "Use AI to clean up text & fill title/subject",
-                   "bool", False,
-                   hint="Sends the recognised text of EVERY page to your AI "
-                        "provider, which fixes obvious OCR mistakes (small fixes "
-                        "only — numbers are never changed) and fills in an empty "
-                        "title/subject. Needs AI set up in Settings → AI provider. "
-                        "Untick to keep everything on your PC; recognition itself "
-                        "always stays local."),
+            Option("ocr_use_ai", "Use AI to clean up the text", "bool", False,
+                   hint="Sends the recognised text to your AI provider.",
+                   details="Sends the recognised text of EVERY page to your AI provider "
+                           "(Settings → AI provider), which fixes obvious OCR mistakes — "
+                           "small fixes only, numbers are never changed — and fills in an "
+                           "empty title/subject. Untick to keep everything on your PC; "
+                           "recognition itself always stays local."),
         ],
     ),
     Tool(

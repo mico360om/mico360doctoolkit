@@ -126,7 +126,11 @@ tool automatically.</p>
       embedded files and XMP, resets the dates and gives the file a new identifier) or
       <i>Remove all metadata</i> before sharing.</li>
   <li><b>Searchable PDF (OCR)</b> — add an invisible text layer to a scanned PDF so it
-      becomes selectable and searchable (the look of the page is unchanged).
+      becomes selectable and searchable (the look of the page is unchanged). It also takes
+      <b>images</b> — JPG, PNG, TIFF (every page of a multi-page TIFF), WEBP, BMP and HEIC —
+      and turns each one into a <b>searchable PDF</b>: phone photos are turned upright and
+      the page matches the picture. You can also right-click an image in File Explorer →
+      <i>MICO360 Toolkit → Searchable PDF (OCR)</i>.
       Recognition always runs <b>on your PC</b>; it does not need AI. Optionally,
       if you've set up AI in <b>Settings → AI provider</b>, <b>Use AI</b> sends the
       <b>recognised text of every page</b> to your AI to fix obvious recognition
@@ -135,7 +139,8 @@ tool automatically.</p>
       up; untick it to keep everything on your PC. Pages that already have text are
       skipped (you're told if there was nothing to OCR); tick <b>Redo OCR on pages that
       already have text</b> to replace an earlier or poor OCR layer. Large text is read
-      correctly at every <b>Recognition quality</b> setting.</li>
+      correctly at every <b>Quality</b> setting. Hover over any option to see a fuller
+      explanation.</li>
   <li><b>PDF → …</b> — one tool to convert a PDF to <b>Word</b> (editable .docx; turn on
       <b>OCR</b> for scanned pages), <b>PowerPoint</b> (<i>Auto</i> keeps text editable and
       falls back to a page image so slides are never empty; OCR optional), <b>Excel</b>
