@@ -16,7 +16,7 @@ from pathlib import Path
 
 if not os.environ.get("MICO360_SETTINGS_FILE"):
     os.environ["MICO360_SETTINGS_FILE"] = os.path.join(
-        tempfile.mkdtemp(prefix="mico360_ocrimg_"), "DocToolkit.ini")
+        tempfile.mkdtemp(prefix="ocrimgtest_ini_"), "DocToolkit.ini")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 try:
@@ -33,7 +33,17 @@ def check(name, ok, detail=""):
         failures.append(name)
 
 
-TD = Path(tempfile.mkdtemp(prefix="mico360_ocrimg_files_"))
+# Not "mico360_ocrimg_…": that prefix is the app's own temp folder, which the
+# "no temporary files left behind" check looks for.
+TD = Path(tempfile.mkdtemp(prefix="ocrimgtest_files_"))
+
+
+def _app_temp_dirs() -> set:
+    import glob
+    return set(glob.glob(os.path.join(tempfile.gettempdir(), "mico360_ocrimg_*")))
+
+
+APP_TEMP_BEFORE = _app_temp_dirs()
 
 
 def page_image(text: str, size=(1275, 1650), px=48):
@@ -117,10 +127,57 @@ def main() -> int:
         check("a damaged image gives a clear error", False)
     except ProcessError as exc:
         check("a damaged image gives a clear error", "broken.jpg" in str(exc), str(exc)[:80])
-    import glob
-    check("no temporary files are left behind",
-          not glob.glob(os.path.join(tempfile.gettempdir(), "mico360_ocrimg_*", "*.pdf")))
+    leftover = _app_temp_dirs() - APP_TEMP_BEFORE
+    check("no temporary files are left behind", not leftover, str(sorted(leftover))[:120])
 
+    # a long line: every word, up to the last, is searchable (the text layer
+    # used to run past the page edge and lose the line's final words)
+    long_img = TD / "long_line.png"
+    from PIL import Image, ImageDraw, ImageFont
+    try:
+        f11 = ImageFont.truetype(r"C:\Windows\Fonts\arial.ttf", 46)
+    except Exception:
+        f11 = ImageFont.load_default()
+    im = Image.new("RGB", (2480, 3508), "white")
+    line = "Dear Mr Rahman, thank you for your order number 48213 dated 14 March 2026. The total"
+    ImageDraw.Draw(im).text((200, 300), line, fill="black", font=f11)
+    im.save(long_img, dpi=(300, 300))
+    o = P.pdf_ocr(long_img, out, {"overwrite": True}, quiet)[0]
+    d = fitz.open(str(o))
+    last_found = bool(d[0].search_for("total")) and bool(d[0].search_for("2026"))
+    inside = all(d[0].rect.contains(fitz.Rect(s["bbox"])) or
+                 fitz.Rect(s["bbox"]).x1 <= d[0].rect.x1 + 1
+                 for s in d[0].get_texttrace())
+    d.close()
+    check("the last words of a long line are searchable", last_found)
+    check("the invisible text stays inside the page", inside)
+
+    # rotated scanned pages: the searchable text lines up with the printed words
+    for rot in (90, 180, 270):
+        base = page_image("Quarterly report for the Muscat office")
+        stored = base.rotate(rot, expand=True)
+        png_r = TD / f"rot{rot}.png"; stored.save(png_r)
+        w_, h_ = stored.size
+        dd = fitz.open(); pp = dd.new_page(width=w_ * 72 / 150, height=h_ * 72 / 150)
+        pp.insert_image(pp.rect, filename=str(png_r)); pp.set_rotation(rot)
+        src_r = TD / f"rot{rot}.pdf"; dd.save(str(src_r)); dd.close()
+        o = P.pdf_ocr(src_r, out, {"overwrite": True}, quiet)[0]
+        dd = fitz.open(str(o)); pp = dd[0]
+        pix = pp.get_pixmap(dpi=72)
+        ink = [(x, y) for y in range(0, pix.height, 2) for x in range(0, pix.width, 2)
+               if pix.pixel(x, y)[0] < 100]
+        hits = pp.search_for("Quarterly")
+        ok = bool(ink and hits)
+        if ok:
+            ix0 = min(x for x, _ in ink); iy0 = min(y for _, y in ink); iy1 = max(y for _, y in ink)
+            v = fitz.Rect(hits[0]) * pp.rotation_matrix
+            vx0, vy0 = min(v.x0, v.x1), min(v.y0, v.y1)
+            vx1, vy1 = max(v.x0, v.x1), max(v.y0, v.y1)
+            ok = abs(vx0 - ix0) < 10 and vy0 < iy1 and vy1 > iy0 and (vx1 - vx0) > (vy1 - vy0)
+        dd.close()
+        check(f"on a {rot}° rotated page the searchable text sits on the printed words", ok)
+
+    # the preview shows a phone photo upright (its rotation tag is honoured)
     # the tool page accepts images and says so
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance() or QApplication([])  # noqa: F841
@@ -133,6 +190,10 @@ def main() -> int:
     check("drop band says PDFs or images, with the formats",
           "PDFs or images" in title and "JPG" in fmts and "HEIC" in fmts, f"{title} | {fmts}")
     page = ToolPage(tool)
+    thumb = page._thumbnail(jpg)
+    check("the queue preview shows a sideways-stored phone photo upright",
+          thumb is not None and thumb.height() > thumb.width(),
+          f"{thumb.width()}x{thumb.height()}" if thumb is not None else "none")
     page.add_paths([png, tif, TD / "out"])
     names = sorted(it.path.name for it in page.items)
     check("images can be queued on the OCR page", "note.png" in names and "scan.tif" in names,
@@ -148,6 +209,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    _rc = main()
+    try:
+        _rc = main()
+    finally:
+        import shutil
+        shutil.rmtree(TD, ignore_errors=True)
     sys.stdout.flush()
     os._exit(_rc)

@@ -1411,6 +1411,26 @@ def _ocr_text_font(chars: set) -> tuple[str, str | None]:
     return "", None
 
 
+def _ocr_fit_fontsize(text: str, box_w: float, box_h: float, fontname: str,
+                      font=None) -> float:
+    """Font size for an invisible OCR line: from the line's height, then shrunk
+    so the text fits the recognised box's width. Sizing from height alone made
+    long lines run past the page edge, and text beyond the edge can't be
+    searched or copied — the last words of long lines were lost."""
+    import fitz
+    fs = max(4.0, box_h * 0.9)
+    try:
+        if font is not None:
+            width = font.text_length(text, fontsize=fs)
+        else:
+            width = fitz.get_text_length(text, fontname=fontname or "helv", fontsize=fs)
+    except Exception:
+        return fs
+    if width > box_w > 0:
+        fs = max(2.0, fs * box_w / width)
+    return fs
+
+
 def _is_rtl(text: str) -> bool:
     """True when a line is mostly right-to-left script (Arabic / Hebrew)."""
     rtl = ltr = 0
@@ -1539,7 +1559,7 @@ def _run_ocr_engine(engine, img):
 # dpi) made the detector split lines and drop characters: "RECEIPT page 1"
 # came back as "RECEIPT r" + "page". Lines taller than _OCR_MAX_TEXT_PX trigger
 # a second pass on a downscaled image that brings them to _OCR_TARGET_TEXT_PX.
-_OCR_MAX_TEXT_PX = 60
+_OCR_MAX_TEXT_PX = 90
 _OCR_TARGET_TEXT_PX = 48
 _OCR_MAX_DET_SIDE = 2600      # a huge page with nothing found also gets a smaller retry
 
@@ -3532,20 +3552,39 @@ def _pdf_ocr_run(src: Path, orig: Path, out_dir: Path, opt: dict,
                 if not fontname:
                     skipped += 1          # never write garbage into the layer
                     continue
-                fontsize = max(4.0, (y1 - y0) * 0.9)
+                fontsize = _ocr_fit_fontsize(text, x1 - x0, y1 - y0, fontname,
+                                             _ocr_font_obj(fontfile or fontname, fontfile)
+                                             if fontname != "helv" else None)
+                # OCR boxes are in the page's *visual* orientation (the page is
+                # rendered as the reader sees it). On a page with /Rotate the text
+                # must be placed in unrotated coordinates and turned with the page
+                # — otherwise search hits and selections land in the wrong place,
+                # running the wrong way.
+                rot = doc[i].rotation % 360
+                start = fitz.Point(x0, y1)
+                if rot:
+                    start = start * doc[i].derotation_matrix
                 if fontname == "helv":
                     if tw is not None:        # flush first: keep reading order
                         tw.write_text(doc[i], render_mode=3)
                         tw = None
                     # render_mode=3 → invisible text (selectable/searchable only)
-                    doc[i].insert_text(fitz.Point(x0, y1), text, fontsize=fontsize,
-                                       fontname="helv", render_mode=3)
+                    doc[i].insert_text(start, text, fontsize=fontsize,
+                                       fontname="helv", render_mode=3, rotate=rot)
+                elif rot:
+                    # Rotated page: one writer per line, turned about its start.
+                    tw1 = fitz.TextWriter(doc[i].rect)
+                    tw1.append(start, text,
+                               font=_ocr_font_obj(fontfile or fontname, fontfile),
+                               fontsize=fontsize, right_to_left=_is_rtl(text))
+                    tw1.write_text(doc[i], render_mode=3, morph=(start, fitz.Matrix(rot)))
+                    embedded = True
                 else:
                     # Unicode text (Arabic, Cyrillic, ł/č/ş…): TextWriter keeps
                     # right-to-left lines in logical (searchable) order.
                     if tw is None:
                         tw = fitz.TextWriter(doc[i].rect)
-                    tw.append(fitz.Point(x0, y1), text,
+                    tw.append(start, text,
                               font=_ocr_font_obj(fontfile or fontname, fontfile),
                               fontsize=fontsize, right_to_left=_is_rtl(text))
                     embedded = True

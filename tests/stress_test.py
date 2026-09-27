@@ -72,8 +72,20 @@ def run(page, out, timeout_ms=120000):
     return res
 
 
+def _explorer_count() -> int | None:
+    """How many explorer.exe processes are running (None if unknown)."""
+    import subprocess
+    try:
+        tl = subprocess.run(["tasklist", "/FI", "IMAGENAME eq explorer.exe"],
+                            capture_output=True, text=True, timeout=15).stdout
+        return tl.lower().count("explorer.exe")
+    except Exception:
+        return None
+
+
 def main() -> int:
     setup_logging()
+    explorer_before = _explorer_count()
     app = QApplication.instance() or QApplication([])
     app.setStyleSheet(stylesheet(settings.theme))
     saved_out = settings.output_dir
@@ -123,17 +135,17 @@ def main() -> int:
         check("repeated runs: start button re-enabled", cp.btn_start.isEnabled())
 
     # --- no leaked helper processes from a headless batch ---------------
-    import subprocess
-    try:
-        tl = subprocess.run(["tasklist", "/FI", "IMAGENAME eq explorer.exe"],
-                            capture_output=True, text=True, timeout=15).stdout
-        # We only assert our own run didn't spawn a runaway count; explorer is
-        # the shell, so a small number is normal. The headless guard means tools
-        # never open Explorer in tests.
-        n = tl.lower().count("explorer.exe")
-        check("no explorer storm from headless batch (<=3)", n <= 3, f"{n} explorer")
-    except Exception as exc:
-        print(f"[INFO] explorer check skipped: {exc}")
+    # Compare with the count BEFORE the batch: the Windows shell and any File
+    # Explorer windows the user has open are explorer.exe too, so an absolute
+    # limit failed on a normal desktop. The headless guard means tools never
+    # open Explorer in tests — the batch must not add any.
+    explorer_after = _explorer_count()
+    if explorer_before is None or explorer_after is None:
+        print("[INFO] explorer check skipped: tasklist unavailable")
+    else:
+        check("no explorer windows opened by the headless batch",
+              explorer_after <= explorer_before,
+              f"{explorer_before} before, {explorer_after} after")
 
     settings.output_dir = saved_out
     settings.max_workers = saved_workers

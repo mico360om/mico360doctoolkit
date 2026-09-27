@@ -625,8 +625,11 @@ class ToolPage(QWidget):
                     doc.close()
             else:
                 from PIL import Image
+                from PIL import ImageOps
                 with Image.open(str(path)) as im:
-                    im = im.convert("RGBA")
+                    # Honour the photo's rotation tag, as the tools do — a
+                    # phone photo previewed sideways looked wrong.
+                    im = ImageOps.exif_transpose(im).convert("RGBA")
                     im.thumbnail(box)
                     data = im.tobytes("raw", "RGBA")
                     img = QImage(data, im.width, im.height, QImage.Format_RGBA8888)

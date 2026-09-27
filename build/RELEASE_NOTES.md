@@ -10,6 +10,9 @@
 **Bugs fixed**
 - The OCR screen was cluttered: option notes sat in the wrong column with big gaps, the "&" in an option name disappeared, the quality choice was cut off, and long text pushed the Start button out of view. It is now compact and tidy, and Start is visible without scrolling.
 - Option notes on every tool now sit directly under their option, with no large blank gaps.
+- Searchable PDFs now include the last words of long lines — they could run past the page edge in the hidden text layer, so they couldn't be searched or copied.
+- On scanned pages saved with a rotation (90°, 180° or 270°), the searchable text now lines up with the printed words, so search highlights and text selection land in the right place.
+- The queue preview now shows phone photos upright instead of sideways.
 
 **Improvements**
 - OCR options have short, clear names and one-line notes; hover over an option for the full explanation.
