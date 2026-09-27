@@ -302,7 +302,11 @@ TOOLS: list[Tool] = [
                 ("fast", "Fast — 200 dpi"),
                 ("balanced", "Balanced — 300 dpi (recommended)"),
                 ("high", "High — 400 dpi (best on small text)"),
-            ], hint="Higher quality reads small or faint text better, but is slower."),
+            ], hint="Higher quality reads small or faint text better, but is slower. "
+                    "Large text is handled automatically at any setting."),
+            Option("ocr_redo", "Redo OCR on pages that already have text", "bool", False,
+                   hint="Replaces an earlier (or poor) OCR text layer by reading those "
+                        "pages again. Real, visible text is never removed."),
             # Optional AI polish. Recognition always runs locally; when this is on
             # (and AI is set up in Settings → AI provider) an AI additionally fixes obvious
             # OCR errors and fills in the document's title/subject from the text.

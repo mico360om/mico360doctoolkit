@@ -658,21 +658,36 @@ class ToolPage(QWidget):
         """Import files/folders into the queue. Unsupported, unreadable and
         duplicate files are skipped and reported — never fatal."""
         found, stats = collect_files_detailed(paths, self.tool.accept)
-        existing = {self._dedupe_key(it.path) for it in self.items}
-        added = dupes = 0
+        by_key: dict = {}
+        for it in self.items:
+            by_key.setdefault(self._dedupe_key(it.path), []).append(it)
+        added = dupes = requeued = 0
         for p in found:
             key = self._dedupe_key(p)
-            if key in existing:
-                dupes += 1
+            if key in by_key:
+                # Adding a file that already ran means "do it again": put its
+                # finished row back to pending instead of silently ignoring it
+                # (which made a second run look like it did nothing).
+                again = [it for it in by_key[key] if it.state in ("done", "failed")]
+                if again and self.controller is None:
+                    for it in again:
+                        it.state, it.msg, it.outputs = "pending", "", []
+                    requeued += 1
+                else:
+                    dupes += 1
                 continue
-            self.items.append(QueueItem(path=p, size=_safe_size(p)))
-            existing.add(key)
+            item = QueueItem(path=p, size=_safe_size(p))
+            self.items.append(item)
+            by_key[key] = [item]
             added += 1
         self._refresh_list()
 
         if added:
             self._log(f"Added {added} file(s).")
-        elif dupes:
+        if requeued:
+            self._log(f"{requeued} file(s) already processed are queued to run again "
+                      "— press Start.")
+        if not added and not requeued and dupes:
             self._log("Those files are already in the queue.")
         elif not stats.unsupported and not stats.unreadable:
             self._log("No supported files found in the selection.")
@@ -1145,11 +1160,25 @@ class ToolPage(QWidget):
             # skipped until the user retries (or removes & re-adds them).
             todo = [it for it in self.items if it.state != "done"]
         if not todo:
-            QMessageBox.information(
-                self, "Already done",
-                "Every row here is already done.\n\nRight-click → \"Retry\" to "
-                "process them again, or add new files.")
-            return
+            from PySide6.QtGui import QGuiApplication
+            if QGuiApplication.platformName() == "offscreen":
+                QMessageBox.information(
+                    self, "Already done",
+                    "Every row here is already done.\n\nRight-click → \"Retry\" to "
+                    "process them again, or add new files.")
+                return
+            # Pressing Start again usually means "run it again" (e.g. with other
+            # options) — offer that instead of a dead end.
+            res = QMessageBox.question(
+                self, "Run again?",
+                f"Every file in the queue has already been processed.\n\n"
+                f"Run {self.tool.name} on all {len(self.items)} file(s) again with the "
+                "current options?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+            if res != QMessageBox.Yes:
+                return
+            self._retry(list(self.items))
+            todo = [it for it in self.items if it.state != "done"]
         if self.tool.mode == AGGREGATE and self.tool.id == "pdf_merge" and len(todo) < 2:
             QMessageBox.information(self, "Need more files",
                                     "Select at least two PDFs to merge.")

@@ -1308,6 +1308,30 @@ def ocr_active_provider() -> str:
     return _ocr_active_provider
 
 
+def _remove_invisible_text(page) -> int:
+    """Delete the page's *invisible* text (render mode 3 — what OCR adds on top
+    of a scan) so the page can be recognised again. Visible text is never
+    touched. Returns how many text spans were removed."""
+    import fitz
+    try:
+        spans = [s for s in page.get_texttrace() if s.get("type") == 3]
+    except Exception:
+        log.debug("text trace unavailable", exc_info=True)
+        return 0
+    if not spans:
+        return 0
+    for s in spans:
+        page.add_redact_annot(fitz.Rect(s["bbox"]))
+    kw = {"images": fitz.PDF_REDACT_IMAGE_NONE}
+    if hasattr(fitz, "PDF_REDACT_LINE_ART_NONE"):
+        kw["graphics"] = fitz.PDF_REDACT_LINE_ART_NONE
+    try:
+        page.apply_redactions(**kw)
+    except TypeError:
+        page.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE)
+    return len(spans)
+
+
 def _page_has_text(page, threshold: int = 8) -> bool:
     """True if the page is already searchable. A scanned page that merely
     carries a small text stamp (fax header line, Bates number, "Page 3 of 9")
@@ -1318,6 +1342,17 @@ def _page_has_text(page, threshold: int = 8) -> bool:
         return False
     if len(txt) >= 200:                  # real body text
         return True
+    # An invisible text layer (render mode 3) is exactly what OCR adds: the
+    # page is already searchable, however few words it has. (Without this, a
+    # short OCR'd page looked like "a scan with a stamp" and OCR ran again,
+    # doubling the text layer.)
+    try:
+        hidden = sum(len(s.get("chars", ())) for s in page.get_texttrace()
+                     if s.get("type") == 3)
+        if hidden >= threshold:
+            return True
+    except Exception:
+        log.debug("text trace unavailable", exc_info=True)
     try:
         import fitz
         area = abs(page.rect)
@@ -1499,6 +1534,69 @@ def _run_ocr_engine(engine, img):
     return result
 
 
+# The recogniser reads lines best when the text is roughly 20-50 px tall. Large
+# text (headings, phone photos, zoomed scans — or any page rendered at 300-400
+# dpi) made the detector split lines and drop characters: "RECEIPT page 1"
+# came back as "RECEIPT r" + "page". Lines taller than _OCR_MAX_TEXT_PX trigger
+# a second pass on a downscaled image that brings them to _OCR_TARGET_TEXT_PX.
+_OCR_MAX_TEXT_PX = 60
+_OCR_TARGET_TEXT_PX = 48
+_OCR_MAX_DET_SIDE = 2600      # a huge page with nothing found also gets a smaller retry
+
+
+def _ocr_line_height_px(result) -> float:
+    """Median height (pixels) of the recognised lines; 0 when there are none."""
+    hs = []
+    for box, text, _score in (result or []):
+        if str(text).strip():
+            ys = [float(pt[1]) for pt in box]
+            hs.append(max(ys) - min(ys))
+    hs.sort()
+    return hs[len(hs) // 2] if hs else 0.0
+
+
+def _ocr_result_quality(result) -> float:
+    """How much confident text a pass produced (characters x confidence)."""
+    total = 0.0
+    for _box, text, score in (result or []):
+        try:
+            total += len(str(text).strip()) * float(score if score is not None else 0.5)
+        except (TypeError, ValueError):
+            total += len(str(text).strip()) * 0.5
+    return total
+
+
+def _ocr_run_adaptive(engine, img):
+    """Run OCR; if the text is too large for the model (or nothing was found on
+    a very large image), run again on a downscaled copy and keep the better
+    reading. Returns (result, scale) — *scale* maps the result's pixel
+    coordinates back onto *img* (1.0 = no rescale)."""
+    result = _run_ocr_engine(engine, img)
+    h_img, w_img = img.shape[:2]
+    med = _ocr_line_height_px(result)
+    factor = 1.0
+    if med > _OCR_MAX_TEXT_PX:
+        factor = _OCR_TARGET_TEXT_PX / med
+    elif not result and max(h_img, w_img) > _OCR_MAX_DET_SIDE:
+        factor = 1800.0 / max(h_img, w_img)
+    if factor >= 0.95:
+        return result, 1.0
+    try:
+        import cv2
+        small = cv2.resize(img, (max(1, int(w_img * factor)), max(1, int(h_img * factor))),
+                           interpolation=cv2.INTER_AREA)
+        second = _run_ocr_engine(engine, small)
+    except Exception:
+        log.debug("downscaled OCR pass failed", exc_info=True)
+        return result, 1.0
+    # The rescaled pass ran at a size the model is built for, so trust it —
+    # unless it clearly found less text. (Comparing raw scores favoured the
+    # oversized pass, whose split lines carry extra junk characters.)
+    if _ocr_result_quality(second) >= 0.8 * _ocr_result_quality(result):
+        return second, factor
+    return result, 1.0
+
+
 def _ocr_image_lines(engine, img, dpi: int,
                      min_score: float = _OCR_MIN_SCORE) -> list[tuple[str, tuple]]:
     """Run OCR on an already-rendered image; return [(text, (x0,y0,x1,y1))] in
@@ -1517,10 +1615,10 @@ def _ocr_image_lines(engine, img, dpi: int,
     """
     if ocr_active_provider() != "CPU":
         with _ocr_infer_lock:
-            result = _run_ocr_engine(engine, img)
+            result, factor = _ocr_run_adaptive(engine, img)
     else:
-        result = _run_ocr_engine(engine, img)
-    scale = 72.0 / dpi
+        result, factor = _ocr_run_adaptive(engine, img)
+    scale = 72.0 / (dpi * factor)
     lines: list[tuple[str, tuple]] = []
     for box, text, score in (result or []):
         t = str(text).strip()
@@ -3339,9 +3437,27 @@ def pdf_ocr(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Path]:
     except Exception as exc:
         raise ProcessError(f"Couldn't open '{src.name}' ({exc}).")
     try:
-        todo = [i for i in range(doc.page_count) if not _page_has_text(doc[i])]
+        redo = bool(opt.get("ocr_redo"))
+        todo, replaced = [], 0
+        for i in range(doc.page_count):
+            page = doc[i]
+            if not _page_has_text(page):
+                todo.append(i)
+            elif redo and _remove_invisible_text(page) and not _page_has_text(page):
+                todo.append(i)            # an old OCR layer, now removed: read again
+                replaced += 1
         kept = doc.page_count - len(todo)
+        if not todo:
+            # Nothing to recognise: every page already carries (visible or OCR)
+            # text. Say so plainly instead of "succeeding" with an unchanged copy.
+            raise ProcessError(
+                f"Every page of '{src.name}' already has text, so there was "
+                "nothing to OCR." + ("" if redo else
+                                     " If that text is wrong or incomplete (for example, "
+                                     "from an earlier OCR), turn on \"Redo OCR on pages "
+                                     "that already have text\" and run it again."))
         report(f"OCR {len(todo)} page(s)…"
+               + (f"  ({replaced} with an old text layer replaced)" if replaced else "")
                + (f"  ({kept} already searchable)" if kept else ""))
         # OCR the image-only pages in parallel, then write text in page order.
         page_lines = _ocr_pages_concurrent(src, todo, report, dpi, lang)

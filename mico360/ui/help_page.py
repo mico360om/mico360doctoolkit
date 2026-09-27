@@ -176,6 +176,11 @@ and recovers the text.</p>
       directly (no OCR needed), so it’s safe to leave on.</li>
   <li>Recognised text is laid out in reading order — words on the same line are kept
       together, and clear vertical gaps become paragraph breaks.</li>
+  <li><b>Running OCR again:</b> pages that already have text are skipped (an earlier OCR
+      counts). If that text is wrong, tick <b>Redo OCR on pages that already have
+      text</b> — it replaces the old OCR layer and never removes real, visible text.
+      Large text (headings, phone photos) is handled automatically at any quality
+      setting.</li>
   <li>Recognition runs <b>entirely on your computer</b> and works offline. Only the
       optional <b>Use AI</b> clean-up (Searchable PDF, when AI is set up) sends the
       recognised text to your AI provider — untick it to keep OCR fully offline.</li>

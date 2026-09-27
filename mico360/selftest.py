@@ -244,6 +244,44 @@ def run(report_path: str) -> int:
         return f"text layer: {text.strip()[:40]!r} via {ocr_active_provider()}"
     check("Searchable PDF (OCR)", _ocr)
 
+    def _ocr_repeat():
+        """OCR keeps working after the first run: several different scans in a
+        row (including large text), then re-running on the result."""
+        import fitz
+        from PIL import Image, ImageDraw, ImageFont
+        from mico360.core.util import ProcessError
+        try:
+            big = ImageFont.truetype(r"C:\Windows\Fonts\arial.ttf", 64)
+        except Exception:
+            big = ImageFont.load_default()
+        words = ["RECEIPT page 1", "CONTRACT page 2", "INVOICE page 3"]
+        outs = []
+        for n, w in enumerate(words):
+            im = Image.new("RGB", (1650, 2200), "white")
+            ImageDraw.Draw(im).text((120, 200), w, fill="black", font=big)
+            png = work / "in" / f"rep{n}.png"; im.save(png)
+            pdf = work / "in" / f"rep{n}.pdf"
+            d = fitz.open(); pg = d.new_page(width=612, height=816)
+            pg.insert_image(pg.rect, filename=str(png)); d.save(str(pdf)); d.close()
+            o = _run_tool("pdf_ocr", pdf, out / "ocr_repeat", {"ocr_use_ai": False,
+                                                                "quality": "balanced"})[0]
+            t = " ".join(fitz.open(str(o))[0].get_text().split())
+            if w not in t:
+                raise AssertionError(f"run {n + 1}: expected {w!r}, text layer {t!r}")
+            outs.append(o)
+        try:
+            _run_tool("pdf_ocr", outs[0], out / "ocr_again", {"ocr_use_ai": False})
+            raise AssertionError("re-OCR of a searchable PDF should explain there's nothing to do")
+        except ProcessError:
+            pass
+        r = _run_tool("pdf_ocr", outs[0], out / "ocr_redo", {"ocr_use_ai": False,
+                                                              "ocr_redo": True})[0]
+        t = " ".join(fitz.open(str(r))[0].get_text().split())
+        if t.count("RECEIPT") != 1:
+            raise AssertionError(f"Redo OCR should replace, not double, the text: {t!r}")
+        return f"{len(words)} scans in a row + re-run + redo OK"
+    check("Searchable PDF (OCR) — repeated runs, large text, redo", _ocr_repeat)
+
     def _ui():
         from PySide6.QtWidgets import QApplication
         app = QApplication.instance() or QApplication([])

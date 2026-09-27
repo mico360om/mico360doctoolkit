@@ -1,4 +1,33 @@
-## MICO360 Doc Toolkit v7.4.0
+## MICO360 Doc Toolkit v7.4.1
+
+**OCR fix release — Searchable PDF keeps working after the first run.**
+
+**Bugs fixed**
+- **OCR accuracy on large text:** headings, phone photos and zoomed scans (and any
+  page at the Balanced/High quality settings) could come back split or garbled —
+  e.g. "RECEIPT page 1" read as "RECEIPT r" + "page". OCR now adapts to the size
+  of the text automatically, so it reads correctly at every quality setting.
+- **Running OCR again doubled the text:** OCR on a PDF that had already been made
+  searchable added a second copy of the text. It now recognises an existing OCR
+  layer, and tells you plainly when there is nothing to OCR.
+- **New "Redo OCR on pages that already have text" option:** replaces an earlier
+  or poor OCR text layer by reading those pages again. Real, visible text is
+  never removed.
+- **Running a tool again:** pressing Start when every file is already done now
+  offers to run them again (instead of a dead end), and adding a file that was
+  already processed queues it to run again.
+
+**Reliability**
+- The packaged app's built-in self-test (`--selftest`) now also runs several OCR
+  jobs in a row, large text, and a re-run/redo, so every build is checked for
+  this.
+
+_Windows: the installer updates in place — your settings and favourites are kept.
+macOS: open the `.dmg` and drag the app to Applications._
+
+---
+
+### Also in v7.4 (from v7.4.0)
 
 **A big reliability, privacy and polish release** — every item from the September 2026 full-app review is fixed.
 
@@ -71,5 +100,3 @@
 - Accessibility: queue status is read by screen readers, and low-contrast text now
   meets WCAG AA.
 
-_Windows: the installer updates in place — your settings and favourites are kept.
-macOS: open the `.dmg` and drag the app to Applications._
