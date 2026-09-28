@@ -23,6 +23,13 @@ docx2pdf>=0.1.8         # use Microsoft Word via COM when it is installed
 # with automatic CPU fallback — see build/build.ps1. macOS/Linux stay on CPU
 # onnxruntime (DirectML is Windows-only); the app detects this at runtime.
 rapidocr-onnxruntime>=1.2.3
+# OpenCV (pulled in by rapidocr and pdf2docx) must stay on 4.x: OpenCV 5's new
+# loader fails inside PyInstaller bundles ("recursion is detected during loading
+# of cv2 binary extensions"), which broke OCR and PDF -> Word in the macOS app
+# built with 5.0. The built app's --selftest catches this; keep the pin until a
+# PyInstaller release supports OpenCV 5.
+opencv-python>=4.8,<5
+opencv-python-headless>=4.8,<5
 # onnxruntime-directml>=1.17  ; installed by the build on Windows (not here, to
 #                               avoid a double-install conflict with onnxruntime)
 

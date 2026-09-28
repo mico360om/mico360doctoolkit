@@ -151,6 +151,17 @@ def test_no_control_characters() -> None:
     check("build scripts contain no stray control characters", not bad, str(bad))
 
 
+def test_requirements_pins() -> None:
+    """OpenCV 5 breaks inside PyInstaller bundles (OCR and PDF -> Word stopped
+    working in the macOS app); both OpenCV packages stay pinned below 5."""
+    req = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    for pkg in ("opencv-python", "opencv-python-headless"):
+        m = re.search(rf"^{re.escape(pkg)}\s*([^#\n]*)", req, re.M)
+        check(f"requirements: {pkg} is pinned below OpenCV 5",
+              m is not None and "<5" in m.group(1).replace(" ", ""),
+              m.group(0) if m else "missing")
+
+
 def test_installer_iss() -> None:
     iss = _read(BUILD / "installer.iss")
     run = iss.split("[Run]", 1)[1].split("\n[", 1)[0] if "[Run]" in iss else ""
@@ -238,6 +249,7 @@ def main() -> int:
     test_release_scripts()
     test_onefile_spec()
     test_installer_iss()
+    test_requirements_pins()
     test_no_control_characters()
     test_macos_workflow()
     test_ps_parse()
