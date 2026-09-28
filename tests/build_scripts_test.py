@@ -151,6 +151,17 @@ def test_no_control_characters() -> None:
     check("build scripts contain no stray control characters", not bad, str(bad))
 
 
+def test_entry_script_sys_path() -> None:
+    """run.py is the bundle's entry script. Putting its folder (the bundle's
+    library folder) first on sys.path in the built app made OpenCV's loader
+    re-import its own package ("recursion is detected during loading of cv2"),
+    which broke OCR and PDF -> Word in the macOS app."""
+    src = (ROOT / "run.py").read_text(encoding="utf-8")
+    m = re.search(r"^(.*)\n\s*sys\.path\.insert\(", src, re.M)
+    check("run.py: only adds its folder to sys.path when not frozen",
+          m is not None and "frozen" in m.group(1), m.group(1) if m else "no insert")
+
+
 def test_installer_iss() -> None:
     iss = _read(BUILD / "installer.iss")
     run = iss.split("[Run]", 1)[1].split("\n[", 1)[0] if "[Run]" in iss else ""
@@ -238,6 +249,7 @@ def main() -> int:
     test_release_scripts()
     test_onefile_spec()
     test_installer_iss()
+    test_entry_script_sys_path()
     test_no_control_characters()
     test_macos_workflow()
     test_ps_parse()
