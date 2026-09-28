@@ -42,11 +42,9 @@ TD = Path(tempfile.mkdtemp(prefix="mico360_ocrre_files_"))
 
 def scan(name: str, lines: list[str], px: int = 64, pages: int = 1) -> Path:
     import fitz
-    from PIL import Image, ImageDraw, ImageFont
-    try:
-        font = ImageFont.truetype(r"C:\Windows\Fonts\arial.ttf", px)
-    except Exception:
-        font = ImageFont.load_default()
+    from PIL import Image, ImageDraw
+    from mico360.selftest import sample_font
+    font = sample_font(px)
     doc = fitz.open()
     for pno in range(pages):
         im = Image.new("RGB", (1650, 2200), "white")

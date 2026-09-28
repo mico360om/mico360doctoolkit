@@ -47,11 +47,9 @@ APP_TEMP_BEFORE = _app_temp_dirs()
 
 
 def page_image(text: str, size=(1275, 1650), px=48):
-    from PIL import Image, ImageDraw, ImageFont
-    try:
-        font = ImageFont.truetype(r"C:\Windows\Fonts\arial.ttf", px)
-    except Exception:
-        font = ImageFont.load_default()
+    from PIL import Image, ImageDraw
+    from mico360.selftest import sample_font
+    font = sample_font(px)
     im = Image.new("RGB", size, "white")
     ImageDraw.Draw(im).text((100, 160), text, fill="black", font=font)
     return im
@@ -133,11 +131,9 @@ def main() -> int:
     # a long line: every word, up to the last, is searchable (the text layer
     # used to run past the page edge and lose the line's final words)
     long_img = TD / "long_line.png"
-    from PIL import Image, ImageDraw, ImageFont
-    try:
-        f11 = ImageFont.truetype(r"C:\Windows\Fonts\arial.ttf", 46)
-    except Exception:
-        f11 = ImageFont.load_default()
+    from PIL import Image, ImageDraw
+    from mico360.selftest import sample_font
+    f11 = sample_font(46)
     im = Image.new("RGB", (2480, 3508), "white")
     line = "Dear Mr Rahman, thank you for your order number 48213 dated 14 March 2026. The total"
     ImageDraw.Draw(im).text((200, 300), line, fill="black", font=f11)

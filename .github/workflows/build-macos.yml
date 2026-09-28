@@ -58,18 +58,17 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pyinstaller
 
-      - name: Run feature + cross-platform tests on macOS
+      # run_suite.py runs every suite (even after a failure), with a per-suite
+      # timeout and a throw-away settings file, and exits non-zero if any fail.
+      - name: Run the test suites on macOS
         env:
           QT_QPA_PLATFORM: offscreen
         run: |
-          python tests/feature_audit_test.py
-          python tests/cross_platform_test.py
-          python tests/responsive_dpi_test.py
-          python tests/single_instance_test.py
-          python tests/download_resume_test.py
-          python tests/page_organizer_test.py
-          python tests/low_resource_test.py
-          python tests/spec_parity_test.py
+          python tests/run_suite.py --timeout 900 \
+            feature_audit cross_platform responsive_dpi single_instance \
+            download_resume page_organizer low_resource spec_parity \
+            ocr_images ocr_rerun ocr_quality docs_sync help_legal \
+            selftest_mode options_layout bugfix_2026_09
 
       - name: Build the app icon (.icns)
         run: |
@@ -80,6 +79,28 @@ jobs:
         run: |
           pyinstaller build/mico360_macos.spec --noconfirm --distpath dist --workpath build/_work
           test -d "dist/MICO360 Doc Toolkit.app" || (echo "::error::.app was not produced" && exit 1)
+
+      # The same post-build self-test the Windows .exe passes: every bundled
+      # library, every tool on sample files, OCR (PDFs, images, repeated runs),
+      # and the whole UI — run inside the finished .app.
+      - name: Self-test the built app (--selftest)
+        run: |
+          BIN="dist/MICO360 Doc Toolkit.app/Contents/MacOS/MICO360DocToolkit"
+          mkdir -p dist/selftest
+          set +e
+          MICO360_SETTINGS_FILE="$RUNNER_TEMP/selftest.ini" QT_QPA_PLATFORM=offscreen \
+            "$BIN" --selftest "$PWD/dist/selftest/macos-selftest.json"
+          RC=$?
+          set -e
+          cat dist/selftest/macos-selftest.txt || echo "::error::no self-test report was written"
+          if [ "$RC" -ne 0 ]; then echo "::error::the macOS app failed its self-test (exit $RC)"; exit 1; fi
+
+      - name: Upload the self-test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MICO360-macOS-selftest
+          path: dist/selftest/
 
       - name: Smoke-test the bundle (it must launch)
         run: |

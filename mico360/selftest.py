@@ -32,6 +32,33 @@ _IMPORTS = [
 _WIN_IMPORTS = ["win32file", "win32con", "win32security", "pythoncom", "pywintypes"]
 
 
+# Fonts for drawing sample text, per platform. The Windows path alone left
+# macOS/Linux with Pillow's tiny bitmap font, which OCR can't read — so the Mac
+# app's self-test (and the OCR tests) failed there for the wrong reason.
+_SAMPLE_FONTS = (
+    r"C:\Windows\Fonts\arial.ttf",
+    "/System/Library/Fonts/Supplemental/Arial.ttf",
+    "/Library/Fonts/Arial.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+)
+
+
+def sample_font(px: int):
+    """A scalable font of *px* pixels for drawing sample text on any platform."""
+    from PIL import ImageFont
+    for path in _SAMPLE_FONTS:
+        try:
+            return ImageFont.truetype(path, px)
+        except Exception:
+            continue
+    try:
+        return ImageFont.load_default(size=px)     # Pillow >= 10.1: scalable
+    except TypeError:
+        return ImageFont.load_default()
+
+
 class _Report:
     """The ``report`` callable processors expect (collects log lines)."""
 
@@ -44,7 +71,7 @@ class _Report:
 
 def _samples(d: Path) -> dict:
     import fitz
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
     s: dict = {}
     # A 3-page PDF with bookmarks and metadata.
     pdf = d / "sample.pdf"
@@ -91,10 +118,7 @@ def _samples(d: Path) -> dict:
     # A "scanned" PDF (image only) with large clear text for OCR.
     scan_img = Image.new("RGB", (1700, 600), "white")
     dr = ImageDraw.Draw(scan_img)
-    try:
-        font = ImageFont.truetype(r"C:\Windows\Fonts\arial.ttf", 96)
-    except Exception:
-        font = ImageFont.load_default()
+    font = sample_font(96)
     dr.text((80, 220), "INVOICE TOTAL 1250", fill="black", font=font)
     scan_png = d / "scan.png"; scan_img.save(scan_png)
     scan = d / "scan.pdf"
@@ -248,12 +272,9 @@ def run(report_path: str) -> int:
         """OCR keeps working after the first run: several different scans in a
         row (including large text), then re-running on the result."""
         import fitz
-        from PIL import Image, ImageDraw, ImageFont
+        from PIL import Image, ImageDraw
         from mico360.core.util import ProcessError
-        try:
-            big = ImageFont.truetype(r"C:\Windows\Fonts\arial.ttf", 64)
-        except Exception:
-            big = ImageFont.load_default()
+        big = sample_font(64)
         words = ["RECEIPT page 1", "CONTRACT page 2", "INVOICE page 3"]
         outs = []
         for n, w in enumerate(words):
@@ -285,11 +306,8 @@ def run(report_path: str) -> int:
     def _ocr_image():
         """An image (PNG) and a multi-page TIFF become searchable PDFs."""
         import fitz
-        from PIL import Image, ImageDraw, ImageFont
-        try:
-            font = ImageFont.truetype(r"C:\Windows\Fonts\arial.ttf", 48)
-        except Exception:
-            font = ImageFont.load_default()
+        from PIL import Image, ImageDraw
+        font = sample_font(48)
 
         def pg(text):
             im = Image.new("RGB", (1275, 1650), "white")

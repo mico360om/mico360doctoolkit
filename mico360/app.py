@@ -208,7 +208,18 @@ def main() -> int:
         from mico360 import selftest
         rc = selftest.run(cli["report"])
         log.info("self-test finished: %s", "passed" if rc == 0 else "FAILED")
-        return rc
+        # Exit straight away: the report is written, and Qt's headless teardown
+        # at interpreter shutdown can crash (0xC0000409 on Windows), turning a
+        # passed self-test into a failing exit code for the build pipeline.
+        import logging
+        logging.shutdown()
+        for stream in (sys.stdout, sys.stderr):      # None in the windowed app
+            if stream is not None:
+                try:
+                    stream.flush()
+                except Exception:
+                    pass
+        os._exit(rc)
 
     # Shell-integration setup runs without the GUI (used by the installer).
     if cli and cli["action"] in ("register", "unregister"):

@@ -197,8 +197,22 @@ def test_macos_workflow() -> None:
     idx_build = next((i for i, s in enumerate(steps) if "pyinstaller" in str(s.get("run", ""))), -1)
     check("workflow: the tag check runs before the build", idx_verify < idx_build)
     tests = next((s for s in steps if "tests/" in str(s.get("run", ""))), {})
-    for t in ("page_organizer_test.py", "low_resource_test.py", "spec_parity_test.py"):
-        check(f"workflow: still runs {t}", t in str(tests.get("run", "")))
+    run = str(tests.get("run", ""))
+    # Suites are passed to tests/run_suite.py by name ("page_organizer") —
+    # accept either that or the file name.
+    for t in ("page_organizer", "low_resource", "spec_parity", "ocr_images", "ocr_rerun",
+              "docs_sync", "selftest_mode", "options_layout"):
+        check(f"workflow: runs the {t} suite on macOS",
+              re.search(rf"\b{t}(_test\.py)?\b", run) is not None)
+    check("workflow: suites go through run_suite.py (timeouts, isolated settings)",
+          "tests/run_suite.py" in run)
+    selftest = next((s for s in steps if "--selftest" in str(s.get("run", ""))), None)
+    idx_self = steps.index(selftest) if selftest in steps else 99
+    idx_dmg = next((i for i, s in enumerate(steps) if "hdiutil" in str(s.get("run", ""))), -1)
+    check("workflow: the built .app runs its --selftest before the .dmg is made",
+          selftest is not None and idx_build < idx_self < idx_dmg)
+    check("workflow: a failed self-test fails the build",
+          selftest is not None and "exit 1" in str(selftest.get("run", "")))
 
 
 def test_ps_parse() -> None:

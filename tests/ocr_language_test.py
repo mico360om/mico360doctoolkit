@@ -74,7 +74,10 @@ def main() -> int:
             import arabic_reshaper
             from bidi.algorithm import get_display
             font_file = next((f for f in (r"C:\Windows\Fonts\arial.ttf",
-                                          r"C:\Windows\Fonts\tahoma.ttf")
+                                          r"C:\Windows\Fonts\tahoma.ttf",
+                                          "/System/Library/Fonts/Supplemental/Arial.ttf",
+                                          "/System/Library/Fonts/Supplemental/Tahoma.ttf",
+                                          "/Library/Fonts/Arial Unicode.ttf")
                               if os.path.exists(f)), None)
             if font_file:
                 font = ImageFont.truetype(font_file, 48)
