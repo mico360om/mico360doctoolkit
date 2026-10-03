@@ -58,8 +58,15 @@ if ($LASTEXITCODE -ne 0) {
 $assets = @($Installer, $Sidecar, $Latest, $LatestSidecar)
 if (Test-Path $Onefile) { $assets += $Onefile }
 
+# "release not found" arrives on stderr; under ErrorActionPreference=Stop,
+# Windows PowerShell 5.1 turns redirected native stderr into a fatal error -
+# which made publishing a NEW version fail right here.
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
 & $Gh release view $Tag *> $null
-if ($LASTEXITCODE -ne 0) {
+$releaseExists = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = $prevEap
+if (-not $releaseExists) {
     Write-Host "Creating release $Tag..." -ForegroundColor Cyan
     $notesArg = if (Test-Path $Notes) { @("--notes-file", $Notes) } else { @("--generate-notes") }
     & $Gh release create $Tag @assets --title $Tag @notesArg
