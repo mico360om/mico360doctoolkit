@@ -5,7 +5,7 @@ from mico360 import __app_name__, __publisher__, __version__
 
 # Bump whenever the Terms or Privacy Policy text changes (shown on both pages;
 # tests/docs_sync_test.py checks it is a real, current date).
-LEGAL_UPDATED = "27 September 2026"
+LEGAL_UPDATED = "3 October 2026"
 
 EMAIL = "info@mico360.com"
 WEBSITE = "www.mico360.com"
@@ -84,11 +84,14 @@ an AI provider in Settings — the <b>System AI</b> operated for you, or <b>your
 own</b> OpenAI-compatible API. They are:</p>
 <ul>
 <li><b>Metadata suggestions</b> (Edit Metadata) — proposals only: you review them
-and decide what to apply.</li>
+and decide what to apply. The app checks each suggestion against the document and
+leaves out what the document doesn't support, but it cannot guarantee every value
+is right.</li>
 <li><b>OCR clean-up</b> (Searchable PDF → "Use AI") — once AI is set up this option
 is on by default and can be turned off per run. It sends the <b>recognised text of
 every page</b> to your AI provider, which corrects obvious recognition mistakes; the
-app accepts only small, character-level corrections and never changes numbers.
+app accepts only small, character-level corrections, never changes numbers and never
+swaps a word for a different one.
 It can also fill in an empty Title or Subject. These changes are applied
 automatically, so check important documents.</li>
 </ul>
@@ -169,14 +172,16 @@ Once you configure an AI provider — the <b>System AI</b> operated for you, or
 <b>your own</b> OpenAI-compatible API:
 <ul>
 <li><b>Metadata suggestions</b>: when you ask, a short excerpt of that one document
-is sent.</li>
+(its opening and, for a long document, a little of its end) is sent, together with
+the headings, dates and reference numbers the app read from that same excerpt.</li>
 <li><b>OCR "Use AI"</b> (on by default once AI is set up; untick it to keep OCR
 fully offline): the <b>full recognised text of every page</b> of each file you OCR
 is sent for clean-up, and each run's log says so and names the server. Recognition
 itself always runs on your computer.</li>
 </ul>
 Nothing else is sent, and this app stores no copy of the text or the replies.
-Your saved API key is only ever sent to the server it was saved for. Your API key is stored encrypted on your
+Your saved API key is only ever sent to the server it was saved for, and a key built into
+the app for the System AI is only ever sent to the System AI. Your API key is stored encrypted on your
 computer (Windows account protection / DPAPI on Windows; obfuscated on macOS) and
 is never displayed again after you save it. Note: the System AI connection is not
 yet encrypted in transit, so prefer a trusted network — or use your own HTTPS

@@ -184,9 +184,16 @@ def main() -> int:
             doc = fitz.open()
             page = doc.new_page()
             page.insert_text((60, 90), "PORTFOLIO REVIEW", fontsize=18)
-            page.insert_text((60, 130),
-                             "This document reviews the 2026 portfolio "
-                             "performance across all programmes.", fontsize=11)
+            # The facts the stub AI "finds" are really in the document, so they
+            # survive the grounding check (anything invented would be dropped).
+            page.insert_text((60, 130), "\n".join([
+                "Quarterly Portfolio Review prepared by: Strategy Office",
+                "MICO360 - Manager: A. Manager",
+                "Date: 4 March 2026. Revised: 9 March 2026.",
+                "Invoice Number: INV-1042",
+                "This report reviews the performance of the 2026 portfolio and its",
+                "risks, with a governance section for the board.",
+                "(c) 2026 MICO360"]), fontsize=11)
             pdf = tmp / "review.pdf"
             doc.save(str(pdf))
             doc.close()
@@ -229,8 +236,9 @@ def main() -> int:
                   set(got) == set(ai_metadata.FIELDS),
                   f"{len(got)}/{len(ai_metadata.FIELDS)}: {sorted(got)}")
             check("dates come back normalised", got["creation_date"] == "2026-03-04")
-            check("trapped is one of the allowed values",
-                  got["trapped"] in ("True", "False", "Unknown"))
+            check("file-describing fields (Creator/Producer/Trapped) are never "
+                  "guessed by the AI", not {"creator", "producer", "trapped"} & set(got),
+                  str(sorted(got)))
             check("custom properties keep their Key = Value form",
                   "=" in got["custom"], got["custom"])
             check("suggested title matches the document",
@@ -554,8 +562,6 @@ def main() -> int:
             check("Apply all fills every suggested field",
                   vals["copyright"] == "(c) 2026 MICO360"
                   and vals["creation_date"] == "2026-03-04")
-            check("a choice field (Trapped) takes the suggestion",
-                  vals["trapped"] == "Unknown", str(vals["trapped"]))
             check("a multi-line field (Custom) takes the suggestion",
                   "Invoice Number = INV-1042" in vals["custom"], vals["custom"])
 

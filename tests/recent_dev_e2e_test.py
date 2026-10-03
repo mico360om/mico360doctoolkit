@@ -110,6 +110,21 @@ class EvilSink(BaseHTTPRequestHandler):
     do_POST = do_GET
 
 
+# A document that really states every fact in REPLY_FULL: AI answers are
+# checked against the document, so only supported values come through.
+FACTS_TITLE = "Monthly Maintenance Charges"
+FACTS_BODY = "\n".join([
+    "Expense report prepared by: Accounts Department",
+    "Company: MICO360 - Manager: A. Manager",
+    "Date: 4 March 2026. Revised: 9 March 2026.",
+    "Invoice Number: INV-1042 - Cost Centre = FIN-3",
+    "This report covers the maintenance costs billed for the month, and the",
+    "charges are reviewed by the accounts team. Maintenance costs for March",
+    "2026 are listed below.",
+    "Real Key = safe",
+    "(c) 2026 MICO360"])
+
+
 def _make_pdf(path: Path, title: str, body: str) -> None:
     import fitz
     doc = fitz.open()
@@ -202,12 +217,14 @@ def main() -> int:
     REPLY_HOLDER[0] = inj
     with tempfile.TemporaryDirectory() as td:
         p = Path(td) / "inj.pdf"
-        _make_pdf(p, "PORTFOLIO REVIEW", "text")
+        _make_pdf(p, FACTS_TITLE, FACTS_BODY)
         got = aim.suggest_metadata(p, cfg)
     check("SEC oversized value is capped", len(got.get("title", "")) <= 500,
           str(len(got.get("title", ""))))
-    check("SEC injected SQL-ish language rejected", "language" not in got)
-    check("SEC impossible date rejected", "creation_date" not in got)
+    check("SEC injected SQL-ish language rejected",
+          "DROP" not in got.get("language", ""), got.get("language", ""))
+    check("SEC impossible date rejected (the document's own date is used)",
+          got.get("creation_date") == "2026-03-04", got.get("creation_date", ""))
     check("SEC bogus trapped value rejected", "trapped" not in got)
     check("SEC custom keeps only real Key = Value pairs",
           "Real Key = safe" in got.get("custom", "")
@@ -215,15 +232,24 @@ def main() -> int:
 
     # =================================================================
     print("\n--- EDGE: malformed / hostile AI replies ---")
-    def suggest_reply(reply):
+    def suggest_reply(reply, bare=False):
         REPLY_HOLDER[0] = reply
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "d.pdf"
-            _make_pdf(p, "PORTFOLIO REVIEW", "text")
+            if bare:        # nothing the app can read off the document itself
+                _make_pdf(p, "", "just a few words here")
+            else:
+                _make_pdf(p, FACTS_TITLE, FACTS_BODY)
             try:
                 return aim.suggest_metadata(p, cfg), None
             except Exception as exc:      # noqa: BLE001
                 return None, exc
+
+    def facts_with_note(out, err):
+        """An unusable AI reply still offers the document's own facts, and
+        says the AI failed."""
+        return (err is None and bool(out) and out.get("title") == FACTS_TITLE
+                and "document itself" in getattr(out, "note", ""))
 
     out, err = suggest_reply("here is your data: " + json.dumps(REPLY_FULL) + " done")
     check("EDGE JSON embedded in prose is extracted", out and out.get("title"))
@@ -231,27 +257,37 @@ def main() -> int:
     out, err = suggest_reply("```json\n" + json.dumps(REPLY_FULL) + "\n```")
     check("EDGE fenced JSON is parsed", out and out.get("company") == "MICO360")
 
-    out, err = suggest_reply("not json at all, sorry")
-    check("EDGE non-JSON reply raises a clean AiError, no crash",
-          out is None and isinstance(err, ai_core.AiError), type(err).__name__)
-
-    out, err = suggest_reply("")
-    check("EDGE empty reply -> clean AiError", isinstance(err, ai_core.AiError))
-
-    out, err = suggest_reply(json.dumps([1, 2, 3]))     # JSON array, not object
-    check("EDGE JSON array -> clean AiError (no usable fields)",
-          isinstance(err, ai_core.AiError))
+    for label, reply in (("non-JSON reply", "not json at all, sorry"),
+                         ("empty reply", ""),
+                         ("JSON array", json.dumps([1, 2, 3]))):
+        out, err = suggest_reply(reply)
+        check(f"EDGE {label} -> the document's own facts, with a note",
+              facts_with_note(out, err),
+              f"{type(err).__name__ if err else ''} {getattr(out, 'note', '')[:40]}")
+        out, err = suggest_reply(reply, bare=True)
+        check(f"EDGE {label} on a document with no facts -> clean AiError",
+              out is None and isinstance(err, ai_core.AiError), type(err).__name__)
 
     out, err = suggest_reply(json.dumps({k: "" for k in aim.FIELDS}))
-    check("EDGE all-blank object -> 'no usable metadata' AiError",
-          isinstance(err, ai_core.AiError))
+    check("EDGE all-blank object -> only what the document itself states",
+          err is None and out.get("title") == FACTS_TITLE
+          and out.get("creation_date") == "2026-03-04", str(out))
+    out, err = suggest_reply(json.dumps({k: "" for k in aim.FIELDS}), bare=True)
+    check("EDGE all-blank object, nothing in the document -> 'no usable "
+          "metadata' AiError", isinstance(err, ai_core.AiError))
 
     out, err = suggest_reply(json.dumps(
         {"title": 12345, "keywords": None, "author": True, "company": 3.14}))
     check("EDGE wrong JSON types don't crash the cleaner", err is None or out is not None)
 
-    out, err = suggest_reply('{"title": "Half a json"')     # truncated
-    check("EDGE truncated JSON -> clean AiError", isinstance(err, ai_core.AiError))
+    out, err = suggest_reply('{"title": "Monthly Maintenance Charges", "company": '
+                             '"MICO360", "keywords": "maintenance, maint')   # cut off
+    check("EDGE a cut-off reply keeps its complete fields",
+          err is None and out.get("company") == "MICO360"
+          and out.get("title") == FACTS_TITLE, str(out))
+    out, err = suggest_reply('{"title": "Half a json"', bare=True)
+    check("EDGE truncated JSON with nothing usable -> clean AiError",
+          isinstance(err, ai_core.AiError))
 
     out, err = suggest_reply(json.dumps({**REPLY_FULL, "unknown_field": "ignored",
                                          "__proto__": "x"}))
@@ -446,7 +482,7 @@ def main() -> int:
           sum(rows) >= 10 and len(set(rows)) >= 3, str(rows))
 
     # =================================================================
-    print("\n--- UI: full suggest -> apply -> write path (all 16 fields) ---")
+    print("\n--- UI: full suggest -> apply -> write path (every AI field) ---")
     from mico360.core.tools import TOOLS_BY_ID
     from mico360.ui.tool_page import ToolPage
     from PySide6.QtWidgets import QMessageBox
@@ -462,7 +498,7 @@ def main() -> int:
         out = Path(td) / "out"; out.mkdir()
         settings.output_dir = str(out)
         src = Path(td) / "invoice.pdf"
-        _make_pdf(src, "PORTFOLIO REVIEW", "Invoice INV-1042 dated 2026-03-04.")
+        _make_pdf(src, FACTS_TITLE, FACTS_BODY)
 
         page = ToolPage(TOOLS_BY_ID["pdf_metadata"])
         panel = page.ai_panel
@@ -473,8 +509,9 @@ def main() -> int:
         panel.btn_suggest.click()
         got = wait_for(lambda: bool(panel._current), 40000)
         check("UI suggestions returned for the file", got, panel.status.text()[:50])
-        check("UI all 16 fields suggested", len(panel._current) == 16,
-              str(len(panel._current)))
+        check("UI every AI-fillable field suggested",
+              len(panel._current) == len(aim.FIELDS),
+              f"{len(panel._current)}/{len(aim.FIELDS)}: {sorted(panel._current)}")
 
         # blank never overwrites
         page.options_widget._controls["title"].setText("Keep me")
@@ -486,11 +523,10 @@ def main() -> int:
         panel.btn_apply_all.click()
         loop = QEventLoop(); QTimer.singleShot(120, loop.quit); loop.exec()
         vals = page.options_widget.values()
-        check("UI Apply all fills text + date + choice + multiline",
+        check("UI Apply all fills text + date + multiline",
               vals["title"] == REPLY_FULL["title"]
               and vals["creation_date"] == "2026-03-04"
-              and vals["trapped"] == "Unknown"
-              and "Invoice Number = INV-1042" in vals["custom"])
+              and "Invoice Number = INV-1042" in vals["custom"], str(vals)[:200])
 
         # write to the PDF and read it back
         page.chk_same.setChecked(False)
@@ -511,9 +547,9 @@ def main() -> int:
             md = PdfReader(str(outs[0])).metadata or {}
             expect = {"/Title": REPLY_FULL["title"], "/Author": REPLY_FULL["author"],
                       "/Subject": REPLY_FULL["subject"], "/Keywords": REPLY_FULL["keywords"],
-                      "/Creator": REPLY_FULL["creator"], "/Producer": REPLY_FULL["producer"],
                       "/Company": REPLY_FULL["company"], "/Manager": REPLY_FULL["manager"],
-                      "/Category": REPLY_FULL["category"], "/Comments": REPLY_FULL["comments"]}
+                      # "Expense Report" is mapped onto the fixed category list
+                      "/Category": "Report", "/Comments": REPLY_FULL["comments"]}
             wrong = {k: str(md.get(k)) for k, v in expect.items() if str(md.get(k)) != v}
             check("UI every AI text field written into the PDF", not wrong, str(wrong))
             check("UI AI creation date written",

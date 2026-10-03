@@ -89,6 +89,17 @@ def test_build_ps1() -> None:
           "$LASTEXITCODE" not in lines[uninstall])
 
 
+def test_workpath_outside_project() -> None:
+    """PyInstaller's work folder must not sit in the (cloud-synced) project:
+    the sync client locks the half-built .exe and the manifest step fails."""
+    src = (ROOT / "build" / "build.ps1").read_text(encoding="utf-8")
+    m = re.search(r"PyInstaller build\\mico360\.spec.*--workpath (\S+)", src)
+    check("build.ps1: PyInstaller works outside the project folder",
+          m is not None and m.group(1) == "$Work"
+          and re.search(r"\$Work = Join-Path \$env:LOCALAPPDATA", src) is not None,
+          m.group(1) if m else "no --workpath")
+
+
 def test_release_scripts() -> None:
     rel = _read(BUILD / "release.ps1")
     pub = _read(BUILD / "publish.ps1")
@@ -247,6 +258,7 @@ def test_ps_parse() -> None:
 def main() -> int:
     test_build_ps1()
     test_release_scripts()
+    test_workpath_outside_project()
     test_onefile_spec()
     test_installer_iss()
     test_entry_script_sys_path()

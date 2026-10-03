@@ -173,7 +173,7 @@ def main() -> int:
 
     try:
         # AI on + usable → corrected text + metadata embedded
-        ocr_ai.cleanup_lines = lambda cfg, lines, is_cancelled=None: \
+        ocr_ai.cleanup_lines = lambda cfg, lines, is_cancelled=None, budget=None: \
             [s.replace("teh", "the").replace("brovvn", "brown") for s in lines]
         ai_metadata.suggest_metadata = lambda path, cfg, excerpt=None, cancel=None: \
             {"title": "The Quick Brown Fox", "subject": "pangram"}

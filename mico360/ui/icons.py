@@ -236,6 +236,31 @@ def _icon_label_class():
     return _IconLabelClass
 
 
+def app_icon():
+    """The app's own icon with every size from app.ico (16-256 px, each drawn
+    for its size) plus the 512 px PNG — so the title bar, taskbar and Alt-Tab
+    pick a sharp image instead of Qt shrinking one big picture. Falls back to
+    the wide logo if the square icon is missing."""
+    from PySide6.QtGui import QIcon, QImageReader, QPixmap
+    from mico360.paths import resource_path
+    out = QIcon()
+    ico = resource_path("app.ico")
+    if ico.exists():
+        reader = QImageReader(str(ico))
+        for _ in range(max(reader.imageCount(), 1)):
+            img = reader.read()
+            if not img.isNull():
+                out.addPixmap(QPixmap.fromImage(img))
+            if not reader.jumpToNextImage():
+                break
+    for name in ("app.png", "logo.png"):
+        p = resource_path(name)
+        if p.exists():
+            out.addFile(str(p))
+            break
+    return out
+
+
 class IconLabel:
     """A QLabel that shows a tinted line icon and re-tints itself when the theme
     changes. Constructing one returns a shared ``_IconLabel`` subclass instance;

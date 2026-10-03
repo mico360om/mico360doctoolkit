@@ -5,7 +5,6 @@ runs them concurrently, emitting Qt signals the UI binds to for live progress.
 """
 from __future__ import annotations
 
-import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -19,8 +18,11 @@ from mico360.core.util import (
     auto_worker_count,
     begin_reservations,
     discard_empty_reservations,
+    explain_failure,
     is_nonempty,
     require_free_space,
+    source_problem,
+    tidy_message,
 )
 
 from mico360.logging_setup import get_logger
@@ -103,6 +105,13 @@ class _Worker(QRunnable):
             except OSError:
                 need = 0
             require_free_space(self.out_dir, need, self.label)
+            # A missing, empty or mislabelled file gets one clear sentence here
+            # rather than whatever the PDF / image / Office library would raise.
+            any_file = "*" in self.tool.accept
+            for s in srcs:
+                why = source_problem(s, any_file)
+                if why:
+                    raise ProcessError(why)
             outputs = self.tool.runner(self.item, self.out_dir, self.options, report)
             # A binary output that is still 0 bytes means an engine failed
             # silently (the placeholder was never filled) — that's a failure,
@@ -126,14 +135,28 @@ class _Worker(QRunnable):
                                                       index=self.index))
                 return
             log.warning("%s failed: %s", self.label, exc)
-            self.signals.finished.emit(UnitResult(self.label, False, message=str(exc),
-                                                  sources=srcs, index=self.index))
+            self.signals.finished.emit(UnitResult(
+                self.label, False, message=tidy_message(str(exc), srcs),
+                sources=srcs, index=self.index))
         except Exception as exc:  # pragma: no cover - defensive
             discard_empty_reservations()
-            log.exception("Unexpected error processing %s", self.label)
-            self.signals.finished.emit(UnitResult(self.label, False,
-                                                  message=f"Unexpected error: {exc}",
-                                                  sources=srcs, index=self.index))
+            if self.cancel.is_set():   # cancelled mid-write -> skipped, not failed
+                self.signals.finished.emit(UnitResult(self.label, False, skipped=True,
+                                                      message="Cancelled", sources=srcs,
+                                                      index=self.index))
+                return
+            # A locked, damaged or vanished file reads as that — not as
+            # "Unexpected error: ValueError: document closed or encrypted".
+            known = explain_failure(exc, srcs)
+            if known:
+                log.warning("%s failed: %s [%s: %s]", self.label, known,
+                            type(exc).__name__, exc)
+            else:
+                log.exception("Unexpected error processing %s", self.label)
+            self.signals.finished.emit(UnitResult(
+                self.label, False,
+                message=known or tidy_message(f"Unexpected error: {exc}", srcs),
+                sources=srcs, index=self.index))
 
 
 class BatchController(QObject):

@@ -7,6 +7,9 @@ venv/
 .env
 
 # Build artifacts
+# The System AI key: written into the app at build time, never committed.
+build/system_ai.key
+mico360/_build_secrets.py
 build/_work/
 build/_work_onefile/
 build/_build_v5.ps1

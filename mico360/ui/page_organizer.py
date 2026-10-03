@@ -26,7 +26,6 @@ from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap, QTransform
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QApplication,
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,

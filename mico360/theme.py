@@ -310,7 +310,9 @@ QPushButton#Danger:hover {{ background-color: {c['error_bg']}; border-color: {c[
 
 /* Keyboard focus indicators (the global outline:none hides the default ring) */
 QPushButton:focus {{ border: 1px solid {c['primary']}; }}
-QPushButton#Primary:focus {{ border: 2px solid {c['text']}; }}
+/* A soft inner ring: a dark outline round a red button looked heavy, and a
+   dialog's default button has focus the moment it opens. */
+QPushButton#Primary:focus {{ border: 2px solid rgba(255, 255, 255, 170); }}
 QPushButton#Subtle:focus, QPushButton#IconButton:focus {{
     border: 1px solid {c['primary']}; background-color: {c['hover']};
 }}

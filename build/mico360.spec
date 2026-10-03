@@ -56,6 +56,7 @@ hiddenimports = [
     # AI metadata generator (ai_suggest is imported lazily inside a method)
     "mico360.core.ai", "mico360.core.ai_metadata", "mico360.core.ocr_ai",
     "mico360.ui.ai_suggest", "mico360.ui.bg",   # AI worker threads (lazy)
+    "mico360._build_secrets",   # System AI key (written at build time)
     "mico360.selftest",   # --selftest (post-build check; lazy)
     # Lazily imported inside functions — name them so PyInstaller collects them.
     "mico360.shell_integration", "mico360.capabilities", "mico360.ui.icons",

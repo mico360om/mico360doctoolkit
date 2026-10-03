@@ -6,7 +6,6 @@ import os
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -276,6 +275,9 @@ class SettingsPage(QWidget):
         row.addWidget(self.ai_source, 1)
         w = QWidget(); w.setLayout(row); card.add(w)
 
+        # Under System AI the box shows the System AI's address; your own
+        # API's address is kept aside for when you switch back to it.
+        self._custom_url = settings.ai_base_url
         self.ai_url = QLineEdit(settings.ai_base_url)
         self.ai_url.setPlaceholderText(ai_core.SYSTEM_BASE_URL)
         self.ai_url.setAccessibleName("AI API URL")
@@ -572,7 +574,8 @@ class SettingsPage(QWidget):
 
     def _refresh_models(self) -> None:
         """Manual Refresh — save what's on screen first, then re-check."""
-        self._save_ai()
+        if not self._save_ai():
+            return                          # the address isn't usable (shown)
         self.btn_models_refresh.setEnabled(False)
         self.refresh_models_async(quiet=False)
 
@@ -597,20 +600,33 @@ class SettingsPage(QWidget):
         shown masked - never in full."""
         from mico360.core import ai as ai_core
         custom = self.ai_source.currentData() == ai_core.SOURCE_CUSTOM
+        if custom and not self.ai_url.isEnabled():
+            self.ai_url.setText(self._custom_url)       # back to your own API
+        elif not custom:
+            if self.ai_url.isEnabled():
+                self._custom_url = self.ai_url.text().strip()
+            self.ai_url.setText(ai_core.SYSTEM_BASE_URL)
         self.ai_url.setEnabled(custom)
-        stored = ai_core.unseal_key(settings.ai_api_key_sealed)
+        stored = ai_core.sanitize_key(ai_core.unseal_key(settings.ai_api_key_sealed))
         cur = ai_core.AiConfig(source=self.ai_source.currentData(),
                                base_url=self.ai_url.text().strip())
-        if stored and not ai_core.stored_key_for(cur.effective_base_url):
-            self.ai_key.setPlaceholderText("Paste the API key for this server")
-            self.ai_key_state.setText(
-                "The saved key belongs to a different AI server, so it won't be "
-                "sent here. Paste this server's key and save.")
-        elif stored:
+        usable = ai_core.stored_key_for(cur.effective_base_url)
+        builtin = not custom and bool(ai_core.builtin_system_key())
+        if stored and usable == stored:
             self.ai_key.setPlaceholderText(ai_core.masked_key(stored) + "  (saved)")
             self.ai_key_state.setText(
                 "A key is saved. Leave blank to keep it, or type a new one to "
                 "replace it.")
+        elif builtin:
+            self.ai_key.setPlaceholderText("Built in — nothing to paste")
+            self.ai_key_state.setText(
+                "The System AI's key is built into the app, so it works as soon "
+                "as AI features are on. You can still paste your own key.")
+        elif stored:
+            self.ai_key.setPlaceholderText("Paste the API key for this server")
+            self.ai_key_state.setText(
+                "The saved key belongs to a different AI server, so it won't be "
+                "sent here. Paste this server's key and save.")
         else:
             self.ai_key.setPlaceholderText("Paste your API key")
             self.ai_key_state.setText("No API key saved yet.")
@@ -629,19 +645,29 @@ class SettingsPage(QWidget):
         cfg = ai_core.AiConfig(
             enabled=self.chk_ai.isChecked(),
             source=self.ai_source.currentData(),
-            base_url=self.ai_url.text().strip(),
+            base_url=(self.ai_url.text().strip()
+                      if self.ai_source.currentData() == ai_core.SOURCE_CUSTOM
+                      else self._custom_url),
             model=self.ai_model.currentText().strip(),
         )
         # The saved key is only reused for the server it was saved for.
         cfg.api_key = typed or ai_core.stored_key_for(cfg.effective_base_url)
         return cfg, typed
 
-    def _save_ai(self) -> None:
+    def _save_ai(self) -> bool:
+        """Save the AI settings; False (and nothing saved) when the address of
+        your own API isn't usable — the reason is shown under the buttons."""
         from mico360.core import ai as ai_core
         cfg, typed = self._collect_ai()
-        if cfg.source == ai_core.SOURCE_CUSTOM and cfg.base_url:
+        if cfg.source == ai_core.SOURCE_CUSTOM:
             cfg.base_url = ai_core.normalize_base_url(cfg.base_url)
+            problem = ai_core.url_problem(cfg.base_url)
+            if problem:
+                self._on_test_done(False, problem + " Nothing was saved.")
+                self.ai_url.setFocus()
+                return False
             self.ai_url.setText(cfg.base_url)
+            self._custom_url = cfg.base_url
         # A model id typed into the editable combo becomes a saved entry, so
         # "new models can be added" simply by naming one. A model the server
         # doesn't advertise is the user's own — remembered separately so a
@@ -656,16 +682,19 @@ class SettingsPage(QWidget):
         ai_core.save_config(cfg, api_key=typed if typed else None)
         self.ai_key.clear()          # never keep the secret on screen
         self._sync_ai_fields()
+        self.ai_status.setTextFormat(Qt.PlainText)
         self.ai_status.setText("Saved.")
         # New endpoint or key => a different set of models may be available.
         self.refresh_models_async(quiet=True)
+        return True
 
     def _test_ai(self) -> None:
         """Test the connection OFF the UI thread — an unreachable host can block
         the connect for the full timeout (~30s), which would otherwise freeze the
         whole window with no way to interact."""
         from mico360.core import ai as ai_core
-        self._save_ai()
+        if not self._save_ai():
+            return                          # the address isn't usable (shown)
         if getattr(self, "_test_thread", None) is not None:
             return                          # a test is already running
         self.btn_ai_test.setEnabled(False)
@@ -699,9 +728,12 @@ class SettingsPage(QWidget):
         pal = palette(settings.theme)
         # .get() with a fallback: a missing palette key must never turn a failed
         # connection test into a crash (the failure path is the one users hit).
-        colour = pal.get("success" if ok else "error", pal["text"])
+        # Connected, but the chosen model isn't offered (or none are): AI won't
+        # work as set up, so that's a warning, not a green tick.
+        warn = ok and ("isn't one of them" in msg or "offers no models" in msg)
+        colour = pal.get("warn" if warn else "success" if ok else "error", pal["text"])
         self.ai_status.setTextFormat(Qt.RichText)
-        mark = "✓" if ok else "✗"
+        mark = "⚠" if warn else "✓" if ok else "✗"
         self.ai_status.setText(
             f"<span style='color:{colour};'>{mark} {html.escape(msg)}</span>")
 

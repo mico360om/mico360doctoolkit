@@ -19,6 +19,115 @@ class ProcessError(Exception):
     """Raised when a processing operation fails for a user-actionable reason."""
 
 
+# Office formats that are ZIP packages inside (an older or password-protected
+# one is an OLE file instead, and is left for the conversion engine to judge).
+_ZIP_DOCS = {".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp"}
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0"
+
+
+def source_problem(path, any_file: bool = False) -> str:
+    """Why a source file can't be processed, or "" when it looks fine.
+
+    Checked before a tool runs, so a missing, empty or mislabelled file gets
+    one clear sentence instead of whatever the PDF / image / Office library
+    happens to raise. ``any_file`` is for tools that take every kind of file
+    (Edit File Properties), where only "it must exist" applies.
+    """
+    p = Path(path)
+    name = p.name
+    try:
+        if not p.is_file():
+            return (f"'{name}' can't be found — it was moved, renamed or deleted "
+                    "after you added it.")
+        size = p.stat().st_size
+    except OSError as exc:
+        return f"'{name}' can't be opened ({exc.strerror or type(exc).__name__})."
+    if any_file:
+        return ""
+    if size == 0:
+        return f"'{name}' is empty (0 bytes), so there is nothing to process."
+    ext = p.suffix.lower()
+    if ext != ".pdf" and ext not in _ZIP_DOCS:
+        return ""
+    try:
+        with open(p, "rb") as fh:
+            head = fh.read(1024)
+    except PermissionError:
+        return (f"'{name}' can't be read — it is open in another program, or you "
+                "don't have permission to open it.")
+    except OSError as exc:
+        return f"'{name}' can't be read ({exc.strerror or type(exc).__name__})."
+    if ext == ".pdf":
+        if b"%PDF-" not in head:
+            return (f"'{name}' isn't a PDF inside — it is damaged, or it is another "
+                    "kind of file that was renamed to .pdf.")
+        return ""
+    if head.startswith(_OLE_MAGIC):
+        return ""
+    import zipfile
+    if not zipfile.is_zipfile(p):
+        return (f"'{name}' isn't a valid {ext} document — it is damaged or "
+                "incomplete, or it is another kind of file that was renamed.")
+    return ""
+
+
+def tidy_message(message: str, sources=()) -> str:
+    """A failure message with the sources' full paths shortened to file names.
+    Library errors quote the whole path (often with doubled backslashes), which
+    buries the actual reason in the results list."""
+    out = str(message)
+    for s in sources or []:
+        p = Path(s)
+        full = str(p)
+        for form in (full.replace("\\", "\\\\"), full, p.as_posix()):
+            if form and form != p.name:
+                out = out.replace(form, p.name)
+    return out
+
+
+def explain_failure(exc: BaseException, sources=()) -> str:
+    """A plain-language reason for a known kind of technical failure, or ""
+    when the error isn't one we recognise (the caller then reports it as
+    unexpected). Lets a locked, damaged or vanished file read as that, rather
+    than as "ValueError: document closed or encrypted"."""
+    names = [Path(s).name for s in (sources or [])]
+    raw = str(exc)
+    named = next((n for n in names if n and n in raw), None)
+    if named or len(names) == 1:
+        subject = f"'{named or names[0]}'"
+    else:
+        subject = "One of the files"
+    text = f"{type(exc).__name__}: {raw}".lower()
+    if isinstance(exc, FileNotFoundError):
+        return (f"{subject} can't be found — it was moved, renamed or deleted "
+                "after you added it.")
+    if isinstance(exc, PermissionError):
+        return (f"{subject} can't be read or written — it is open in another "
+                "program, or you don't have permission for that folder.")
+    if isinstance(exc, MemoryError):
+        return (f"{subject} is too large to process with the memory available. "
+                "Close other apps, or try a lower quality setting.")
+    if "decompressionbomb" in text:
+        return f"{subject} has too many pixels to process safely."
+    if "password" in text or "encrypted" in text:
+        return (f"{subject} is password-protected. Remove the password first "
+                "(Protect PDF → Remove the password), then try again.")
+    if any(k in text for k in ("is no pdf", "filedataerror", "emptyfileerror",
+                               "failed to open file", "broken document",
+                               "cannot open broken", "no objects found")):
+        return (f"{subject} isn't a valid PDF — it is damaged, or it is another "
+                "kind of file that was renamed to .pdf.")
+    if any(k in text for k in ("unidentifiedimageerror", "cannot identify image",
+                               "image file is truncated", "broken data stream",
+                               "broken png", "not a jpeg")):
+        return (f"{subject} isn't a valid image — it is damaged or incomplete, "
+                "or it is another kind of file that was renamed.")
+    if "badzipfile" in text or "not a zip file" in text or "packagenotfound" in text:
+        return (f"{subject} isn't a valid Office document — it is damaged or "
+                "incomplete.")
+    return ""
+
+
 # Placeholders reserved by the current worker thread, so the engine can remove
 # the ones a failed / cancelled unit never filled (a 0-byte file with a real-
 # looking name is worse than no file at all).

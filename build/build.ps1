@@ -97,8 +97,18 @@ if (Test-Path $DistApp) {
     }
 }
 
+# The System AI key is built in from build\system_ai.key or the
+# MICO360_SYSTEM_AI_KEY environment variable (never from the source code).
+Write-Host "Building in the System AI key..." -ForegroundColor Cyan
+& $Py build\write_build_secrets.py
+if ($LASTEXITCODE -ne 0) { throw "write_build_secrets.py failed (exit $LASTEXITCODE)" }
+
 Write-Host "Building with PyInstaller..." -ForegroundColor Cyan
-& $Py -m PyInstaller build\mico360.spec --noconfirm --distpath dist --workpath build\_work
+# PyInstaller's scratch folder lives OUTSIDE the project: inside a cloud-synced
+# folder the half-built .exe gets locked by the sync client / antivirus, and
+# embedding its manifest then fails (it once succeeded on the last of 20 tries).
+$Work = Join-Path $env:LOCALAPPDATA "mico360-build-work"
+& $Py -m PyInstaller build\mico360.spec --noconfirm --distpath dist --workpath $Work
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed (exit $LASTEXITCODE)" }
 if (-not (Test-Path (Join-Path $DistApp "MICO360DocToolkit.exe"))) {
     throw "PyInstaller reported success but $DistApp\MICO360DocToolkit.exe is missing"

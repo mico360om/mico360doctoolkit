@@ -5,13 +5,12 @@ import os
 import sys
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QGuiApplication, QIcon
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
 from mico360 import __app_name__
 from mico360.config import settings
 from mico360.logging_setup import get_logger, setup_logging
-from mico360.paths import resource_path
 from mico360.theme import stylesheet
 
 
@@ -274,11 +273,10 @@ def main() -> int:
 
     # Square app icon — this is what the macOS Dock / Windows taskbar show when
     # running from source. (The wide word-mark squashes to a sliver there.)
-    for name in ("app.png", "logo.png"):
-        p = resource_path(name)
-        if p.exists():
-            app.setWindowIcon(QIcon(str(p)))
-            break
+    from mico360.ui.icons import app_icon
+    icon = app_icon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
 
     app.setStyleSheet(stylesheet(settings.theme))
 

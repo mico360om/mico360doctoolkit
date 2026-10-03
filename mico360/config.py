@@ -23,13 +23,26 @@ def _dedup_strs(value) -> list:
     return out
 
 
+def _test_settings_file() -> str:
+    """A throw-away INI when the program is one of our test scripts run
+    directly (python tests/x_test.py) without MICO360_SETTINGS_FILE — such a
+    run once left a test server's address in a user's real AI settings."""
+    import sys
+    from pathlib import Path
+    main = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
+    if main and main.parent.name == "tests" and main.name.endswith("_test.py"):
+        import tempfile
+        return str(Path(tempfile.gettempdir()) / f"mico360_test_{os.getpid()}.ini")
+    return ""
+
+
 class Settings:
     """Thin typed wrapper around QSettings."""
 
     def __init__(self) -> None:
         # MICO360_SETTINGS_FILE points the app at another INI (the test runner
         # uses a throw-away one so tests never rewrite the user's real settings).
-        alt = os.environ.get("MICO360_SETTINGS_FILE", "").strip()
+        alt = os.environ.get("MICO360_SETTINGS_FILE", "").strip() or _test_settings_file()
         if alt:
             self._s = QSettings(alt, QSettings.IniFormat)
         else:

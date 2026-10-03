@@ -6,7 +6,7 @@
 ; ..\vendor and installed alongside the app. See vendor\README.md.
 
 #define AppName "MICO360 Doc Toolkit"
-#define AppVersion "7.5.0"
+#define AppVersion "7.6.0"
 #define AppPublisher "MICO360"
 #define AppExeName "MICO360DocToolkit.exe"
 
@@ -22,6 +22,9 @@ OutputDir=..\dist\installer
 OutputBaseFilename=MICO360-DocToolkit-Setup-{#AppVersion}
 SetupIconFile=..\mico360\resources\app.ico
 UninstallDisplayIcon={app}\{#AppExeName}
+; Ask Explorer to refresh its icon cache when setup finishes, so shortcuts and a
+; pinned taskbar button show the new icon instead of a cached old one.
+ChangesAssociations=yes
 ; The payload is large (~1.7 GB — it bundles the LibreOffice engine). ISCC's
 ; LZMA compressor is 32-bit, so a single SOLID block with a big dictionary
 ; exhausts its address space and crashes (islzma.dll access violation). Compress

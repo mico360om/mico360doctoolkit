@@ -5,6 +5,9 @@ review first — each row has a tick box (for bulk selection), an editable value
 and its own Apply — plus Apply all, Apply selected and Dismiss. Turning on
 *Auto apply* accepts them as soon as they arrive.
 
+Suggestions are grounded (see mico360.core.ai_metadata): a value the document
+doesn't support never reaches the panel.
+
 Two rules protect existing metadata:
   * a blank / low-confidence suggestion is never applied, so a useful value is
     never overwritten with nothing;
@@ -334,13 +337,20 @@ class AiSuggestPanel(Card):
         self._reset_idle()
         self._show(values)
         n = len(self._current)
+        note = getattr(values, "note", "")
         if self.chk_auto.isChecked():
             self._apply_all()
+            if note:
+                self._set_status(note + " " + self.status.text(), warn=True)
+        elif note:
+            self._set_status(f"{note} {n} of {self._total_fields} fields found — "
+                             "review, then apply.", warn=True)
         else:
             self._set_status(
                 f"{n} of {self._total_fields} fields suggested — review, edit "
-                "if you like, then apply. Fields the AI wasn't sure about were "
-                "left out so your existing values stay put.")
+                "if you like, then apply. Every value was checked against the "
+                "document; anything it doesn't say was left out, so your "
+                "existing values stay put.")
 
     def _on_failed(self, message: str, token=None) -> None:
         if token is not None and token != self._active_token:

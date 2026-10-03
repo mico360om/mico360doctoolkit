@@ -97,10 +97,18 @@ tool automatically.</p>
   <li><b>Sign PDF</b> — stamp a signature image on the last/first/every page.</li>
   <li><b>AI metadata suggestions</b> — on the <b>Edit Metadata</b> page, click
       <b>Suggest All with AI</b> and the app reads the selected document and
-      proposes values for <b>every</b> metadata field it can (Title, Author,
-      Subject, Keywords, Creator, Producer, Creation/Modification date, Company,
-      Manager, Category, Description/Comments, Custom properties, Copyright,
-      Language and Trapped). <b>Nothing changes until you accept.</b> Tick the
+      proposes values for the fields the document itself can answer (Title,
+      Author, Subject, Keywords, Creation/Modification date, Company, Manager,
+      Category, Description/Comments, Custom properties such as invoice or
+      reference numbers, Copyright and Language). Every suggestion is
+      <b>checked against the document</b>: a name, company, date, number or
+      keyword the document doesn't contain is left out, dates come only from
+      ones printed in it (never a due or expiry date), the category is one of a
+      fixed list, and text in the document that tries to instruct the AI is
+      ignored. Creator, Producer and Trapped describe how the file was made, so
+      the AI doesn't guess them. If the AI can't give an answer, you're told and
+      shown what the app found in the document itself.
+      <b>Nothing changes until you accept.</b> Tick the
       fields you want and <b>Apply selected</b>, use <b>Apply all</b>, apply an
       individual field, edit any value first, or <b>Dismiss</b>. Turn on
       <b>Auto apply</b> to fill the fields the moment suggestions arrive.
@@ -110,7 +118,8 @@ tool automatically.</p>
       <b>Privacy</b> preset is selected. Only a short excerpt of that one document
       is sent, and only when you ask.<br>
       Set it up in <b>Settings → AI provider</b>: choose the <b>System AI</b> (provided for
-      you) or <b>your own</b> OpenAI-compatible API (URL + key + model), press
+      you) or <b>your own</b> OpenAI-compatible API
+      (URL + key + model), press
       <b>Test connection</b>, and pick a model from the <b>Model</b> dropdown —
       it lists the models your key may use and refreshes itself. Your API key is
       encrypted on your computer and never shown again after saving.</li>
@@ -134,8 +143,11 @@ tool automatically.</p>
       Recognition always runs <b>on your PC</b>; it does not need AI. Optionally,
       if you've set up AI in <b>Settings → AI provider</b>, <b>Use AI</b> sends the
       <b>recognised text of every page</b> to your AI to fix obvious recognition
-      errors (only small character fixes are accepted — numbers are never changed)
-      and to fill in an <i>empty</i> Title/Subject. It's on by default once AI is set
+      errors (only small character fixes are accepted — numbers are never changed,
+      and a word is never swapped for a different one). Certain slips, such as a
+      letter O read inside a number, are fixed straight away; with a small model
+      only the lines that look misread are sent for checking. It also fills in an
+      <i>empty</i> Title/Subject. It's on by default once AI is set
       up; untick it to keep everything on your PC. Pages that already have text are
       skipped (you're told if there was nothing to OCR); tick <b>Redo OCR on pages that
       already have text</b> to replace an earlier or poor OCR layer. Large text is read
@@ -280,7 +292,10 @@ and recovers the text.</p>
       <b>your own</b> OpenAI-compatible API (URL, key, model), <b>Test connection</b>, pick a
       model from the self-refreshing dropdown, and set <b>Auto apply</b>. Your API key is
       encrypted on your computer, never displayed again, and only ever sent to the server
-      it was saved for — switching to another server asks for that server's key.</li>
+      it was saved for — switching to another server asks for that server's key. If
+      your copy of the app comes with the <b>System AI's key built in</b>, Settings says so and
+      there's nothing to paste (you can still use your own key); a built-in key is only ever
+      sent to the System AI. Otherwise, paste the System AI key you were given.</li>
   <li><b>Updates</b> — see your current version, check for updates on demand, and turn the
       automatic startup check on or off.</li>
   <li><b>Conversion engine</b> — see the LibreOffice engine's status, download it ahead of

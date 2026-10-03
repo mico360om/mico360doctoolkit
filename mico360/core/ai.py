@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import http.client
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -50,7 +51,12 @@ SOURCE_CUSTOM = "custom"
 
 
 class AiError(Exception):
-    """A user-facing AI failure — the message is safe to show as-is."""
+    """A user-facing AI failure — the message is safe to show as-is.
+    ``status`` is the HTTP status when the server answered with an error."""
+
+    def __init__(self, message: str = "", status: int | None = None):
+        super().__init__(message)
+        self.status = status
 
 
 def sanitize_key(key: str) -> str:
@@ -247,11 +253,37 @@ def normalize_base_url(url: str) -> str:
     # Add the OpenAI-compatible /v1 only when the URL has no API version of its
     # own — Gemini (/v1beta/openai), Azure (/openai/deployments/…) and other
     # providers are left exactly as given.
-    if not (re.search(r"/v\d+[a-z0-9]*(/|$)", path) or "/openai" in path
-            or "/deployments/" in path):
+    low = path.lower()
+    if not (re.search(r"/v\d+[a-z0-9]*(/|$)", low) or "/openai" in low
+            or "/deployments/" in low):
         path += "/v1"
-    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, path,
+    return urllib.parse.urlunsplit((parts.scheme.lower(), parts.netloc, path,
                                     parts.query, ""))
+
+
+def url_problem(url: str) -> str:
+    """Why a (normalised) base URL can't be used, or "" when it's fine — so
+    Settings refuses "not a url", "ftp://…" or a bad port up front instead of
+    saving it and failing later with a confusing network error."""
+    u = (url or "").strip()
+    if not u:
+        return "Enter the address of your AI API, for example https://api.example.com/v1"
+    if any(ch.isspace() for ch in u):
+        return "The API address can't contain spaces."
+    try:
+        parts = urllib.parse.urlsplit(u)
+        port = parts.port                  # raises for a port out of range
+    except ValueError:
+        return "The port in the API address isn't valid (it must be 1-65535)."
+    if parts.scheme not in ("http", "https"):
+        return "The API address must start with http:// or https://."
+    host = parts.hostname or ""
+    if not host or not re.fullmatch(r"[A-Za-z0-9.\-]+|[0-9a-fA-F:]+", host) \
+            or host.startswith(".") or ".." in host:
+        return "The API address needs a valid server name, for example api.example.com."
+    if port == 0:
+        return "The port in the API address isn't valid (it must be 1-65535)."
+    return ""
 
 
 def _join_url(base: str, path: str) -> str:
@@ -328,7 +360,7 @@ def _request(cfg: AiConfig, path: str, payload=None, timeout=DEFAULT_TIMEOUT,
                         time.sleep(wait)
                     attempt += 1
                     continue
-            raise AiError(_http_message(exc, url))
+            raise AiError(_http_message(exc, url), status=exc.code)
         except urllib.error.URLError as exc:
             raise AiError(f"Couldn't reach the AI server at {base} "
                           f"({getattr(exc, 'reason', exc)}). Check the URL, the "
@@ -433,13 +465,21 @@ def test_connection(cfg: AiConfig) -> tuple[bool, str]:
                   f"isn't one of them. Try: {', '.join(models[:4])}")
 
 
+_THINK_RE = re.compile(r"<think>.*?(</think>|$)", re.S | re.I)
+
+
 def chat(cfg: AiConfig, messages: list[dict], timeout: int = DEFAULT_TIMEOUT,
          max_tokens: int | None = None, retries: int = MAX_RETRIES,
-         cancel=None) -> str:
+         cancel=None, temperature: float | None = None) -> str:
     """Send a chat completion and return the assistant's text.
 
     Transient 429/503 responses are retried automatically (``retries``); pass a
     ``cancel`` event-like object to abort the wait between retries promptly.
+
+    ``temperature`` 0 makes structured answers repeatable, but not every
+    OpenAI-compatible server accepts it — a 400/422 is retried once without it.
+    (JSON mode is deliberately not used: it sent small models into endless
+    repetition.) A reasoning model's ``<think>…</think>`` preamble is removed.
     """
     ok, why = cfg.is_usable()
     if not ok:
@@ -447,34 +487,88 @@ def chat(cfg: AiConfig, messages: list[dict], timeout: int = DEFAULT_TIMEOUT,
     payload = {"model": cfg.effective_model, "messages": messages, "stream": False}
     if max_tokens:
         payload["max_tokens"] = int(max_tokens)
-    data = _request(cfg, "/chat/completions", payload, timeout=timeout,
-                    retries=retries, cancel=cancel)
+    extras = {}
+    if temperature is not None:
+        extras["temperature"] = float(temperature)
     try:
-        return (data["choices"][0]["message"]["content"] or "").strip()
+        data = _request(cfg, "/chat/completions", {**payload, **extras},
+                        timeout=timeout, retries=retries, cancel=cancel)
+    except AiError as exc:
+        if not extras or exc.status not in (400, 422):
+            raise
+        log.info("AI server rejected the temperature setting (HTTP %s); "
+                 "retrying without it", exc.status)
+        data = _request(cfg, "/chat/completions", payload, timeout=timeout,
+                        retries=retries, cancel=cancel)
+    try:
+        text = data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError):
         raise AiError("The AI server's reply didn't contain any text.")
+    return _THINK_RE.sub("", str(text)).strip()
 
 
 # =====================================================================
 # Settings bridge
 # =====================================================================
+_SCRAMBLE = b"MICO360-Doc-Toolkit/system-ai"
+
+
+def scramble_key(key: str) -> str:
+    """Reversible scrambling for the System AI key built into the app, so it
+    isn't readable as plain text in the program files. (Not encryption: an app
+    can always recover a key it ships with — use a key meant for the app.)"""
+    raw = key.encode("utf-8")
+    return base64.b64encode(bytes(b ^ _SCRAMBLE[i % len(_SCRAMBLE)]
+                                  for i, b in enumerate(raw))).decode("ascii")
+
+
+def _unscramble(text: str) -> str:
+    try:
+        raw = base64.b64decode(text or "")
+        return bytes(b ^ _SCRAMBLE[i % len(_SCRAMBLE)]
+                     for i, b in enumerate(raw)).decode("utf-8")
+    except (ValueError, UnicodeError):
+        return ""
+
+
+def builtin_system_key() -> str:
+    """The System AI key built into this copy of the app ("" if none). The
+    build writes it to mico360/_build_secrets.py from build/system_ai.key or
+    the MICO360_SYSTEM_AI_KEY environment variable — never into the source."""
+    import os
+    env = sanitize_key(os.environ.get("MICO360_SYSTEM_AI_KEY", ""))
+    if env:
+        return env
+    try:
+        from mico360 import _build_secrets
+    except ImportError:
+        return ""
+    return sanitize_key(_unscramble(getattr(_build_secrets, "SYSTEM_AI_KEY", "")))
+
+
+def is_system_url(base_url: str) -> bool:
+    return bool(base_url) and _origin(base_url) == _origin(SYSTEM_BASE_URL)
+
+
 def stored_key_for(base_url: str) -> str:
     """The saved API key, but only for the server it was saved for. Typing a
     new custom URL must not send the saved key (e.g. the System-AI key) to that
     host. A key saved before this check existed is bound on first use to the
-    server it was configured with."""
+    server it was configured with. The System AI falls back to the key built
+    into the app, which is never sent anywhere else."""
     from mico360.config import settings
     key = sanitize_key(unseal_key(settings.ai_api_key_sealed))
-    if not key:
-        return ""
-    bound = settings.ai_key_origin
     want = _origin(base_url)
-    if not bound:
-        saved = AiConfig(source=settings.ai_source, base_url=settings.ai_base_url)
-        bound = _origin(saved.effective_base_url)
-        if bound:
-            settings.ai_key_origin = bound
-    return key if (want and want == bound) else ""
+    if key:
+        bound = settings.ai_key_origin
+        if not bound:
+            saved = AiConfig(source=settings.ai_source, base_url=settings.ai_base_url)
+            bound = _origin(saved.effective_base_url)
+            if bound:
+                settings.ai_key_origin = bound
+        if want and want == bound:
+            return key
+    return builtin_system_key() if is_system_url(base_url) else ""
 
 
 def load_config() -> AiConfig:

@@ -3646,11 +3646,12 @@ def _ocr_ai_pass(src: Path, opt: dict, page_lines: dict, report: Report):
     n_pages = sum(1 for v in page_lines.values() if v)
     report(f"AI: sending the recognised text of {n_pages} page(s) to {host} "
            "for clean-up (turn off \"Use AI\" to keep everything on this PC)…")
+    budget = ocr_ai.LineBudget()             # single-line requests, whole document
     for i, lines in list(page_lines.items()):
         if is_cancelled is not None and is_cancelled():
             return None
         texts = [t for t, _bbox in lines]
-        fixed = ocr_ai.cleanup_lines(cfg, texts, is_cancelled)
+        fixed = ocr_ai.cleanup_lines(cfg, texts, is_cancelled, budget=budget)
         page_lines[i] = [(fixed[j] or texts[j], lines[j][1])
                          for j in range(len(lines))]
     if is_cancelled is not None and is_cancelled():

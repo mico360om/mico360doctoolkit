@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QCursor, QGuiApplication, QIcon
+from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -21,7 +21,6 @@ from mico360 import __app_name__, __version__
 from mico360.config import settings
 from mico360.core.tools import TOOLS
 from mico360.logging_setup import get_logger
-from mico360.paths import resource_path
 from mico360.theme import stylesheet
 from mico360.ui.help_page import HelpPage
 from mico360.ui.log_page import LogPage
@@ -66,12 +65,11 @@ class MainWindow(QMainWindow):
         self._apply_initial_geometry()   # size + centre, clamped to the screen
 
         # Square app icon (not the wide word-mark, which squashes to a sliver
-        # in the Dock / Alt-Tab). Falls back to the logo if it's missing.
-        for name in ("app.png", "logo.png"):
-            p = resource_path(name)
-            if p.exists():
-                self.setWindowIcon(QIcon(str(p)))
-                break
+        # in the Dock / Alt-Tab), with every size drawn for its size.
+        from mico360.ui.icons import app_icon
+        icon = app_icon()
+        if not icon.isNull():
+            self.setWindowIcon(icon)
 
         self.setAcceptDrops(True)       # drag & drop anywhere routes to a tool
         self.stack = QStackedWidget()

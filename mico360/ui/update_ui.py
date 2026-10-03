@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -533,9 +532,12 @@ class UpdateCompletedDialog(QDialog):
         ok.setObjectName("Primary")
         ok.setCursor(Qt.PointingHandCursor)
         ok.setDefault(True)
+        ok.setMinimumWidth(150)          # centred like the rest of the dialog
         ok.clicked.connect(self.accept)
         row.addWidget(ok)
+        row.addStretch(1)
         lay.addLayout(row)
+        self.btn_ok = ok
 
 
 def maybe_show_update_completed(parent) -> None:

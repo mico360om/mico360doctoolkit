@@ -112,7 +112,8 @@ def test_help() -> None:
     # Features that must stay documented (add new user-visible features here).
     features = ["redo ocr on pages that already have text", "use ai", "visual organizer",
                 "run them all again", "retry", "undo", "right-click", "quality setting",
-                "privacy", "scrub", "save beside", "watermark"]
+                "privacy", "scrub", "save beside", "watermark",
+                "checked against the document"]
     miss_f = [f for f in features if f not in text]
     check("help: key features are documented", not miss_f, str(miss_f))
     # Every tool option's hint is shown in the app; Help must not describe options

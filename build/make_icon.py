@@ -10,7 +10,15 @@ app and its installers need:
 The brand logo is a wide wordmark ("MICO 360°"), which becomes an invisible
 sliver when letterboxed into a square icon. Instead we build a proper square
 app icon: the bold white "360° + swoosh" emblem (cropped from the white logo)
-centred on a rounded maroon brand tile. This stays recognisable down to 16px.
+centred on a rounded maroon brand tile.
+
+Every size is drawn for its size, so the icon is sharp everywhere:
+  * 16-48 px (taskbar, title bar, Explorer lists): a simplified mark — a bold
+    white "360" drawn at that exact pixel size. The detailed swoosh shrunk to
+    these sizes was a blur.
+  * 64 px and up: the full emblem, downscaled with light sharpening.
+The .ico carries the in-between sizes Windows asks for at 125-200 % display
+scaling (20, 40, 72, 96 px), so Windows never has to stretch one.
 
 Pure Pillow, so all three formats build on any OS (no iconutil needed).
 
@@ -18,7 +26,7 @@ Run:  python build/make_icon.py
 """
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC_WHITE = ROOT / "logo-w.png"      # all-white wordmark (for dark backgrounds)
@@ -33,10 +41,20 @@ ICNS_SIZES = [(16, 16), (32, 32), (64, 64), (128, 128),
 PREVIEW = ROOT / "build" / "_work" / "icon_preview.png"   # scratch, not shipped
 
 MAROON = (130, 20, 20, 255)          # sampled brand maroon (#821414)
+WHITE = (255, 255, 255, 255)
 EMBLEM_LEFT_FRAC = 0.365             # crop x: right of the MICO pill / gap (~x850/2330)
 TILE = 1024                          # master canvas
-ICO_SIZES = [(16, 16), (24, 24), (32, 32), (48, 48),
-             (64, 64), (128, 128), (256, 256)]
+ICO_SIZES = [16, 20, 24, 32, 40, 48, 64, 72, 96, 128, 256]
+SIMPLE_MAX = 48                      # sizes up to this use the simplified mark
+
+# Heavy sans faces for the small mark, first found wins (Windows, macOS, Linux).
+_BOLD_FONTS = (
+    r"C:\Windows\Fonts\ariblk.ttf", r"C:\Windows\Fonts\seguibl.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Black.ttf",
+    "/Library/Fonts/Arial Black.ttf",
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+)
 
 
 def _emblem() -> Image.Image:
@@ -71,14 +89,62 @@ def build_master() -> Image.Image:
     return tile
 
 
+def _bold_font(px: int):
+    for path in _BOLD_FONTS:
+        if Path(path).exists():
+            return ImageFont.truetype(path, px)
+    return ImageFont.load_default(size=px)
+
+
+def _small_mark(size: int) -> Image.Image:
+    """The simplified icon for small sizes: a bold "360" drawn at this exact
+    pixel size on the maroon tile (corners drawn at 4x for smooth edges).
+
+    Up to 24 px the lettering spans the tile and is drawn on whole pixels (no
+    anti-aliasing): strokes thinner than a pixel otherwise render grey and soft.
+    """
+    tile = _rounded_tile(size * 4, MAROON).resize((size, size), Image.LANCZOS)
+    pixel_crisp = size <= 24
+    width, height = (0.98, 0.80) if pixel_crisp else (0.88, 0.66)
+    px = size * 2
+    font = _bold_font(px)
+    while px > 4:                     # largest text that fits the tile
+        font = _bold_font(px)
+        l, t, r, b = font.getbbox("360")
+        if r - l <= size * width and b - t <= size * height:
+            break
+        px -= 1
+    l, t, r, b = font.getbbox("360")
+    x = round((size - (r - l)) / 2 - l)
+    y = round((size - (b - t)) / 2 - t)
+    draw = ImageDraw.Draw(tile)
+    if pixel_crisp:
+        draw.fontmode = "1"
+    draw.text((x, y), "360", font=font, fill=WHITE)
+    return tile
+
+
+def render(size: int, master: Image.Image | None = None) -> Image.Image:
+    """The icon drawn for one pixel size."""
+    if size <= SIMPLE_MAX:
+        return _small_mark(size)
+    img = (master or build_master()).resize((size, size), Image.LANCZOS)
+    if size <= 256:                  # restore edge contrast lost in the downscale
+        img = img.filter(ImageFilter.UnsharpMask(radius=1.0, percent=60, threshold=2))
+    return img
+
+
 def write_all(master: Image.Image | None = None) -> list[Path]:
     """Write app.ico, app.icns and app.png; returns the paths written."""
     master = master or build_master()
     RES.mkdir(parents=True, exist_ok=True)
-    master.save(DST, sizes=ICO_SIZES)
-    # Pillow's ICNS writer embeds each requested size (incl. @2x retina slots).
-    master.save(DST_ICNS, format="ICNS", sizes=ICNS_SIZES)
-    master.resize((PNG_SIZE, PNG_SIZE), Image.LANCZOS).save(DST_PNG)
+    frames = {s: render(s, master) for s in ICO_SIZES}
+    # Pillow takes each size from append_images when one matches exactly.
+    frames[256].save(DST, format="ICO", sizes=[(s, s) for s in ICO_SIZES],
+                     append_images=[frames[s] for s in ICO_SIZES if s != 256])
+    icns = [render(w, master) for w, _ in ICNS_SIZES if w != 1024]
+    master.save(DST_ICNS, format="ICNS", sizes=ICNS_SIZES, append_images=icns)
+    render(PNG_SIZE, master).save(DST_PNG)
     return [DST, DST_ICNS, DST_PNG]
 
 
@@ -87,15 +153,13 @@ def main() -> None:
     for p in write_all(master):
         print(f"Wrote {p}")
 
-    # Preview strip: render the icon at several sizes on a checker-ish bg.
-    sizes = [16, 32, 48, 64, 128, 256]
+    # Preview strip: every .ico size, on a light background.
     pad = 12
-    strip = Image.new("RGBA", (sum(sizes) + pad * (len(sizes) + 1),
+    strip = Image.new("RGBA", (sum(ICO_SIZES) + pad * (len(ICO_SIZES) + 1),
                                256 + pad * 2), (240, 240, 240, 255))
     x = pad
-    for s in sizes:
-        thumb = master.resize((s, s), Image.LANCZOS)
-        strip.alpha_composite(thumb, (x, pad + (256 - s) // 2))
+    for s in ICO_SIZES:
+        strip.alpha_composite(render(s, master), (x, pad + (256 - s) // 2))
         x += s + pad
     PREVIEW.parent.mkdir(parents=True, exist_ok=True)
     strip.save(PREVIEW)

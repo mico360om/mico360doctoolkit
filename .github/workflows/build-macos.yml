@@ -75,6 +75,13 @@ jobs:
           python build/make_iconset.py
           iconutil -c icns build/MICO360.iconset -o mico360/resources/app.icns
 
+      # The System AI key comes from the repository secret of the same name;
+      # it is written into the app at build time, never into the source.
+      - name: Build in the System AI key
+        env:
+          MICO360_SYSTEM_AI_KEY: ${{ secrets.MICO360_SYSTEM_AI_KEY }}
+        run: python build/write_build_secrets.py
+
       - name: Build the .app with PyInstaller
         run: |
           pyinstaller build/mico360_macos.spec --noconfirm --distpath dist --workpath build/_work
