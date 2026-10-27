@@ -283,7 +283,7 @@ class SettingsPage(QWidget):
         self.ai_url.setAccessibleName("AI API URL")
         tip(self.ai_url,
             "The OpenAI-compatible base URL, including the port and /v1 - for "
-            "example http://ai.mico360.com:5310/v1")
+            "example https://ai.mico360.com:5310/v1")
         card.add(self._labeled("API URL", self.ai_url))
 
         self.ai_key = QLineEdit()

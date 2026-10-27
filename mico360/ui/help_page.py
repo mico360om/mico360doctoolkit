@@ -51,8 +51,10 @@ tool automatically.</p>
       Start offers to <b>run them all again</b> (for example with different options), and
       adding a file that was already processed queues it to run again. The same file can
       be queued more than once (Duplicate), each tracked separately.</li>
-  <li><b>Cancel</b> stops the batch: files in progress stop at the next safe point (their
-      partial output is removed) and finished results are kept.</li>
+  <li><b>Cancel</b> stops the batch: queued files are skipped, files in progress stop at
+      the next safe point (their partial output is removed, and a helper program such as
+      Ghostscript is stopped straight away) and finished results are kept. Closing the
+      window does the same — nothing keeps running in the background.</li>
   <li><b>Merge</b> and <b>Images → PDF</b> always combine <i>every</i> file in the queue,
       including ones finished in an earlier run.</li>
   <li>If a run finishes with failures, a <b>Retry <i>N</i> failed</b> button appears — one

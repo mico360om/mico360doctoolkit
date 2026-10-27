@@ -29,8 +29,13 @@ from mico360.logging_setup import get_logger
 log = get_logger("mico360.ai")
 
 # The administrator-provided default ("System AI"). Users can point elsewhere.
-SYSTEM_BASE_URL = "http://ai.mico360.com:5310/v1"
+# HTTPS since October 2026: the server now has a certificate and no longer
+# answers plain HTTP on this port at all.
+SYSTEM_BASE_URL = "https://ai.mico360.com:5310/v1"
 SYSTEM_MODEL = "qwen2.5:0.5b"
+# What the System AI was called before it got TLS. A key saved while that was
+# the address is still the System AI's key, so it moves over automatically.
+_LEGACY_SYSTEM_ORIGINS = frozenset({"http://ai.mico360.com:5310"})
 
 # A cold model load dominates the first request (~20s), so the platform's own
 # guidance is a client timeout of at least 120s.
@@ -236,9 +241,9 @@ def normalize_base_url(url: str) -> str:
         return ""
     if "://" not in u:
         # A bare host: HTTPS unless it's clearly a local/LAN server (Ollama,
-        # LM Studio…) or the MICO360 platform host, which speak plain HTTP.
+        # LM Studio…), which speaks plain HTTP.
         host = u.split("/")[0].split(":")[0].lower()
-        local = (host in ("localhost", urllib.parse.urlsplit(SYSTEM_BASE_URL).hostname)
+        local = (host == "localhost"
                  or host.endswith(".local") or host.startswith("127.")
                  or host.startswith("10.") or host.startswith("192.168.")
                  or re.match(r"^172\.(1[6-9]|2\d|3[01])\.", host) is not None)
@@ -410,7 +415,7 @@ def _http_message(exc, url: str) -> str:
              "it belongs to this server.",
         403: "This key isn't allowed to use that capability.",
         404: f"No API endpoint at {url}. The base URL usually needs the port and "
-             "/v1 — for example http://ai.mico360.com:5310/v1",
+             "/v1 — for example https://ai.mico360.com:5310/v1",
         413: "The document is too large for the AI server.",
         429: "Rate limit or quota reached. Wait a moment and try again.",
         502: "The AI job ran but failed on the server.",
@@ -566,6 +571,11 @@ def stored_key_for(base_url: str) -> str:
             bound = _origin(saved.effective_base_url)
             if bound:
                 settings.ai_key_origin = bound
+        if bound in _LEGACY_SYSTEM_ORIGINS and is_system_url(base_url):
+            # Saved for the System AI before it moved to HTTPS: same server,
+            # same key — rebind rather than make the user paste it again.
+            settings.ai_key_origin = bound = _origin(SYSTEM_BASE_URL)
+            log.info("System AI key re-bound to its HTTPS address")
         if want and want == bound:
             return key
     return builtin_system_key() if is_system_url(base_url) else ""

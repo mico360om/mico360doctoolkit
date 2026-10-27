@@ -374,6 +374,25 @@ class MainWindow(QMainWindow):
         if page is not None:
             page.cancel_if_running()
 
+    def closeEvent(self, event):  # noqa: N802
+        """Closing the window stops the work. Without this, a batch kept
+        running invisibly after the window was gone — with 200+ files that is
+        minutes of a 'ghost' process, and relaunching then said the app was
+        'already running'. Queued files are skipped at once and helper
+        processes are stopped; files mid-way stop at their next check."""
+        busy = []
+        for w in self._widgets.values():
+            page = w.widget() if isinstance(w, QScrollArea) else w
+            if isinstance(page, ToolPage) and page.controller is not None:
+                busy.append(page)
+        for page in busy:
+            page.controller.cancel()
+        for page in busy:
+            page.controller.wait_done(3000)
+        if busy:
+            log.info("window closed with %d batch(es) running — cancelled", len(busy))
+        super().closeEvent(event)
+
     def _current_tool_page(self):
         cur = self.stack.currentWidget()
         page = cur.widget() if isinstance(cur, QScrollArea) else cur

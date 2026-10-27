@@ -218,6 +218,17 @@ def main() -> int:
                     stream.flush()
                 except Exception:
                     pass
+        # Tear Qt down while Python is still whole: leaving the QApplication
+        # to the DLL-unload stage of os._exit faulted inside PySide6 (an access
+        # violation Windows logged as "MICO360DocToolkit stopped working").
+        try:
+            qapp = QApplication.instance()
+            if qapp is not None:
+                qapp.closeAllWindows()
+                qapp.processEvents()
+                qapp.shutdown()
+        except Exception:
+            log.debug("Qt shutdown before exit failed", exc_info=True)
         os._exit(rc)
 
     # Shell-integration setup runs without the GUI (used by the installer).

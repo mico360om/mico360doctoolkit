@@ -5,7 +5,7 @@ from mico360 import __app_name__, __publisher__, __version__
 
 # Bump whenever the Terms or Privacy Policy text changes (shown on both pages;
 # tests/docs_sync_test.py checks it is a real, current date).
-LEGAL_UPDATED = "3 October 2026"
+LEGAL_UPDATED = "22 October 2026"
 
 EMAIL = "info@mico360.com"
 WEBSITE = "www.mico360.com"
@@ -183,9 +183,9 @@ Nothing else is sent, and this app stores no copy of the text or the replies.
 Your saved API key is only ever sent to the server it was saved for, and a key built into
 the app for the System AI is only ever sent to the System AI. Your API key is stored encrypted on your
 computer (Windows account protection / DPAPI on Windows; obfuscated on macOS) and
-is never displayed again after you save it. Note: the System AI connection is not
-yet encrypted in transit, so prefer a trusted network — or use your own HTTPS
-endpoint — when the content is sensitive.</li>
+is never displayed again after you save it. The connection to the System AI is
+encrypted in transit (HTTPS, with the server's certificate verified); if you use your
+own AI API, prefer an HTTPS address too when the content is sensitive.</li>
 <li><b>Error reports (only if you ask)</b> — if something goes wrong, a report (with a
 copy of the recent log) is saved <b>on your computer</b>. It is <b>never sent
 automatically</b>; you decide whether to open a <b>pre-filled GitHub issue</b> (which you

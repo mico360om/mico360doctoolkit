@@ -18,10 +18,12 @@ from mico360.core.util import (
     auto_worker_count,
     begin_reservations,
     discard_empty_reservations,
+    discard_reservations,
     explain_failure,
     is_nonempty,
     require_free_space,
     source_problem,
+    terminate_child_processes,
     tidy_message,
 )
 
@@ -128,23 +130,25 @@ class _Worker(QRunnable):
             self.signals.finished.emit(UnitResult(self.label, True, outputs or [],
                                                   sources=srcs, index=self.index))
         except ProcessError as exc:
-            discard_empty_reservations()
             if self.cancel.is_set():   # cancelled mid-loop -> skipped, not failed
+                discard_reservations()       # incl. a half-written output
                 self.signals.finished.emit(UnitResult(self.label, False, skipped=True,
                                                       message="Cancelled", sources=srcs,
                                                       index=self.index))
                 return
+            discard_empty_reservations()
             log.warning("%s failed: %s", self.label, exc)
             self.signals.finished.emit(UnitResult(
                 self.label, False, message=tidy_message(str(exc), srcs),
                 sources=srcs, index=self.index))
         except Exception as exc:  # pragma: no cover - defensive
-            discard_empty_reservations()
             if self.cancel.is_set():   # cancelled mid-write -> skipped, not failed
+                discard_reservations()
                 self.signals.finished.emit(UnitResult(self.label, False, skipped=True,
                                                       message="Cancelled", sources=srcs,
                                                       index=self.index))
                 return
+            discard_empty_reservations()
             # A locked, damaged or vanished file reads as that — not as
             # "Unexpected error: ValueError: document closed or encrypted".
             known = explain_failure(exc, srcs)
@@ -190,7 +194,19 @@ class BatchController(QObject):
         return self._outputs
 
     def cancel(self) -> None:
+        """Stop the run: queued files are skipped at once, running ones stop at
+        their next check, and helper processes (Ghostscript, LibreOffice) are
+        killed rather than left to finish a multi-minute job on their own."""
         self._cancel.set()
+        terminate_child_processes()
+
+    @property
+    def running(self) -> bool:
+        return self._done < self._total
+
+    def wait_done(self, timeout_ms: int) -> bool:
+        """Wait (at most ``timeout_ms``) for the workers to wind down."""
+        return self.pool.waitForDone(timeout_ms)
 
     def start(self, tool: Tool, inputs: list[Path], out_dir: Path, options: dict,
               same_as_source: bool = False) -> None:

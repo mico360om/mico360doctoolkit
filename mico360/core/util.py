@@ -401,6 +401,13 @@ def auto_worker_count(cpu: int | None = None, avail_mem_bytes: int | None = -1,
     return max(1, n)
 
 
+# Helper processes (Ghostscript, LibreOffice…) currently running on behalf of a
+# batch, so Cancel / closing the window can stop them instead of waiting for a
+# multi-minute conversion to finish on its own.
+_children: set = set()
+_children_lock = threading.Lock()
+
+
 def run_subprocess(cmd: list[str], timeout: int = 600) -> subprocess.CompletedProcess:
     """Run a child process without flashing a console window on Windows."""
     creationflags = 0
@@ -409,11 +416,56 @@ def run_subprocess(cmd: list[str], timeout: int = 600) -> subprocess.CompletedPr
         creationflags = 0x08000000  # CREATE_NO_WINDOW
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    return subprocess.run(
+    proc = subprocess.Popen(
         cmd,
-        capture_output=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        timeout=timeout,
         creationflags=creationflags,
         startupinfo=startupinfo,
     )
+    with _children_lock:
+        _children.add(proc)
+    try:
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.communicate()
+            raise
+    finally:
+        with _children_lock:
+            _children.discard(proc)
+    return subprocess.CompletedProcess(cmd, proc.returncode, out, err)
+
+
+def terminate_child_processes() -> int:
+    """Stop every helper process started by :func:`run_subprocess`. Used when
+    a batch is cancelled or the window is closed. Returns how many were hit."""
+    with _children_lock:
+        procs = list(_children)
+    n = 0
+    for p in procs:
+        try:
+            if p.poll() is None:
+                p.kill()
+                n += 1
+        except OSError:
+            pass
+    return n
+
+
+def discard_reservations() -> int:
+    """Delete EVERY output this thread's unit reserved, whole or partial — for a
+    cancelled unit, whose outputs are never reported (a half-written PDF from a
+    killed Ghostscript must not be left looking like a result)."""
+    removed = 0
+    for p in getattr(_tls, "paths", None) or []:
+        try:
+            if p.exists():
+                p.unlink()
+                removed += 1
+        except OSError:
+            pass
+    _tls.paths = []
+    return removed

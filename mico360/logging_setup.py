@@ -31,6 +31,29 @@ class QtLogBridge(QObject, logging.Handler):
 
 bridge = QtLogBridge()
 
+# A crash inside a native library (PDF engine, image codec, Qt) kills the
+# process before any Python handler runs, leaving nothing in mico360.log.
+# faulthandler writes the thread stacks at that moment to this file instead.
+NATIVE_CRASH_LOG = "native_crash.log"
+_native_crash_file = None
+
+
+def _enable_native_crash_log() -> None:
+    global _native_crash_file
+    import datetime
+    import faulthandler
+    try:
+        path = logs_dir() / NATIVE_CRASH_LOG
+        if path.exists() and path.stat().st_size > 1_000_000:
+            path.unlink()                      # keep it small; old crashes only
+        _native_crash_file = open(path, "a", encoding="utf-8")
+        _native_crash_file.write(f"\n=== started {datetime.datetime.now():%Y-%m-%d %H:%M:%S} "
+                                 "(a stack below means the app crashed) ===\n")
+        _native_crash_file.flush()
+        faulthandler.enable(file=_native_crash_file, all_threads=True)
+    except Exception:                          # noqa: BLE001 - diagnostics only
+        _native_crash_file = None
+
 
 def setup_logging() -> logging.Logger:
     root = logging.getLogger("mico360")
@@ -39,6 +62,7 @@ def setup_logging() -> logging.Logger:
     root.setLevel(logging.DEBUG)
 
     log_file = logs_dir() / "mico360.log"
+    _enable_native_crash_log()
     fh = RotatingFileHandler(log_file, maxBytes=2_000_000, backupCount=5, encoding="utf-8")
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(logging.Formatter(_LOG_FORMAT))
