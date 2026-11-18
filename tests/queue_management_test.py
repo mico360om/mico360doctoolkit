@@ -60,6 +60,9 @@ def main() -> int:
 
     # 2. Add + dedupe
     page.add_paths([str(p) for p in pdfs])
+    log = page.log_view.toPlainText()
+    check("A good add does not also log 'No supported files found'",
+          "Added 4 file(s)." in log and "No supported files" not in log, log)
     page.add_paths([str(pdfs[0])])  # duplicate add is ignored
     check("Add files populates the queue (dedupe on add)", len(page.items) == 4,
           str(len(page.items)))

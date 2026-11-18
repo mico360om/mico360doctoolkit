@@ -274,6 +274,19 @@ def human_size(num_bytes: float) -> str:
     return f"{num_bytes:.1f} TB"
 
 
+def size_change(before: float, after: float) -> str:
+    """How a file's size changed, in words: "90% smaller", "4% larger" or
+    "same size". (A signed "+90%" read as if the file had grown.)"""
+    if not before:
+        return "same size"
+    pct = round((1 - after / before) * 100)
+    if pct > 0:
+        return f"{pct}% smaller"
+    if pct < 0:
+        return f"{-pct}% larger"
+    return "same size"
+
+
 # =========================================================================
 # Low-resource guards: disk space + memory-aware concurrency
 # =========================================================================

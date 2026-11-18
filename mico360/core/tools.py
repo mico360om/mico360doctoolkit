@@ -22,7 +22,7 @@ OCR_LANG_CHOICES = ocr_models.language_choices()
 class Option:
     key: str
     label: str
-    kind: str                       # choice | int | bool | text
+    kind: str                       # choice | int | size (KB, typed in KB or MB) | bool | text
     default: object = None
     choices: list = field(default_factory=list)   # list[(value, label)]
     minimum: int = 0
@@ -87,9 +87,10 @@ TOOLS: list[Tool] = [
         options=[
             Option("level", "Compression", "choice", "lossless", _QUALITY_CHOICES,
                    hint="Higher compression = smaller file, lower fidelity."),
-            Option("target_kb", "Target size", "int", 250, minimum=10, maximum=200000,
-                   suffix=" KB", visible_when=("level", "target"),
-                   hint="Auto-selects DPI & quality to land at or just under this size."),
+            Option("target_kb", "Target size", "size", 250, minimum=10, maximum=200000,
+                   visible_when=("level", "target"),
+                   hint="Type a size in KB or MB. Auto-selects DPI & quality to land "
+                        "at or just under it."),
             Option("dpi", "Image DPI", "int", 150, minimum=36, maximum=600,
                    suffix=" dpi", visible_when=("level", "custom")),
             Option("jpeg_quality", "JPEG quality", "int", 75, minimum=10, maximum=100,
@@ -394,10 +395,10 @@ TOOLS: list[Tool] = [
         options=[
             Option("level", "Compression", "choice", "lossless", _QUALITY_CHOICES,
                    hint="Higher compression = smaller file, lower fidelity."),
-            Option("target_kb", "Target size", "int", 250, minimum=5, maximum=200000,
-                   suffix=" KB", visible_when=("level", "target"),
-                   hint="Auto-selects quality (and downscales if needed) to land "
-                        "at or just under this size."),
+            Option("target_kb", "Target size", "size", 250, minimum=5, maximum=200000,
+                   visible_when=("level", "target"),
+                   hint="Type a size in KB or MB. Auto-selects quality (and downscales "
+                        "if needed) to land at or just under it."),
             Option("quality", "Quality", "int", 65, minimum=5, maximum=100, suffix=" %",
                    visible_when=("level", "custom")),
             Option("format", "Output format", "choice", "keep", [

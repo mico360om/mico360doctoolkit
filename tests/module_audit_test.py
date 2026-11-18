@@ -92,7 +92,7 @@ def audit_core_processing():
             assert callable(t.runner), f"{t.id} runner not callable"
             assert t.group in tools.GROUP_ORDER, f"{t.id} group {t.group!r} not ordered"
             for o in t.options:
-                assert o.kind in ("text", "textarea", "choice", "int", "bool",
+                assert o.kind in ("text", "textarea", "choice", "int", "size", "bool",
                                   "file", "password", "posgrid", "page_plan"), \
                     f"{t.id}:{o.key} {o.kind}"
                 if o.kind == "choice":

@@ -71,8 +71,8 @@ tool automatically.</p>
 <ul>
   <li><b>Compress PDF</b> — <i>Lossless</i> (the default) reduces size with <b>zero change</b> to
       images, text, fonts or layout and is verified content-identical; or pick <i>Low / Medium /
-      High</i>, a <i>Target file size</i> (e.g. 250&nbsp;KB — the app auto-picks settings to land
-      at or just under it), or <i>Custom</i> DPI + JPEG quality. Uses Ghostscript when available,
+      High</i>, a <i>Target file size</i> in KB or MB (e.g. 250&nbsp;KB or 2&nbsp;MB — the app
+      auto-picks settings to land at or just under it), or <i>Custom</i> DPI + JPEG quality. Uses Ghostscript when available,
       otherwise a built-in compressor.</li>
   <li><b>Merge PDF</b> — combines two or more PDFs into one. <b>Drag files in the list to
       reorder</b> them before merging (also works for combined Image → PDF).</li>
@@ -180,7 +180,7 @@ tool automatically.</p>
   <li><b>Convert Image</b> — change format between PNG / JPG / WEBP / TIFF / BMP, and
       convert <b>HEIC/HEIF</b> (iPhone photos) to any of them (or save as HEIC).</li>
   <li><b>Watermark Image</b> — stamp text or a logo onto images.</li>
-  <li><b>Compress Image</b> — presets, a <i>Target file size</i>, or custom quality; optional
+  <li><b>Compress Image</b> — presets, a <i>Target file size</i> in KB or MB, or custom quality; optional
       resize and format change (JPEG / PNG / WEBP).</li>
   <li><b>Edit File Properties</b> (System) — bulk-set Windows file properties on <b>any</b>
       files: <b>Date Created</b>, <b>Date Modified</b> and <b>Owner</b>. Type a date like

@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGridLayout,
@@ -24,6 +25,77 @@ from PySide6.QtWidgets import (
 from mico360.config import settings
 from mico360.core.tools import Option, Tool
 from mico360.ui.widgets import tip
+
+
+class _SizeField(QWidget):
+    """A file size typed in KB or MB (e.g. "250 KB" or "2.5 MB").
+
+    The value is always stored and returned in whole KB, so saved settings and
+    the processors keep using the same ``target_kb`` number as before.
+    """
+
+    UNITS = (("KB", 1), ("MB", 1024))
+
+    def __init__(self, kb: int, min_kb: int, max_kb: int, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._min_kb, self._max_kb = int(min_kb), int(max_kb)
+        self._mult = 1
+        self._exact_kb: int | None = None   # the KB value until the user edits
+        self.spin = QDoubleSpinBox()
+        self.spin.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.unit = QComboBox()
+        for name, mult in self.UNITS:
+            self.unit.addItem(name, mult)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+        lay.addWidget(self.spin, 1)
+        lay.addWidget(self.unit)
+
+        kb = min(max(int(kb), self._min_kb), self._max_kb)
+        # A saved size of 1 MB or more opens in MB ("2.5 MB", not "2560 KB").
+        mult = 1024 if kb >= 1024 else 1
+        self.unit.setCurrentIndex(self.unit.findData(mult))
+        self._show(mult, kb)
+        self.unit.currentIndexChanged.connect(self._on_unit)
+        self.spin.valueChanged.connect(self._on_edit)
+
+    def _show(self, mult: int, kb: int) -> None:
+        """Display ``kb`` in the given unit, keeping the exact KB value."""
+        self._mult = mult
+        self.spin.blockSignals(True)
+        if mult == 1:
+            self.spin.setDecimals(0)
+            self.spin.setSingleStep(10)
+            self.spin.setRange(self._min_kb, self._max_kb)
+        else:
+            self.spin.setDecimals(2)
+            self.spin.setSingleStep(0.1)
+            lo = max(0.01, round(self._min_kb / mult + 0.005, 2))
+            self.spin.setRange(lo, self._max_kb / mult)
+        self.spin.setValue(kb / mult)
+        self.spin.blockSignals(False)
+        self._exact_kb = kb
+
+    def _on_unit(self, _index: int) -> None:
+        self._show(int(self.unit.currentData()), self.value_kb())
+
+    def _on_edit(self, _value: float) -> None:
+        self._exact_kb = None
+
+    def value_kb(self) -> int:
+        if self._exact_kb is not None:
+            return self._exact_kb
+        kb = int(round(self.spin.value() * self._mult))
+        return min(max(kb, self._min_kb), self._max_kb)
+
+    def set_kb(self, kb: int) -> None:
+        kb = min(max(int(kb), self._min_kb), self._max_kb)
+        mult = 1024 if kb >= 1024 else 1
+        self.unit.blockSignals(True)
+        self.unit.setCurrentIndex(self.unit.findData(mult))
+        self.unit.blockSignals(False)
+        self._show(mult, kb)
 
 
 class _PosGrid(QWidget):
@@ -277,6 +349,15 @@ class OptionsWidget(QWidget):
             if opt.suffix:
                 sp.setSuffix(opt.suffix)
             field = sp
+        elif opt.kind == "size":
+            try:
+                kb = int(default if default is not None else opt.default)
+            except (TypeError, ValueError):
+                kb = int(opt.default or opt.minimum)
+            sf = _SizeField(kb, opt.minimum, opt.maximum)
+            sf.spin.setAccessibleName(opt.label)
+            sf.unit.setAccessibleName(f"{opt.label} unit")
+            field = sf
         elif opt.kind == "bool":
             # "&&": Qt reads a single "&" as a keyboard-shortcut marker and hides
             # it ("text & fill" showed as "text  fill").
@@ -356,6 +437,8 @@ class OptionsWidget(QWidget):
                 out[opt.key] = ctrl.currentData()
             elif isinstance(ctrl, QSpinBox):
                 out[opt.key] = ctrl.value()
+            elif isinstance(ctrl, _SizeField):
+                out[opt.key] = ctrl.value_kb()
             elif isinstance(ctrl, QCheckBox):
                 out[opt.key] = ctrl.isChecked()
             elif isinstance(ctrl, _PosGrid):

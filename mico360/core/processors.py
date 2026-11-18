@@ -24,6 +24,7 @@ from mico360.core.util import (
     available_memory_bytes,
     build_output_path,
     human_size,
+    size_change,
     is_nonempty,
     run_subprocess,
     unique_dir,
@@ -183,8 +184,7 @@ def pdf_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[Pa
         _pymupdf_compress(src, out, level, opt, report)
 
     after = out.stat().st_size
-    pct = (1 - after / before) * 100 if before else 0
-    report(f"{human_size(before)} → {human_size(after)} ({pct:+.0f}%)")
+    report(f"{human_size(before)} → {human_size(after)} ({size_change(before, after)})")
     if after >= before:
         report("Note: file was already well-optimized; little/no size reduction.")
     # Lossy levels re-encode images by design; make sure nothing ELSE was lost.
@@ -425,8 +425,7 @@ def _pdf_compress_to_target(src: Path, out: Path, target_bytes: int,
     if produce(None) <= target_bytes:
         _progress_frac(report, 0.5)
         achieved = out.stat().st_size
-        pct = (1 - achieved / before) * 100 if before else 0
-        report(f"{human_size(before)} → {human_size(achieved)} ({pct:+.0f}%, lossless)")
+        report(f"{human_size(before)} → {human_size(achieved)} ({size_change(before, achieved)}, lossless)")
         return
     _progress_frac(report, 0.5 / _TOTAL_STEPS)
 
@@ -447,8 +446,7 @@ def _pdf_compress_to_target(src: Path, out: Path, target_bytes: int,
     achieved = produce(final_scale)
     _progress_frac(report, 0.5)
 
-    pct = (1 - achieved / before) * 100 if before else 0
-    report(f"{human_size(before)} → {human_size(achieved)} ({pct:+.0f}%)")
+    report(f"{human_size(before)} → {human_size(achieved)} ({size_change(before, achieved)})")
     if achieved > target_bytes:
         report("Note: the target is smaller than this PDF's text/vector content "
                "allows — produced the smallest possible instead.")
@@ -2701,8 +2699,7 @@ def image_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[
                                 overwrite=overwrite,
                                 numbered=opt.get("same_as_source", False))
         after = _image_compress_to_target(im, out, ext, target_bytes, report)
-        pct = (1 - after / before) * 100 if before else 0
-        report(f"{human_size(before)} → {human_size(after)} ({pct:+.0f}%)")
+        report(f"{human_size(before)} → {human_size(after)} ({size_change(before, after)})")
         if after > target_bytes:
             report("Note: couldn't reach the target even at lowest quality / "
                    "smallest size; produced the smallest possible.")
@@ -2725,8 +2722,7 @@ def image_compress(src: Path, out_dir: Path, opt: dict, report: Report) -> list[
     im.save(out, **save_kwargs)
 
     after = out.stat().st_size
-    pct = (1 - after / before) * 100 if before else 0
-    report(f"{human_size(before)} → {human_size(after)} ({pct:+.0f}%)")
+    report(f"{human_size(before)} → {human_size(after)} ({size_change(before, after)})")
     return [out]
 
 

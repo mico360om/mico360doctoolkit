@@ -722,10 +722,11 @@ class ToolPage(QWidget):
         if requeued:
             self._log(f"{requeued} file(s) already processed are queued to run again "
                       "— press Start.")
-        if not added and not requeued and dupes:
-            self._log("Those files are already in the queue.")
-        elif not stats.unsupported and not stats.unreadable:
-            self._log("No supported files found in the selection.")
+        if not added and not requeued:
+            if dupes:
+                self._log("Those files are already in the queue.")
+            elif not stats.unsupported and not stats.unreadable:
+                self._log("No supported files found in the selection.")
         # Always say what was skipped, so nothing disappears silently.
         note = stats.summary()
         if note:
