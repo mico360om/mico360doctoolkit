@@ -131,6 +131,42 @@ def _main(app, main_tid) -> int:
     check("failed callback received the error text",
           "network down" in (failed.get("msg") or ""), repr(failed.get("msg")))
 
+    # --- closing the window mid-check must not abort the process ---------
+    # The startup check used to run on a QThread owned by the main window;
+    # destroying it while the request was in flight hit Qt's fatal "QThread:
+    # Destroyed while thread is still running" (SIGABRT, exit 134 — seen in
+    # the macOS --selftest). Run it in a child so an abort can't kill us.
+    import subprocess
+    child = (
+        "import os, sys, threading\n"
+        "os.environ['QT_QPA_PLATFORM'] = 'offscreen'\n"
+        "sys.path.insert(0, os.getcwd())\n"
+        "from PySide6.QtCore import QObject\n"
+        "from PySide6.QtWidgets import QApplication\n"
+        "import shiboken6\n"
+        "app = QApplication([])\n"
+        "import mico360.updater as U\n"
+        "started, hold = threading.Event(), threading.Event()\n"
+        "def slow(*a, **k):\n"
+        "    started.set(); hold.wait(30); return None\n"
+        "U.check_for_update = slow\n"
+        "from mico360.ui.update_ui import start_check\n"
+        "owner = QObject()\n"
+        "start_check(owner, lambda i: None)\n"
+        "started.wait(10)\n"
+        "app.processEvents()\n"
+        "shiboken6.delete(owner)\n"
+        "app.processEvents()\n"
+        "print('survived', flush=True)\n"
+        "os._exit(0)\n")
+    p = subprocess.run([sys.executable, "-c", child],
+                       cwd=str(Path(__file__).resolve().parent.parent),
+                       stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=60)
+    check("destroying the owner mid-check doesn't abort the process",
+          p.returncode == 0 and "survived" in p.stdout,
+          f"exit {p.returncode}: {(p.stderr or '').strip()[-200:]}")
+
     # --- rich dialog: status badge, version line, meta, failure state ----
     rich = UpdateInfo(
         "9.9.9", "http://x/Setup-Latest.exe", "Setup-Latest.exe", None,

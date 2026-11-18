@@ -336,7 +336,16 @@ def run(report_path: str) -> int:
         app = QApplication.instance() or QApplication([])
         from mico360.core.tools import TOOLS
         from mico360.ui.main_window import MainWindow
-        w = MainWindow()
+        from mico360.config import settings
+        # No startup update check here: it would make this check depend on the
+        # network, and a "newer release" answer would open a modal dialog that
+        # nobody can dismiss in a headless build.
+        auto = settings.auto_check_updates
+        settings.auto_check_updates = False
+        try:
+            w = MainWindow()
+        finally:
+            settings.auto_check_updates = auto
         opened = 0
         for t in TOOLS:
             w.open_tool(t.id)
