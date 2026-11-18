@@ -38,20 +38,26 @@ class CheckWorker(QObject):
 
     def run(self) -> None:
         try:
-            info = updater.check_for_update()
+            info = _check_and_sweep()
         except Exception as exc:  # network / parse error
             self.failed.emit(str(exc))
             return
-        # A successful check is the moment to sweep stale installers/partials
-        # from the updates folder — keeping the one on offer so it can resume.
-        try:
-            updater.cleanup_downloads(keep_asset=info.asset_name if info else None)
-        except Exception:
-            log.debug("Update-download cleanup failed", exc_info=True)
         if info:
             self.found.emit(info)
         else:
             self.up_to_date.emit()
+
+
+def _check_and_sweep() -> UpdateInfo | None:
+    """Check for a newer release (raises on network / parse errors)."""
+    info = updater.check_for_update()
+    # A successful check is the moment to sweep stale installers/partials
+    # from the updates folder — keeping the one on offer so it can resume.
+    try:
+        updater.cleanup_downloads(keep_asset=info.asset_name if info else None)
+    except Exception:
+        log.debug("Update-download cleanup failed", exc_info=True)
+    return info
 
 
 class DownloadWorker(QObject):
@@ -107,49 +113,29 @@ def _run_in_thread(parent, worker: QObject) -> QThread:
     return thread
 
 
-class _CheckController(QObject):
-    """Runs a CheckWorker on a background thread and delivers the result to the
-    callbacks **on the GUI thread**.
+def start_check(parent, on_found, on_up_to_date=None, on_failed=None):
+    """Check for updates off the GUI thread; deliver results on the GUI thread.
 
-    This object is parented to a main-thread widget and is NOT moved to the
-    worker thread, so the worker's cross-thread signals are delivered to these
-    slots via Qt's automatic queued connection — i.e. the callbacks (and any
-    widgets they create, like the update dialog) run on the GUI thread.
+    The request runs on a daemon thread (mico360.ui.bg), not a QThread: the
+    startup check is owned by the main window, and destroying a QThread while
+    its request is still in flight makes Qt abort the whole process ("QThread:
+    Destroyed while thread is still running") — e.g. closing the app within
+    seconds of launch, or the macOS --selftest tearing its window down.
+    Callbacks are dropped if ``parent`` is deleted first.
     """
+    from mico360.ui.bg import run_in_background
 
-    def __init__(self, parent, on_found, on_up_to_date, on_failed):
-        super().__init__(parent)
-        self._callbacks = (on_found, on_up_to_date, on_failed)
-        self._thread = QThread(self)
-        self._worker = CheckWorker()
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.found.connect(self._on_found)
-        self._worker.up_to_date.connect(self._on_up_to_date)
-        self._worker.failed.connect(self._on_failed)
-        self._thread.start()
+    def _ok(info) -> None:
+        if info:
+            on_found(info)
+        elif on_up_to_date:
+            on_up_to_date()
 
-    def _finish(self, index: int, *args) -> None:
-        self._thread.quit()
-        self._thread.wait(3000)
-        cb = self._callbacks[index]
-        if cb:
-            cb(*args)
-        self.deleteLater()
+    def _err(msg: str) -> None:
+        if on_failed:
+            on_failed(msg)
 
-    def _on_found(self, info) -> None:
-        self._finish(0, info)
-
-    def _on_up_to_date(self) -> None:
-        self._finish(1)
-
-    def _on_failed(self, msg: str) -> None:
-        self._finish(2, msg)
-
-
-def start_check(parent, on_found, on_up_to_date=None, on_failed=None) -> "_CheckController":
-    """Check for updates off the GUI thread; deliver results on the GUI thread."""
-    return _CheckController(parent, on_found, on_up_to_date, on_failed)
+    return run_in_background(parent, _check_and_sweep, _ok, _err)
 
 
 # --- dialog --------------------------------------------------------------
